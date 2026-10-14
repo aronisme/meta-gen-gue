@@ -1,21 +1,23 @@
 'use client';
 
 import { memo, useId } from 'react';
-import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
-import { Progress } from '@/components/ui/progress';
-import { Alert, AlertDescription } from '@/components/ui/alert';
-import { AlertTriangle } from 'lucide-react';
+import { AlertTriangle, FolderOpen, Upload, Zap } from 'lucide-react';
 import type { Provider } from '@/lib/types';
+import { isMediaFile, isVideoFile, validateVideoFile, MAX_VIDEO_DURATION_SECONDS } from '@/lib/video';
+import { filterDuplicateFiles } from '@/lib/dedupe';
+import { toast } from 'sonner';
 
 interface UploadCardProps {
   files: File[];
   busy: boolean;
   progress: number;
+  statusText?: string;
   provider: Provider;
   hasVideoFiles: boolean;
   onFilesChange: (files: File[]) => void;
   onGenerate: () => void;
+  existingItemFilenames?: string[];
 }
 
 function FilePicker({ onPick }: { onPick: (files: File[]) => void }) {
@@ -28,15 +30,19 @@ function FilePicker({ onPick }: { onPick: (files: File[]) => void }) {
         accept="image/*,video/mp4,video/webm,video/quicktime"
         multiple
         className="sr-only"
-        onChange={(e) => onPick(Array.from(e.target.files || []))}
+        onChange={(e) => {
+          onPick(Array.from(e.target.files || []));
+          e.target.value = '';
+        }}
       />
       <label
         htmlFor={id}
-        className="cursor-pointer inline-flex items-center gap-2 px-4 py-2 rounded-lg
-                   bg-purple-600 hover:bg-purple-500 text-white border border-purple-500/40
-                   shadow-sm"
+        className="cursor-pointer inline-flex items-center gap-2 px-5 py-2.5 rounded-lg
+                   bg-white hover:bg-[#fff5e6] text-[#2c1810] border-2 border-[#2c1810]
+                   shadow-[3px_3px_0_#2c1810] hover:shadow-[1px_1px_0_#2c1810] hover:translate-x-[2px] hover:translate-y-[2px]
+                   transition-all font-bold text-sm"
       >
-        Select files
+        Pilih Gambar / Video
       </label>
     </div>
   );
@@ -46,98 +52,160 @@ function UploadCardComponent({
   files,
   busy,
   progress,
+  statusText,
   provider,
   hasVideoFiles,
   onFilesChange,
   onGenerate,
+  existingItemFilenames,
 }: UploadCardProps) {
+  const addFiles = async (newFiles: File[]) => {
+    const validMedia = newFiles.filter(isMediaFile);
+    if (!validMedia.length) return;
+
+    const { acceptedFiles, rejectedDuplicates } = await filterDuplicateFiles(validMedia, {
+      existingFiles: files,
+      existingItemFilenames,
+    });
+
+    if (rejectedDuplicates.length > 0) {
+      if (rejectedDuplicates.length === 1) {
+        toast.warning(
+          `File duplikat diabaikan: "${rejectedDuplicates[0].file.name}" (${rejectedDuplicates[0].description})`
+        );
+      } else {
+        toast.warning(
+          `${rejectedDuplicates.length} file duplikat diabaikan agar tidak terunggah ganda.`
+        );
+      }
+    }
+
+    if (!acceptedFiles.length) return;
+
+    onFilesChange([...files, ...acceptedFiles]);
+
+    for (const f of acceptedFiles) {
+      if (isVideoFile(f)) {
+        void validateVideoFile(f, MAX_VIDEO_DURATION_SECONDS).then((check) => {
+          if (!check.valid && check.duration > MAX_VIDEO_DURATION_SECONDS) {
+            toast.info(
+              `Video "${f.name}" (${check.duration.toFixed(1)}s): Klip > 30s. Analisis frame dibatasi pada 30 detik pertama.`
+            );
+          }
+        });
+      }
+    }
+  };
+
   const onDrop = (e: React.DragEvent) => {
     e.preventDefault();
-    const fl = Array.from(e.dataTransfer.files || []).filter(
-      (f) => f.type.startsWith('image/') || f.type.startsWith('video/')
-    );
-    onFilesChange([...files, ...fl]);
+    void addFiles(Array.from(e.dataTransfer.files || []));
   };
 
-  const addFiles = (newFiles: File[]) => {
-    const validFiles = newFiles.filter(
-      (f) => f.type.startsWith('image/') || f.type.startsWith('video/')
-    );
-    onFilesChange([...files, ...validFiles]);
-  };
-
-  const showVideoWarning = hasVideoFiles && provider === 'openai';
-
-  console.log('UploadCard render:', { filesLen: files.length, busy, showVideoWarning, disabled: !files.length || busy || showVideoWarning });
+  const showVideoWarning = hasVideoFiles && provider !== 'gemini';
 
   return (
-    <Card
+    <div
       onDrop={onDrop}
       onDragOver={(e) => e.preventDefault()}
-      className="bg-neutral-950 border-neutral-800"
+      className="bg-white border-2 border-[#2c1810] shadow-[4px_4px_0_#2c1810] rounded-xl overflow-hidden"
     >
-      <CardHeader className="bg-neutral-900 rounded-t-2xl">
-        <CardTitle className="text-neutral-100">Upload</CardTitle>
-      </CardHeader>
-      <CardContent className="space-y-3">
-        <div className="border border-neutral-800 rounded-2xl p-6 text-neutral-300 text-center bg-neutral-900/50">
-          Drag & drop images or videos here, or
-          <div className="mt-3">
-            <FilePicker onPick={addFiles} />
+      <div className="bg-[#fff5e6] border-b-2 border-[#2c1810] px-4 py-3 flex items-center justify-between">
+        <h3 className="font-bold text-[#2c1810] text-sm flex items-center gap-2">
+          <FolderOpen className="w-4 h-4 text-[#ff6b35]" />
+          <span>Upload Asset Studio</span>
+        </h3>
+        {!!files.length && (
+          <button
+            onClick={() => onFilesChange([])}
+            className="text-xs font-bold text-[#6b5344] hover:text-[#ff6b35] underline cursor-pointer"
+          >
+            Hapus Semua ({files.length})
+          </button>
+        )}
+      </div>
+
+      <div className="p-4 space-y-4">
+        {/* Dropzone */}
+        <div className="border-2 border-dashed border-[#2c1810] rounded-xl p-6 text-center bg-[#fff5e6]/60 transition-all hover:bg-[#fff5e6]">
+          <div className="w-10 h-10 mx-auto mb-2 rounded-full bg-white border-2 border-[#2c1810] shadow-[2px_2px_0_#2c1810] flex items-center justify-center text-[#ff6b35]">
+            <Upload className="w-5 h-5" />
           </div>
+          <p className="font-bold text-[#2c1810] text-sm">Drag & drop gambar atau video ke sini</p>
+          <p className="text-xs text-[#6b5344] mt-1 mb-3">Format didukung: JPG, PNG, WEBP, MP4/MOV (Maks. 30 detik)</p>
+          <FilePicker onPick={addFiles} />
         </div>
 
-        {showVideoWarning && (
-          <Alert className="bg-yellow-900/20 border-yellow-600/50">
-            <AlertTriangle className="h-4 w-4 text-yellow-500" />
-            <AlertDescription className="text-yellow-200">
-              Video analysis requires Gemini. OpenAI does not support video input. Please switch to
-              Gemini or remove video files.
-            </AlertDescription>
-          </Alert>
-        )}
-
+        {/* Selected files preview count */}
         {!!files.length && (
-          <div className="text-sm text-neutral-300">
-            <strong className="text-neutral-100">{files.length}</strong> file(s) selected:
-            <ul className="list-disc list-inside mt-1 space-y-0.5 max-h-32 overflow-y-auto">
+          <div className="space-y-1.5 bg-[#fffdf9] border-2 border-[#2c1810] p-3 rounded-lg shadow-[2px_2px_0_#2c1810]">
+            <div className="flex items-center justify-between text-xs font-bold text-[#2c1810]">
+              <span>Antrean File ({files.length}):</span>
+              <span className="text-[#6b5344] font-normal">
+                {(files.reduce((acc, f) => acc + f.size, 0) / (1024 * 1024)).toFixed(1)} MB total
+              </span>
+            </div>
+            <ul className="divide-y divide-[#e8ddd4] max-h-32 overflow-y-auto text-xs text-[#2c1810]">
               {files.map((f, idx) => (
-                <li key={`${f.name}-${idx}`} className="flex items-center gap-2">
-                  <span className="truncate">{f.name}</span>
-                  {f.type.startsWith('video/') && (
-                    <span className="text-xs px-1.5 py-0.5 bg-purple-600/30 text-purple-200 rounded">
-                      video
-                    </span>
-                  )}
+                <li key={`${f.name}-${idx}`} className="py-1 flex items-center justify-between gap-2">
+                  <span className="truncate max-w-[220px] font-medium">{f.name}</span>
+                  <span className="text-[10px] text-[#6b5344] shrink-0 font-mono">
+                    {(f.size / 1024).toFixed(0)} KB
+                  </span>
                 </li>
               ))}
             </ul>
-            <div className="text-xs mt-2 text-neutral-400">
-              (Previews are hidden until metadata is generated)
-            </div>
           </div>
         )}
 
-        <div className="flex gap-2 items-center">
+        {showVideoWarning && (
+          <div className="flex items-center gap-2 p-2.5 rounded-lg bg-[#fff5e6] border border-[#2c1810] text-xs text-[#6b5344]">
+            <AlertTriangle className="w-4 h-4 text-[#ff6b35] shrink-0" />
+            <span>File video terdeteksi. Provider GAS Proxy / Gemini disarankan untuk analisis keyframe tercepat.</span>
+          </div>
+        )}
+
+        {/* Generate CTA Button */}
+        <div className="space-y-2 pt-1">
           <Button
-            disabled={!files.length || busy || showVideoWarning}
+            disabled={!files.length || busy}
             onClick={onGenerate}
-            className="bg-purple-600 hover:bg-purple-500 text-white"
+            className="w-full h-12 bg-[#ff6b35] hover:bg-[#e55a2b] text-white border-2 border-[#2c1810] shadow-[4px_4px_0_#2c1810] hover:shadow-[2px_2px_0_#2c1810] hover:translate-x-[2px] hover:translate-y-[2px] active:translate-x-[4px] active:translate-y-[4px] active:shadow-none font-bold text-base rounded-xl transition-all cursor-pointer disabled:opacity-50 disabled:cursor-not-allowed disabled:transform-none"
           >
-            Generate metadata
-          </Button>
-          {busy && (
-            <>
-              <Progress value={progress} className="w-56 bg-neutral-900" />
-              <span className="text-sm text-neutral-400">
-                {Math.round(progress)}% | {Math.round((progress / 100) * files.length)} /{' '}
-                {files.length}
+            {busy ? (
+              <span className="flex items-center gap-2">
+                <span className="inline-block w-4 h-4 border-2 border-white border-t-transparent rounded-full animate-spin"></span>
+                <span>Memproses Metadata...</span>
               </span>
-            </>
+            ) : (
+              <span className="flex items-center justify-center gap-2">
+                <Zap className="w-4 h-4 fill-current" />
+                <span>Generate Metadata</span>
+              </span>
+            )}
+          </Button>
+
+          {busy && (
+            <div className="space-y-1">
+              <div className="w-full h-3 bg-[#fff5e6] border-2 border-[#2c1810] rounded-full overflow-hidden p-0.5 shadow-[2px_2px_0_#2c1810]">
+                <div
+                  className="h-full bg-[#ff6b35] rounded-full transition-all duration-300"
+                  style={{ width: `${Math.min(100, Math.max(5, progress))}%` }}
+                />
+              </div>
+              <div className="flex justify-between items-center text-[11px] font-bold text-[#6b5344] gap-2">
+                <span className="truncate max-w-[200px]" title={statusText || `Progress: ${Math.round(progress)}%`}>
+                  {statusText || `Progress: ${Math.round(progress)}%`}
+                </span>
+                <span className="shrink-0 font-mono">
+                  {Math.round((progress / 100) * files.length)} / {files.length} Selesai
+                </span>
+              </div>
+            </div>
           )}
         </div>
-      </CardContent>
-    </Card>
+      </div>
+    </div>
   );
 }
 

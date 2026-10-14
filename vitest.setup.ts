@@ -4,11 +4,20 @@ import '@testing-library/jest-dom';
 Object.defineProperty(globalThis, 'crypto', {
   value: {
     subtle: {
-      digest: async (_algorithm: string, data: Uint8Array) => {
-        // Simple mock - returns predictable hash based on data length
+      digest: async (_algorithm: string, data: BufferSource) => {
+        const bytes =
+          data instanceof Uint8Array
+            ? data
+            : ArrayBuffer.isView(data)
+              ? new Uint8Array(data.buffer, data.byteOffset, data.byteLength)
+              : new Uint8Array(data);
         const result = new Uint8Array(32);
+        let sum = 0;
+        for (let i = 0; i < bytes.length; i++) {
+          sum = (sum + bytes[i]) % 65536;
+        }
         for (let i = 0; i < 32; i++) {
-          result[i] = (data.length + i) % 256;
+          result[i] = (bytes.length + sum + i) % 256;
         }
         return result.buffer;
       },
@@ -38,3 +47,17 @@ Object.defineProperty(navigator, 'clipboard', {
     readText: vi.fn().mockResolvedValue(''),
   },
 });
+
+// Mock URL.createObjectURL and URL.revokeObjectURL for media tests
+if (typeof URL.createObjectURL === 'undefined') {
+  URL.createObjectURL = vi.fn(() => 'blob:mock-url');
+}
+if (typeof URL.revokeObjectURL === 'undefined') {
+  URL.revokeObjectURL = vi.fn();
+}
+
+// Mock HTMLMediaElement.prototype.load for jsdom tests
+if (typeof window !== 'undefined' && window.HTMLMediaElement) {
+  window.HTMLMediaElement.prototype.load = vi.fn();
+}
+

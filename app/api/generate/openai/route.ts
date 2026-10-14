@@ -7,16 +7,17 @@ const ALLOWED_MODELS = [
   'gpt-4o-mini', 'gpt-4-turbo', 'gpt-4'
 ];
 
-// JSON Schema used by Structured Outputs
 const jsonSchema = {
   type: 'object',
   additionalProperties: false,
   properties: {
     title: { type: 'string' },
     description: { type: 'string' },
-    keywords: { type: 'string' }
+    keywords: { type: 'string' },
+    category: { type: 'string' },
+    shutterstockCategory: { type: 'string' }
   },
-  required: ['title', 'description', 'keywords']
+  required: ['title', 'description', 'keywords', 'category', 'shutterstockCategory']
 } as const;
 
 const instructionCache = new Map<string, string>();
@@ -37,12 +38,13 @@ function isValidModel(model: string): boolean {
 export async function POST(req: NextRequest) {
   try {
     const body = await req.json();
-    const { apiKey, model, instruction, instructionHash, imageDataUrl } = body as {
+    const { apiKey, model, instruction, instructionHash, imageDataUrl, imageDataUrls } = body as {
       apiKey: string;
       model: string;
       instruction?: string;
       instructionHash?: string;
-      imageDataUrl: string;
+      imageDataUrl?: string;
+      imageDataUrls?: string[];
     };
 
     // Input validation
@@ -58,10 +60,15 @@ export async function POST(req: NextRequest) {
     if (!isValidModel(model)) {
       return new Response(`Invalid model. Allowed: ${ALLOWED_MODELS.join(', ')}`, { status: 400 });
     }
-    if (!imageDataUrl) {
-      return new Response('Missing imageDataUrl', { status: 400 });
+
+    const images: string[] = Array.isArray(imageDataUrls) && imageDataUrls.length > 0
+      ? imageDataUrls
+      : (imageDataUrl ? [imageDataUrl] : []);
+
+    if (images.length === 0) {
+      return new Response('Missing imageDataUrl or imageDataUrls', { status: 400 });
     }
-    if (!isValidDataUrl(imageDataUrl)) {
+    if (!images.every(isValidDataUrl)) {
       return new Response('Invalid image data URL format', { status: 400 });
     }
 
@@ -86,8 +93,13 @@ export async function POST(req: NextRequest) {
         {
           role: 'user',
           content: [
-            { type: 'input_text', text: 'Analyze the image and return metadata JSON.' },
-            { type: 'input_image', image_url: imageDataUrl }
+            {
+              type: 'input_text',
+              text: images.length > 1
+                ? 'Analyze this sequence of chronological video keyframes across the entire footage (from start to finish). Do NOT describe only the first frame; synthesize the overall dynamic motion, subject action, camera movement, and progression across all frames into the metadata JSON.'
+                : 'Analyze the image and return metadata JSON.'
+            },
+            ...images.map((img) => ({ type: 'input_image', image_url: img }))
           ]
         }
       ]

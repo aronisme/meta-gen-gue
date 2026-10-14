@@ -1,0 +1,4 @@
+name = "meta-gen-gue"
+pages_build_output_dir = ".vercel/output/static"
+compatibility_date = "2026-10-14"
+compatibility_flags = ["nodejs_compat"]

@@ -57,4 +57,24 @@ describe('cleanKeywords', () => {
     const result = cleanKeywords('Cat, cat, Dog, dog, Bird, bird, Fish', 3);
     expect(result).toBe('Cat, Dog, Bird');
   });
+
+  it('should filter out banned subjective words like beautiful and cute', () => {
+    const result = cleanKeywords('beautiful, sunset, cute, kitten, amazing, ocean', 10);
+    expect(result).toBe('sunset, kitten, ocean');
+  });
+
+  it('should deduplicate singular and plural forms of the same word', () => {
+    const result = cleanKeywords('cat, cats, dog, dogs, bird', 10);
+    expect(result).toBe('cat, dog, bird');
+  });
+
+  it('should cap repetitive root word spam across multi-word phrases', () => {
+    const result = cleanKeywords(
+      'car, car drive, car road, car trip, car speed, car engine, tree',
+      10,
+      { maxRootWordRepetition: 3 }
+    );
+    // After 3 occurrences with 'car', subsequent phrases with 'car' are dropped
+    expect(result).toBe('car, car drive, car road, tree');
+  });
 });

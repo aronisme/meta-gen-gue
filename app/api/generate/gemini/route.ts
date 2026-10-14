@@ -16,7 +16,9 @@ const responseSchema = {
   properties: {
     title: { type: 'STRING' },
     description: { type: 'STRING' },
-    keywords: { type: 'STRING' }
+    keywords: { type: 'STRING' },
+    category: { type: 'STRING' },
+    shutterstockCategory: { type: 'STRING' }
   },
   required: ['title', 'description', 'keywords']
 } as const;

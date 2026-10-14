@@ -116,6 +116,63 @@
     @apply border-border outline-ring/50;
   }
   body {
-    @apply bg-background text-foreground;
+    background-color: #fffaf0;
+    color: #2c1810;
+    font-family: var(--font-karla), sans-serif;
+  }
+  h1, h2, h3, h4 {
+    letter-spacing: -0.01em;
   }
 }
+
+/* Warm Retro Editorial & Neo-brutalist theme helpers */
+.retro-box {
+  background-color: #ffffff;
+  border: 2px solid #2c1810;
+  box-shadow: 4px 4px 0 #2c1810;
+  border-radius: 0.75rem;
+}
+
+.retro-box-warm {
+  background-color: #fff5e6;
+  border: 2px solid #2c1810;
+  box-shadow: 4px 4px 0 #2c1810;
+  border-radius: 0.75rem;
+}
+
+.retro-btn-cta {
+  background-color: #ff6b35;
+  color: #ffffff;
+  border: 2px solid #2c1810;
+  box-shadow: 4px 4px 0 #2c1810;
+  font-weight: 700;
+  transition: all 0.15s cubic-bezier(0.4, 0, 0.2, 1);
+}
+.retro-btn-cta:hover:not(:disabled) {
+  background-color: #e55a2b;
+  box-shadow: 2px 2px 0 #2c1810;
+  transform: translate(2px, 2px);
+}
+.retro-btn-cta:active:not(:disabled) {
+  box-shadow: 0 0 0 #2c1810;
+  transform: translate(4px, 4px);
+}
+
+.retro-btn-secondary {
+  background-color: #ffffff;
+  color: #2c1810;
+  border: 2px solid #2c1810;
+  box-shadow: 3px 3px 0 #2c1810;
+  font-weight: 600;
+  transition: all 0.15s cubic-bezier(0.4, 0, 0.2, 1);
+}
+.retro-btn-secondary:hover:not(:disabled) {
+  background-color: #fff5e6;
+  box-shadow: 1px 1px 0 #2c1810;
+  transform: translate(2px, 2px);
+}
+.retro-btn-secondary:active:not(:disabled) {
+  box-shadow: 0 0 0 #2c1810;
+  transform: translate(3px, 3px);
+}
+

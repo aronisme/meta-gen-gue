@@ -2,7 +2,6 @@
 
 import { memo, useState } from 'react';
 import Image from 'next/image';
-import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Textarea } from '@/components/ui/textarea';
 import { Badge } from '@/components/ui/badge';
@@ -22,34 +21,15 @@ import {
   Trash2,
   CheckSquare,
   Square,
+  X,
+  Maximize2,
+  Camera,
+  Video,
+  PenTool,
 } from 'lucide-react';
 import { parseKeywords } from '@/lib/keywords';
+import { ADOBE_STOCK_CATEGORIES, SHUTTERSTOCK_CATEGORIES } from '@/lib/categories';
 import type { ItemMetaBox, MetaOutput } from '@/lib/types';
-
-/* Adobe Stock category codes */
-const ADOBE_STOCK_CATEGORIES = [
-  { code: '1', name: 'Animals' },
-  { code: '2', name: 'Buildings and Architecture' },
-  { code: '3', name: 'Business' },
-  { code: '4', name: 'Drinks' },
-  { code: '5', name: 'The Environment' },
-  { code: '6', name: 'States of Mind' },
-  { code: '7', name: 'Food' },
-  { code: '8', name: 'Graphic Resources' },
-  { code: '9', name: 'Hobbies and Leisure' },
-  { code: '10', name: 'Industry' },
-  { code: '11', name: 'Landscapes' },
-  { code: '12', name: 'Lifestyle' },
-  { code: '13', name: 'People' },
-  { code: '14', name: 'Plants and Flowers' },
-  { code: '15', name: 'Culture and Religion' },
-  { code: '16', name: 'Science' },
-  { code: '17', name: 'Social Issues' },
-  { code: '18', name: 'Sports' },
-  { code: '19', name: 'Technology' },
-  { code: '20', name: 'Transport' },
-  { code: '21', name: 'Travel' },
-] as const;
 
 interface MetadataItemProps {
   item: ItemMetaBox;
@@ -79,6 +59,8 @@ function MetadataItemComponent({
   onChipDrop,
 }: MetadataItemProps) {
   const [newKw, setNewKw] = useState('');
+  const [previewOpen, setPreviewOpen] = useState(false);
+  const [activePreviewImage, setActivePreviewImage] = useState<string | null>(null);
 
   const copy = (text: string) => {
     void navigator.clipboard.writeText(text || '');
@@ -109,149 +91,283 @@ function MetadataItemComponent({
 
   return (
     <div
-      className={`rounded-2xl border border-neutral-800 overflow-hidden bg-neutral-900/50 ${
-        selected ? 'ring-2 ring-purple-500/40' : ''
+      className={`rounded-xl border-2 border-[#2c1810] overflow-hidden bg-white shadow-[4px_4px_0_#2c1810] transition-all ${
+        selected ? 'ring-4 ring-[#ff6b35]' : ''
       }`}
     >
-      {/* Header with thumbnail */}
-      <div className="flex gap-3 p-3 items-center bg-gradient-to-r from-purple-950/50 to-neutral-950">
+      {/* Header with enlarged thumbnail */}
+      <div className="flex gap-4 p-3.5 sm:p-4 items-start bg-[#fff5e6] border-b-2 border-[#2c1810]">
         {selectable && onSelect && (
           <button
-            className="p-2 rounded-md bg-neutral-800 hover:bg-neutral-700 text-neutral-100 border border-neutral-700"
+            className="p-1.5 rounded-lg bg-white hover:bg-[#fff5e6] text-[#2c1810] border-2 border-[#2c1810] shadow-[2px_2px_0_#2c1810] cursor-pointer shrink-0 mt-1"
             onClick={() => onSelect(item.id)}
             aria-pressed={selected}
             aria-label={selected ? 'Deselect item' : 'Select item'}
           >
-            {selected ? <CheckSquare className="w-4 h-4" /> : <Square className="w-4 h-4" />}
+            {selected ? <CheckSquare className="w-4 h-4 text-[#ff6b35]" /> : <Square className="w-4 h-4" />}
           </button>
         )}
-        <div className="w-16 h-16 bg-neutral-800 rounded-lg overflow-hidden flex items-center justify-center">
+
+        {/* Enlarged Thumbnail Preview with Lightbox Trigger */}
+        <div
+          className="w-28 h-28 sm:w-36 sm:h-36 bg-white border-2 border-[#2c1810] shadow-[2px_2px_0_#2c1810] rounded-xl overflow-hidden flex items-center justify-center shrink-0 relative group cursor-pointer"
+          onClick={() => {
+            setActivePreviewImage(null);
+            if (item.thumbDataUrl || item.videoDataUrl) setPreviewOpen(true);
+          }}
+          title="Klik untuk memperbesar preview"
+        >
           {isVideo && item.videoDataUrl ? (
             <video
               src={item.videoDataUrl}
               className="object-cover w-full h-full"
               muted
               playsInline
+              loop
             />
           ) : item.thumbDataUrl ? (
             <Image
-              alt=""
+              alt={item.filename}
               src={item.thumbDataUrl}
-              width={64}
-              height={64}
-              className="object-cover w-full h-full"
+              width={160}
+              height={160}
+              className="object-cover w-full h-full transition-transform duration-200 group-hover:scale-105"
               unoptimized
             />
           ) : (
-            <span className="text-xs text-neutral-500">No preview</span>
+            <span className="text-xs text-[#6b5344]">No preview</span>
+          )}
+
+          {(item.thumbDataUrl || item.videoDataUrl) && (
+            <div className="absolute inset-0 bg-black/35 opacity-0 group-hover:opacity-100 transition-opacity flex items-center justify-center text-white">
+              <Maximize2 className="w-5 h-5 drop-shadow" />
+            </div>
           )}
         </div>
-        <div className="min-w-0 flex-1">
-          <div className="font-medium truncate text-neutral-100">{item.filename}</div>
-          <div className="text-xs text-neutral-400">
-            {new Date(item.createdAt).toLocaleString()}
-            {isVideo && item.videoDuration && ` • ${Math.round(item.videoDuration)}s`}
+
+        {/* Item Info beside Thumbnail */}
+        <div className="min-w-0 flex-1 flex flex-col justify-between self-stretch gap-2">
+          <div className="space-y-1">
+            <div className="flex items-start justify-between gap-2">
+              <div className="font-extrabold text-[#2c1810] text-sm sm:text-base leading-snug line-clamp-2" title={item.filename}>
+                {item.filename}
+              </div>
+              <div className="flex items-center gap-1.5 shrink-0">
+                {item.error && (
+                  <Badge className="bg-[#fce8e6] text-[#c5221f] border-2 border-[#2c1810] font-bold shadow-[1px_1px_0_#2c1810]">
+                    Error
+                  </Badge>
+                )}
+                {onDelete && (
+                  <button
+                    className="p-1.5 rounded-lg bg-white hover:bg-[#fee2e2] text-[#2c1810] border-2 border-[#2c1810] shadow-[1px_1px_0_#2c1810] hover:shadow-none hover:translate-x-[1px] hover:translate-y-[1px] transition-all cursor-pointer"
+                    onClick={() => onDelete(item.id)}
+                    aria-label="Delete item"
+                    title="Hapus Item"
+                  >
+                    <Trash2 className="w-4 h-4 text-red-600" />
+                  </button>
+                )}
+              </div>
+            </div>
+
+            <div className="flex items-center gap-2 flex-wrap">
+              <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-md bg-white border border-[#2c1810] text-[11px] font-bold text-[#2c1810] shadow-[1px_1px_0_#2c1810]">
+                {isVideo ? (
+                  <>
+                    <Video className="w-3 h-3 text-[#ff6b35]" />
+                    <span>Video</span>
+                  </>
+                ) : item.fileType === 'illustration' || item.meta?.illustration ? (
+                  <>
+                    <PenTool className="w-3 h-3 text-[#ff6b35]" />
+                    <span>Illustration</span>
+                  </>
+                ) : (
+                  <>
+                    <Camera className="w-3 h-3 text-[#ff6b35]" />
+                    <span>Photo</span>
+                  </>
+                )}
+              </span>
+
+              {isVideo ? (
+                <span className="text-[10px] bg-amber-50 text-amber-900 border border-amber-300 px-1.5 py-0.5 rounded font-semibold inline-flex items-center gap-1" title="Untuk video footage, metadata diekspor via CSV Pendamping agar stream video aman tanpa re-encoding">
+                  📄 CSV Companion
+                </span>
+              ) : item.filename.toLowerCase().endsWith('.png') ? (
+                <span className="text-[10px] bg-purple-50 text-purple-900 border border-purple-300 px-1.5 py-0.5 rounded font-semibold inline-flex items-center gap-1" title="Format PNG: Metadata otomatis disuntikkan ke chunk iTXt (Adobe XMP)">
+                  🏷️ PNG: XMP Ready
+                </span>
+              ) : (
+                <span className="text-[10px] bg-sky-50 text-sky-900 border border-sky-300 px-1.5 py-0.5 rounded font-semibold inline-flex items-center gap-1" title="Format JPEG: Metadata otomatis disuntikkan ke segmen IPTC-IIM Photoshop & Adobe XMP">
+                  🏷️ JPG: IPTC & XMP Ready
+                </span>
+              )}
+
+              {item.meta?.category && (
+                <span className="text-[11px] px-2 py-0.5 rounded-md bg-[#fff5e6] border border-[#2c1810] font-bold text-[#6b5344]">
+                  Kat: {ADOBE_STOCK_CATEGORIES.find((c) => c.code === item.meta?.category)?.name || item.meta.category}
+                </span>
+              )}
+            </div>
+
+            {/* Keyframe filmstrip for video */}
+            {isVideo && item.videoKeyframes && item.videoKeyframes.length > 0 && (
+              <div className="pt-1">
+                <div className="text-[10px] font-extrabold text-[#6b5344] uppercase tracking-wider mb-1 flex items-center justify-between">
+                  <span>{item.videoKeyframes.length} Frame Kunci Dianalisis:</span>
+                  <span className="text-[9px] font-medium text-[#ff6b35]">Klik frame untuk perbesar</span>
+                </div>
+                <div className="flex items-center gap-1.5 overflow-x-auto pb-1">
+                  {item.videoKeyframes.map((kf, kfIdx) => {
+                    const pct = Math.round((kfIdx / (item.videoKeyframes!.length - 1 || 1)) * 100);
+                    return (
+                      <button
+                        type="button"
+                        key={kfIdx}
+                        className="group/kf relative w-10 h-10 rounded-lg border-2 border-[#2c1810] overflow-hidden bg-black shrink-0 cursor-pointer shadow-[1px_1px_0_#2c1810] hover:scale-105 hover:border-[#ff6b35] transition-all"
+                        onClick={(e) => {
+                          e.stopPropagation();
+                          setActivePreviewImage(kf);
+                          setPreviewOpen(true);
+                        }}
+                        title={`Frame ${kfIdx + 1} (~${pct}% durasi) - Klik untuk perbesar`}
+                      >
+                        {/* eslint-disable-next-line @next/next/no-img-element */}
+                        <img src={kf} alt={`Frame ${kfIdx + 1}`} className="w-full h-full object-cover" />
+                        <span className="absolute bottom-0 right-0 bg-[#2c1810]/85 text-[8px] font-bold text-white px-0.5 rounded-tl font-mono">
+                          {pct}%
+                        </span>
+                      </button>
+                    );
+                  })}
+                </div>
+              </div>
+            )}
+          </div>
+
+          <div className="text-xs text-[#6b5344] font-medium flex items-center justify-between flex-wrap gap-2 pt-1 border-t border-[#e8ddd4]/60">
+            <span>
+              {new Date(item.createdAt).toLocaleString()}
+              {isVideo && item.videoDuration && ` • ${Math.round(item.videoDuration)}s`}
+            </span>
+            {(item.thumbDataUrl || item.videoDataUrl) && (
+              <button
+                type="button"
+                onClick={() => setPreviewOpen(true)}
+                className="text-[11px] font-bold text-[#ff6b35] hover:underline flex items-center gap-1 cursor-pointer"
+              >
+                <Maximize2 className="w-3 h-3" />
+                <span>Perbesar</span>
+              </button>
+            )}
           </div>
         </div>
-        {item.error && <Badge variant="destructive" className="ml-auto">Error</Badge>}
-        {onDelete && (
-          <Button
-            size="icon"
-            variant="ghost"
-            className="text-neutral-400 hover:text-red-400"
-            onClick={() => onDelete(item.id)}
-            aria-label="Delete item"
-          >
-            <Trash2 className="w-4 h-4" />
-          </Button>
-        )}
       </div>
 
       {/* Content */}
-      <div className="p-4 space-y-3 text-neutral-200">
+      <div className="p-4 space-y-3.5 text-[#2c1810]">
         {item.error ? (
-          <pre className="text-red-400 text-sm whitespace-pre-wrap">{item.error}</pre>
+          <pre className="text-red-600 bg-red-50 p-3 rounded-lg border-2 border-red-300 text-xs whitespace-pre-wrap font-mono">
+            {item.error}
+          </pre>
         ) : editable ? (
           <>
             {/* Title (editable) */}
             <div className="space-y-1">
-              <div className="flex items-center justify-between">
-                <span className="font-semibold text-neutral-100">Title</span>
-                <div className="shrink-0 flex gap-2">
-                  <Button
-                    size="icon"
-                    variant="ghost"
-                    className="text-neutral-200"
+              <div className="flex items-center justify-between gap-2">
+                <div className="flex items-center gap-2 min-w-0">
+                  <span className="font-bold text-xs uppercase tracking-wider text-[#6b5344] shrink-0">Title</span>
+                  {item.meta?.title && (
+                    <span
+                      className={`text-[10px] font-bold px-1.5 py-0.5 rounded border border-[#2c1810] shadow-[1px_1px_0_#2c1810] shrink-0 ${
+                        item.meta.title.length > 70
+                          ? 'bg-[#feefc3] text-[#b06000]'
+                          : 'bg-[#fff5e6] text-[#2c1810]'
+                      }`}
+                    >
+                      {item.meta.title.length}/70 chars
+                    </span>
+                  )}
+                </div>
+                <div className="shrink-0 flex items-center gap-1">
+                  <button
+                    className="p-1.5 rounded bg-white hover:bg-[#fff5e6] text-[#2c1810] border border-[#2c1810] shadow-[1px_1px_0_#2c1810] hover:shadow-none hover:translate-x-[0.5px] hover:translate-y-[0.5px] transition-all cursor-pointer"
                     onClick={() => copy(item.meta?.title || '')}
                     aria-label="Copy title"
+                    title="Copy title"
                   >
-                    <Copy className="w-4 h-4" />
-                  </Button>
+                    <Copy className="w-3.5 h-3.5" />
+                  </button>
                   {onSave && (
-                    <Button
-                      size="icon"
-                      variant="ghost"
-                      className="text-neutral-200"
+                    <button
+                      className="p-1.5 rounded bg-white hover:bg-[#fff5e6] text-[#2c1810] border border-[#2c1810] shadow-[1px_1px_0_#2c1810] hover:shadow-none hover:translate-x-[0.5px] hover:translate-y-[0.5px] transition-all cursor-pointer"
                       onClick={() => onSave(item.id)}
                       aria-label="Save edits"
+                      title="Save edits"
                     >
-                      <Save className="w-4 h-4" />
-                    </Button>
+                      <Save className="w-3.5 h-3.5" />
+                    </button>
                   )}
                   {onRegenerate && (
-                    <Button
-                      size="icon"
-                      variant="ghost"
-                      className="text-neutral-200"
+                    <button
+                      className="p-1.5 rounded bg-white hover:bg-[#fff5e6] text-[#2c1810] border border-[#2c1810] shadow-[1px_1px_0_#2c1810] hover:shadow-none hover:translate-x-[0.5px] hover:translate-y-[0.5px] transition-all cursor-pointer"
                       onClick={() => onRegenerate(item.id)}
                       aria-label="Regenerate metadata"
+                      title="Regenerate metadata"
                     >
-                      <RotateCw className="w-4 h-4" />
-                    </Button>
+                      <RotateCw className="w-3.5 h-3.5" />
+                    </button>
                   )}
                 </div>
               </div>
               <Input
-                className="bg-neutral-900 border-neutral-700 text-neutral-100"
+                className="w-full bg-white border-2 border-[#2c1810] text-[#2c1810] font-bold shadow-[2px_2px_0_#2c1810] h-9 text-xs"
                 value={item.meta?.title || ''}
                 onChange={(e) => onPatchMeta?.(item.id, { title: e.target.value })}
+                placeholder="Judul stock..."
               />
             </div>
 
             {/* Description (editable) */}
             <div className="space-y-1">
-              <div className="flex items-center justify-between">
-                <span className="font-semibold text-neutral-100">Description</span>
-                <Button
-                  size="icon"
-                  variant="ghost"
-                  className="text-neutral-200"
+              <div className="flex items-center justify-between gap-2">
+                <span className="font-bold text-xs uppercase tracking-wider text-[#6b5344]">Description</span>
+                <button
+                  className="p-1.5 rounded bg-white hover:bg-[#fff5e6] text-[#2c1810] border border-[#2c1810] shadow-[1px_1px_0_#2c1810] hover:shadow-none hover:translate-x-[0.5px] hover:translate-y-[0.5px] transition-all cursor-pointer"
                   onClick={() => copy(item.meta?.description || '')}
                   aria-label="Copy description"
+                  title="Copy description"
                 >
-                  <Copy className="w-4 h-4" />
-                </Button>
+                  <Copy className="w-3.5 h-3.5" />
+                </button>
               </div>
               <Textarea
-                rows={3}
-                className="bg-neutral-900 border-neutral-700 text-neutral-100"
+                rows={2}
+                className="w-full bg-white border-2 border-[#2c1810] text-[#2c1810] font-normal shadow-[2px_2px_0_#2c1810] text-xs resize-y"
                 value={item.meta?.description || ''}
                 onChange={(e) => onPatchMeta?.(item.id, { description: e.target.value })}
+                placeholder="Deskripsi detail..."
               />
             </div>
 
-            {/* Adobe Stock fields */}
-            <div className="grid grid-cols-2 gap-3">
-              <div className="space-y-1">
-                <span className="font-semibold text-neutral-100 text-sm">Category</span>
+            {/* Agency Categories & Releases */}
+            <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-3">
+              <div className="space-y-1 min-w-0">
+                <span className="font-bold text-[11px] uppercase tracking-wider text-[#6b5344] block truncate">
+                  Adobe Category
+                </span>
                 <Select
                   value={item.meta?.category || 'none'}
-                  onValueChange={(value) => onPatchMeta?.(item.id, { category: value === 'none' ? '' : value })}
+                  onValueChange={(value) =>
+                    onPatchMeta?.(item.id, { category: value === 'none' ? '' : value })
+                  }
                 >
-                  <SelectTrigger className="bg-neutral-900 border-neutral-700 text-neutral-100">
-                    <SelectValue placeholder="Select category" />
+                  <SelectTrigger className="w-full min-w-0 max-w-full overflow-hidden bg-white border-2 border-[#2c1810] text-[#2c1810] font-semibold h-9 text-xs shadow-[2px_2px_0_#2c1810]">
+                    <SelectValue placeholder="Pilih Kategori Adobe" className="truncate" />
                   </SelectTrigger>
-                  <SelectContent className="bg-neutral-900 border-neutral-700 text-neutral-100 max-h-64">
+                  <SelectContent className="bg-white border-2 border-[#2c1810] text-[#2c1810] shadow-[4px_4px_0_#2c1810] max-h-64">
                     <SelectItem value="none">None</SelectItem>
                     {ADOBE_STOCK_CATEGORIES.map((cat) => (
                       <SelectItem key={cat.code} value={cat.code}>
@@ -261,47 +377,75 @@ function MetadataItemComponent({
                   </SelectContent>
                 </Select>
               </div>
-              <div className="space-y-1">
-                <span className="font-semibold text-neutral-100 text-sm">Releases</span>
+
+              <div className="space-y-1 min-w-0">
+                <span className="font-bold text-[11px] uppercase tracking-wider text-[#6b5344] block truncate">
+                  Shutterstock Category
+                </span>
+                <Select
+                  value={item.meta?.shutterstockCategory || 'none'}
+                  onValueChange={(value) =>
+                    onPatchMeta?.(item.id, { shutterstockCategory: value === 'none' ? '' : value })
+                  }
+                >
+                  <SelectTrigger className="w-full min-w-0 max-w-full overflow-hidden bg-white border-2 border-[#2c1810] text-[#2c1810] font-semibold h-9 text-xs shadow-[2px_2px_0_#2c1810]">
+                    <SelectValue placeholder="Pilih Kategori Shutterstock" className="truncate" />
+                  </SelectTrigger>
+                  <SelectContent className="bg-white border-2 border-[#2c1810] text-[#2c1810] shadow-[4px_4px_0_#2c1810] max-h-64">
+                    <SelectItem value="none">None</SelectItem>
+                    {SHUTTERSTOCK_CATEGORIES.map((cat) => (
+                      <SelectItem key={cat.code} value={cat.code}>
+                        {cat.name}
+                      </SelectItem>
+                    ))}
+                  </SelectContent>
+                </Select>
+              </div>
+
+              <div className="space-y-1 min-w-0 sm:col-span-2 lg:col-span-1">
+                <span className="font-bold text-[11px] uppercase tracking-wider text-[#6b5344] block truncate">
+                  Releases
+                </span>
                 <Input
-                  className="bg-neutral-900 border-neutral-700 text-neutral-100"
+                  className="w-full min-w-0 bg-white border-2 border-[#2c1810] text-[#2c1810] font-semibold h-9 text-xs shadow-[2px_2px_0_#2c1810]"
                   value={item.meta?.releases || ''}
                   onChange={(e) => onPatchMeta?.(item.id, { releases: e.target.value })}
-                  placeholder="Model/property releases"
+                  placeholder="Model/property release..."
                 />
               </div>
             </div>
 
             {/* Keywords (chips + add box) */}
-            <div className="space-y-2">
+            <div className="space-y-2 pt-1">
               <div className="flex items-center justify-between">
-                <span className="font-semibold text-neutral-100">Keywords</span>
-                <div className="shrink-0 flex gap-2">
+                <div className="flex items-center gap-2">
+                  <span className="font-bold text-xs uppercase tracking-wider text-[#6b5344]">Keywords</span>
+                  <span className="text-[11px] font-bold px-2 py-0.5 rounded border-2 border-[#2c1810] bg-[#fff5e6] text-[#2c1810] shadow-[1px_1px_0_#2c1810]">
+                    {parseKeywords(item.meta?.keywords || '').length} keywords
+                  </span>
+                </div>
+                <div className="shrink-0 flex gap-1.5">
                   {onTidy && (
-                    <Button
-                      size="icon"
-                      variant="ghost"
-                      className="text-neutral-200"
+                    <button
+                      className="p-1.5 rounded-lg bg-white hover:bg-[#fff5e6] text-[#2c1810] border-2 border-[#2c1810] shadow-[2px_2px_0_#2c1810] hover:shadow-none hover:translate-x-[1px] hover:translate-y-[1px] transition-all cursor-pointer"
                       onClick={() => onTidy(item.id)}
                       aria-label="Tidy keywords"
                     >
-                      <Wand2 className="w-4 h-4" />
-                    </Button>
+                      <Wand2 className="w-3.5 h-3.5 text-[#ff6b35]" />
+                    </button>
                   )}
-                  <Button
-                    size="icon"
-                    variant="ghost"
-                    className="text-neutral-200"
+                  <button
+                    className="p-1.5 rounded-lg bg-white hover:bg-[#fff5e6] text-[#2c1810] border-2 border-[#2c1810] shadow-[2px_2px_0_#2c1810] hover:shadow-none hover:translate-x-[1px] hover:translate-y-[1px] transition-all cursor-pointer"
                     onClick={() => copy(item.meta?.keywords || '')}
                     aria-label="Copy keywords"
                   >
-                    <Copy className="w-4 h-4" />
-                  </Button>
+                    <Copy className="w-3.5 h-3.5" />
+                  </button>
                 </div>
               </div>
 
               {/* Draggable chips */}
-              <div className="flex flex-wrap gap-2">
+              <div className="flex flex-wrap gap-1.5">
                 {parseKeywords(item.meta?.keywords || '').map((kw, idx) => (
                   <span
                     key={`${kw}-${idx}`}
@@ -312,25 +456,25 @@ function MetadataItemComponent({
                       const from = parseInt(e.dataTransfer.getData('text/plain'), 10);
                       onChipDrop?.(item.id, from, idx);
                     }}
-                    className="px-2 py-1 rounded-lg border border-purple-500/40 bg-purple-700/25 text-purple-100 text-xs select-none cursor-move"
+                    className="px-3 py-1 rounded-full border-2 border-[#2c1810] bg-[#fff5e6] text-[#2c1810] font-bold text-xs shadow-[1.5px_1.5px_0_#2c1810] hover:shadow-[0.5px_0.5px_0_#2c1810] hover:translate-x-[1px] hover:translate-y-[1px] cursor-move select-none inline-flex items-center gap-1.5 transition-all"
                   >
-                    {kw}
+                    <span>{kw}</span>
                     <button
-                      className="ml-1 text-purple-200/70 hover:text-white"
+                      className="ml-1 font-bold text-[#6b5344] hover:text-[#ff6b35] cursor-pointer inline-flex items-center"
                       onClick={() => removeKeyword(idx)}
                       type="button"
                       aria-label={`Remove ${kw}`}
                     >
-                      ×
+                      <X className="w-3 h-3 hover:text-red-600" />
                     </button>
                   </span>
                 ))}
               </div>
 
               {/* Add keyword input */}
-              <div className="flex items-center gap-2">
+              <div className="flex items-center gap-2 pt-1">
                 <Input
-                  placeholder="Add keyword"
+                  placeholder="Tambah kata kunci..."
                   value={newKw}
                   onChange={(e) => setNewKw(e.target.value)}
                   onKeyDown={(e) => {
@@ -339,67 +483,147 @@ function MetadataItemComponent({
                       addKeyword();
                     }
                   }}
-                  className="h-8 w-48 bg-neutral-900 border-neutral-700 text-neutral-100"
+                  className="h-9 flex-1 min-w-[140px] max-w-xs bg-white border-2 border-[#2c1810] text-[#2c1810] font-semibold text-xs shadow-[2px_2px_0_#2c1810]"
                 />
-                <Button
-                  size="icon"
+                <button
                   onClick={addKeyword}
-                  className="h-8 w-8 bg-purple-600 hover:bg-purple-500 text-white"
+                  className="h-9 w-9 bg-[#ff6b35] hover:bg-[#e55a2b] text-white border-2 border-[#2c1810] shadow-[2px_2px_0_#2c1810] hover:shadow-none hover:translate-x-[1px] hover:translate-y-[1px] font-bold rounded-lg flex items-center justify-center transition-all cursor-pointer"
                   aria-label="Add keyword"
                 >
                   <Plus className="w-4 h-4" />
-                </Button>
-                <span className="text-xs text-neutral-400 ml-2">
-                  {parseKeywords(item.meta?.keywords || '').length} keyword(s)
-                </span>
+                </button>
               </div>
             </div>
           </>
         ) : (
           /* Read-only view */
-          <>
+          <div className="space-y-2 text-sm">
             <div className="flex items-start gap-2">
-              <div className="font-semibold min-w-[70px] text-neutral-100">Title</div>
-              <div className="flex-1 text-neutral-200">{item.meta?.title}</div>
-              <Button
-                size="icon"
-                variant="ghost"
-                className="text-neutral-200 shrink-0"
+              <span className="font-bold min-w-[70px] text-xs uppercase text-[#6b5344]">Title:</span>
+              <span className="flex-1 text-[#2c1810] font-semibold">{item.meta?.title}</span>
+              <button
+                className="p-1 rounded bg-white border border-[#2c1810] shadow-[1px_1px_0_#2c1810]"
                 onClick={() => copy(item.meta?.title || '')}
-                aria-label="Copy title"
               >
-                <Copy className="w-4 h-4" />
-              </Button>
+                <Copy className="w-3.5 h-3.5" />
+              </button>
             </div>
             <div className="flex items-start gap-2">
-              <div className="font-semibold min-w-[70px] text-neutral-100">Desc</div>
-              <div className="flex-1 text-neutral-300">{item.meta?.description}</div>
-              <Button
-                size="icon"
-                variant="ghost"
-                className="text-neutral-200 shrink-0"
+              <span className="font-bold min-w-[70px] text-xs uppercase text-[#6b5344]">Desc:</span>
+              <span className="flex-1 text-[#2c1810]">{item.meta?.description}</span>
+              <button
+                className="p-1 rounded bg-white border border-[#2c1810] shadow-[1px_1px_0_#2c1810]"
                 onClick={() => copy(item.meta?.description || '')}
-                aria-label="Copy description"
               >
-                <Copy className="w-4 h-4" />
-              </Button>
+                <Copy className="w-3.5 h-3.5" />
+              </button>
             </div>
             <div className="flex items-start gap-2">
-              <div className="font-semibold min-w-[70px] text-neutral-100">Keywords</div>
-              <div className="flex-1 text-neutral-300 break-words">{item.meta?.keywords}</div>
-              <Button
-                size="icon"
-                variant="ghost"
-                className="text-neutral-200 shrink-0"
+              <span className="font-bold min-w-[70px] text-xs uppercase text-[#6b5344]">Keywords:</span>
+              <span className="flex-1 text-[#2c1810] break-words text-xs">{item.meta?.keywords}</span>
+              <button
+                className="p-1 rounded bg-white border border-[#2c1810] shadow-[1px_1px_0_#2c1810]"
                 onClick={() => copy(item.meta?.keywords || '')}
-                aria-label="Copy keywords"
               >
-                <Copy className="w-4 h-4" />
-              </Button>
+                <Copy className="w-3.5 h-3.5" />
+              </button>
             </div>
-          </>
+          </div>
         )}
       </div>
+
+      {/* Lightbox Preview Modal */}
+      {previewOpen && (item.thumbDataUrl || item.videoDataUrl) && (
+        <div
+          className="fixed inset-0 z-50 bg-black/80 backdrop-blur-sm flex items-center justify-center p-4"
+          onClick={() => setPreviewOpen(false)}
+        >
+          <div
+            className="relative max-w-4xl max-h-[90vh] bg-white border-2 border-[#2c1810] shadow-[8px_8px_0_#2c1810] rounded-2xl overflow-hidden p-4 space-y-3"
+            onClick={(e) => e.stopPropagation()}
+          >
+            <div className="flex items-center justify-between gap-3 border-b-2 border-[#2c1810] pb-2">
+              <span className="font-black text-[#2c1810] text-sm truncate max-w-md">
+                {item.filename}
+              </span>
+              <button
+                onClick={() => setPreviewOpen(false)}
+                className="p-1 rounded-lg bg-[#fff5e6] hover:bg-[#ffe3cf] text-[#2c1810] border-2 border-[#2c1810] shadow-[1px_1px_0_#2c1810] cursor-pointer"
+                aria-label="Tutup preview"
+              >
+                <X className="w-4 h-4" />
+              </button>
+            </div>
+            <div className="flex items-center justify-center bg-[#f7f5f0] rounded-xl border-2 border-[#2c1810] overflow-hidden max-h-[70vh]">
+              {activePreviewImage ? (
+                /* eslint-disable-next-line @next/next/no-img-element */
+                <img
+                  src={activePreviewImage}
+                  alt={item.filename}
+                  className="max-h-[70vh] max-w-full object-contain"
+                />
+              ) : isVideo && item.videoDataUrl ? (
+                <video
+                  src={item.videoDataUrl}
+                  controls
+                  autoPlay
+                  className="max-h-[70vh] max-w-full object-contain"
+                />
+              ) : item.thumbDataUrl ? (
+                /* eslint-disable-next-line @next/next/no-img-element */
+                <img
+                  src={item.thumbDataUrl}
+                  alt={item.filename}
+                  className="max-h-[70vh] max-w-full object-contain"
+                />
+              ) : null}
+            </div>
+
+            {/* Filmstrip selector in Lightbox */}
+            {isVideo && item.videoKeyframes && item.videoKeyframes.length > 0 && (
+              <div className="flex items-center justify-center gap-2 pt-2 border-t-2 border-[#e8ddd4] overflow-x-auto">
+                <span className="text-[11px] font-bold text-[#6b5344] shrink-0">Frame Kunci:</span>
+                {item.videoKeyframes.map((kf, kfIdx) => {
+                  const pct = Math.round((kfIdx / (item.videoKeyframes!.length - 1 || 1)) * 100);
+                  const isCurrent = activePreviewImage === kf;
+                  return (
+                    <button
+                      type="button"
+                      key={kfIdx}
+                      onClick={() => setActivePreviewImage(kf)}
+                      className={`relative w-12 h-12 rounded-lg border-2 border-[#2c1810] overflow-hidden shrink-0 cursor-pointer transition-all ${
+                        isCurrent
+                          ? 'ring-2 ring-[#ff6b35] scale-105 shadow-[2px_2px_0_#2c1810]'
+                          : 'opacity-70 hover:opacity-100 hover:border-[#ff6b35]'
+                      }`}
+                      title={`Frame ${kfIdx + 1} (~${pct}% durasi)`}
+                    >
+                      {/* eslint-disable-next-line @next/next/no-img-element */}
+                      <img src={kf} alt={`Frame ${kfIdx + 1}`} className="w-full h-full object-cover" />
+                      <span className="absolute bottom-0 right-0 bg-[#2c1810]/85 text-[8px] font-bold text-white px-0.5 rounded-tl font-mono">
+                        {pct}%
+                      </span>
+                    </button>
+                  );
+                })}
+                {item.videoDataUrl && (
+                  <button
+                    type="button"
+                    onClick={() => setActivePreviewImage(null)}
+                    className={`px-3 py-1.5 text-xs font-bold rounded-lg border-2 border-[#2c1810] cursor-pointer transition-all ${
+                      !activePreviewImage
+                        ? 'bg-[#ff6b35] text-white shadow-[2px_2px_0_#2c1810]'
+                        : 'bg-white text-[#2c1810] hover:bg-[#fff5e6]'
+                    }`}
+                  >
+                    Putar Video Asli
+                  </button>
+                )}
+              </div>
+            )}
+          </div>
+        </div>
+      )}
     </div>
   );
 }

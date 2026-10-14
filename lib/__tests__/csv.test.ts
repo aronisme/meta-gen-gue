@@ -32,10 +32,10 @@ Object.defineProperty(global, 'Blob', {
 });
 
 // Import after mocks are set up
-import { downloadAgencyCSV } from '../csv';
+import { downloadAgencyCSV, generateAgencyCSV } from '../csv';
 import type { ItemMetaBox } from '../types';
 
-describe('downloadAgencyCSV', () => {
+describe('CSV Exporters (2026 Microstock Compliance)', () => {
   const mockItems: ItemMetaBox[] = [
     {
       id: '1',
@@ -44,23 +44,31 @@ describe('downloadAgencyCSV', () => {
       assetType: 'image',
       createdAt: Date.now(),
       meta: {
-        title: 'Beautiful sunset',
-        description: 'A stunning sunset over the ocean',
-        keywords: 'sunset, ocean, sky',
-        category: 'Nature',
-        releases: 'None required',
+        title: 'Beautiful sunset, golden hour over the tropical sea and sand',
+        description: 'A stunning sunset over the ocean with vibrant colors',
+        keywords: 'sunset, ocean, sky, nature',
+        category: '5',
+        releases: 'model_release.jpg',
+        shutterstockCategory: 'Nature',
+        license: 'pro',
       },
     },
     {
       id: '2',
-      filename: 'image2.jpg',
-      fileType: 'photo',
+      filename: 'vector-art.eps',
+      fileType: 'vector',
       assetType: 'image',
       createdAt: Date.now(),
       meta: {
-        title: 'City skyline',
-        description: 'Modern city at night',
-        keywords: 'city, night, buildings',
+        title: 'Geometric abstract background',
+        description: 'Modern abstract geometric vector background',
+        keywords: 'abstract, vector, background',
+        category: '8',
+        shutterstockCategory: 'Backgrounds/Textures',
+        illustration: true,
+        aiGenerated: true,
+        aiPrompt: 'Geometric vector patterns with gold details',
+        aiModel: 'Midjourney 6',
       },
     },
   ];
@@ -69,84 +77,154 @@ describe('downloadAgencyCSV', () => {
     vi.clearAllMocks();
   });
 
-  it('should create Adobe CSV with correct headers', () => {
-    downloadAgencyCSV('adobe', mockItems);
+  describe('Adobe Stock CSV', () => {
+    it('should generate Adobe CSV with correct headers and sanitized title', () => {
+      const csv = generateAgencyCSV('adobe', mockItems);
 
-    expect(mockCreateObjectURL).toHaveBeenCalled();
-    const blobArg = mockCreateObjectURL.mock.calls[0][0] as { parts: string[] };
-    const csvContent = blobArg.parts[0];
+      expect(csv).toContain('Filename,Title,Keywords,Category,Releases');
+      expect(csv).toContain('"image1.jpg"');
+      // Commas must be stripped from title
+      expect(csv).not.toContain('sunset, golden hour');
+      expect(csv).toContain('Beautiful sunset golden hour');
+      expect(csv).toContain('"5"');
+    });
 
-    expect(csvContent).toContain('Filename,Title,Keywords,Category,Releases');
-    expect(csvContent).toContain('"image1.jpg"');
-    expect(csvContent).toContain('"Beautiful sunset"');
-    expect(csvContent).toContain('"Nature"');
-  });
-
-  it('should create Shutterstock CSV with correct headers', () => {
-    downloadAgencyCSV('shutterstock', mockItems);
-
-    const blobArg = mockCreateObjectURL.mock.calls[0][0] as { parts: string[] };
-    const csvContent = blobArg.parts[0];
-
-    expect(csvContent).toContain('Filename,Description,Keywords');
-    expect(csvContent).not.toContain('Category');
-  });
-
-  it('should create Vecteezy CSV with correct headers', () => {
-    downloadAgencyCSV('vecteezy', mockItems);
-
-    const blobArg = mockCreateObjectURL.mock.calls[0][0] as { parts: string[] };
-    const csvContent = blobArg.parts[0];
-
-    expect(csvContent).toContain('Filename,Title,Description,Keywords');
-  });
-
-  it('should create Freepik CSV with lowercase headers', () => {
-    downloadAgencyCSV('freepik', mockItems);
-
-    const blobArg = mockCreateObjectURL.mock.calls[0][0] as { parts: string[] };
-    const csvContent = blobArg.parts[0];
-
-    expect(csvContent).toContain('filename,title,keywords');
-  });
-
-  it('should create Dreamstime CSV with correct headers', () => {
-    downloadAgencyCSV('dreamstime', mockItems);
-
-    const blobArg = mockCreateObjectURL.mock.calls[0][0] as { parts: string[] };
-    const csvContent = blobArg.parts[0];
-
-    expect(csvContent).toContain('filename,title,description,keywords');
-  });
-
-  it('should escape double quotes in values', () => {
-    const itemsWithQuotes: ItemMetaBox[] = [
-      {
-        id: '1',
-        filename: 'test.jpg',
-        fileType: 'photo',
-        assetType: 'image',
-        createdAt: Date.now(),
-        meta: {
-          title: 'A "quoted" title',
-          description: 'Description with "quotes"',
-          keywords: 'test',
+    it('should truncate titles longer than 70 characters', () => {
+      const longTitleItem: ItemMetaBox[] = [
+        {
+          id: 'long',
+          filename: 'test.jpg',
+          fileType: 'photo',
+          assetType: 'image',
+          createdAt: Date.now(),
+          meta: {
+            title:
+              'This is a ridiculously long title that definitely exceeds the seventy character maximum limit allowed by Adobe Stock specifications',
+            description: 'Long description',
+            keywords: 'test',
+          },
         },
-      },
-    ];
+      ];
 
-    downloadAgencyCSV('adobe', itemsWithQuotes);
-
-    const blobArg = mockCreateObjectURL.mock.calls[0][0] as { parts: string[] };
-    const csvContent = blobArg.parts[0];
-
-    expect(csvContent).toContain('""quoted""');
+      const csv = generateAgencyCSV('adobe', longTitleItem);
+      // Header line + 1 row
+      const lines = csv.split('\r\n');
+      // Row is: "test.jpg","<sanitized_title>","test","",""
+      const columns = lines[1].split('","');
+      const title = columns[1].replace(/"/g, '');
+      expect(title.length).toBeLessThanOrEqual(70);
+    });
   });
 
-  it('should trigger download', () => {
-    downloadAgencyCSV('adobe', mockItems);
+  describe('Shutterstock CSV', () => {
+    it('should generate Shutterstock CSV with 7 mandatory columns in correct order', () => {
+      const csv = generateAgencyCSV('shutterstock', mockItems);
 
-    expect(mockClick).toHaveBeenCalled();
-    expect(mockRevokeObjectURL).toHaveBeenCalled();
+      expect(csv).toContain(
+        'Filename,Description,Keywords,Categories,Illustration,Mature Content,Editorial'
+      );
+      // Row 1: photo
+      expect(csv).toContain('"image1.jpg"');
+      expect(csv).toContain('"Nature"');
+      expect(csv).toContain('"No"'); // illustration = No for photo
+
+      // Row 2: vector
+      expect(csv).toContain('"vector-art.eps"');
+      expect(csv).toContain('"Backgrounds/Textures"');
+      expect(csv).toContain('"Yes"'); // illustration = Yes
+    });
+  });
+
+  describe('Vecteezy CSV', () => {
+    it('should include License column and respect license value', () => {
+      const csv = generateAgencyCSV('vecteezy', mockItems);
+
+      expect(csv).toContain('Filename,Title,Description,Keywords,License');
+      expect(csv).toContain('"pro"');
+    });
+
+    it('should strip file extension when vecteezyFtpMode is enabled', () => {
+      const csv = generateAgencyCSV('vecteezy', mockItems, { vecteezyFtpMode: true });
+
+      expect(csv).toContain('"image1"');
+      expect(csv).not.toContain('"image1.jpg"');
+      expect(csv).toContain('"vector-art"');
+      expect(csv).not.toContain('"vector-art.eps"');
+    });
+
+    it('should include Id column if items have vecteezyId', () => {
+      const itemsWithId: ItemMetaBox[] = [
+        {
+          ...mockItems[0],
+          meta: {
+            ...mockItems[0].meta!,
+            vecteezyId: 'VZ-998811',
+          },
+        },
+      ];
+
+      const csv = generateAgencyCSV('vecteezy', itemsWithId);
+      expect(csv).toContain('Id,Filename,Title,Description,Keywords,License');
+      expect(csv).toContain('"VZ-998811"');
+    });
+  });
+
+  describe('Freepik / Magnific CSV', () => {
+    it('should use semicolon as column delimiter and title case headers', () => {
+      const csv = generateAgencyCSV('freepik', mockItems);
+
+      // Delimiter is semicolon
+      expect(csv).toContain('File name;Title;Keywords;Prompt;Model');
+      // Keywords inside are comma-separated
+      expect(csv).toContain('"sunset,ocean,sky,nature"');
+    });
+
+    it('should automatically append _ai_generated tag for AI generated assets', () => {
+      const csv = generateAgencyCSV('freepik', mockItems);
+
+      // Row 2 is aiGenerated = true
+      expect(csv).toContain('_ai_generated');
+      expect(csv).toContain('"Geometric vector patterns with gold details"');
+      expect(csv).toContain('"Midjourney 6"');
+    });
+  });
+
+  describe('Dreamstime CSV', () => {
+    it('should generate Dreamstime CSV with correct format', () => {
+      const csv = generateAgencyCSV('dreamstime', mockItems);
+
+      expect(csv).toContain('Filename,Title,Description,Keywords');
+      expect(csv).toContain('"image1.jpg"');
+    });
+  });
+
+  describe('CSV Escaping and Browser Trigger', () => {
+    it('should escape double quotes in values', () => {
+      const itemsWithQuotes: ItemMetaBox[] = [
+        {
+          id: '1',
+          filename: 'test.jpg',
+          fileType: 'photo',
+          assetType: 'image',
+          createdAt: Date.now(),
+          meta: {
+            title: 'A "quoted" title',
+            description: 'Description with "quotes"',
+            keywords: 'test',
+          },
+        },
+      ];
+
+      const csv = generateAgencyCSV('adobe', itemsWithQuotes);
+      expect(csv).toContain('""quoted""');
+    });
+
+    it('should trigger browser download with correct filename', () => {
+      downloadAgencyCSV('adobe', mockItems);
+
+      expect(mockCreateObjectURL).toHaveBeenCalled();
+      expect(mockClick).toHaveBeenCalled();
+      expect(mockRevokeObjectURL).toHaveBeenCalled();
+    });
   });
 });
