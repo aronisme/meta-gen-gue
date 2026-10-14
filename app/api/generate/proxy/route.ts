@@ -1,5 +1,6 @@
 import { NextRequest } from 'next/server';
 
+export const runtime = 'edge';
 
 function extractJson(text: string): Record<string, unknown> {
   let cleaned = text.trim();

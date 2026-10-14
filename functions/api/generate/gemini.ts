@@ -1,0 +1,142 @@
+// Cloudflare Pages Function: /api/generate/gemini
+
+const ALLOWED_MODELS = [
+  'gemini-3.1-pro-preview',
+  'gemini-3-flash-preview',
+  'gemini-3.1-flash-lite',
+  'gemini-3.5-flash',
+  'gemini-2.5-flash-lite'
+];
+
+const responseSchema = {
+  type: 'OBJECT',
+  properties: {
+    title: { type: 'STRING' },
+    description: { type: 'STRING' },
+    keywords: { type: 'STRING' },
+    category: { type: 'STRING' },
+    shutterstockCategory: { type: 'STRING' }
+  },
+  required: ['title', 'description', 'keywords']
+} as const;
+
+const instructionCache = new Map<string, string>();
+
+function isValidApiKey(key: string): boolean {
+  return typeof key === 'string' && key.startsWith('AIza') && key.length >= 30;
+}
+
+function isValidDataUrl(url: string): boolean {
+  return typeof url === 'string' && /^data:image\/[a-z]+;base64,/i.test(url);
+}
+
+function isValidModel(model: string): boolean {
+  return typeof model === 'string' && ALLOWED_MODELS.includes(model);
+}
+
+function parseDataUrl(dataUrl: string): { mime: string; base64: string } {
+  const m = /^data:([^;]+);base64,(.*)$/i.exec(dataUrl);
+  if (!m) throw new Error('Invalid data URL');
+  return { mime: m[1], base64: m[2] };
+}
+
+const sleep = (ms: number) => new Promise(resolve => setTimeout(resolve, ms));
+
+export async function onRequestPost(context: { request: Request }) {
+  try {
+    await sleep(2000);
+
+    const body = await context.request.json();
+    const { apiKey, model, instruction, instructionHash, imageDataUrl } = body as {
+      apiKey: string;
+      model: string;
+      instruction?: string;
+      instructionHash?: string;
+      imageDataUrl: string;
+    };
+
+    if (!apiKey) return new Response('Missing apiKey', { status: 400 });
+    if (!isValidApiKey(apiKey)) return new Response('Invalid API key format', { status: 400 });
+    if (!model) return new Response('Missing model', { status: 400 });
+    if (!isValidModel(model)) return new Response(`Invalid model. Allowed: ${ALLOWED_MODELS.join(', ')}`, { status: 400 });
+    if (!imageDataUrl) return new Response('Missing imageDataUrl', { status: 400 });
+    if (!isValidDataUrl(imageDataUrl)) return new Response('Invalid image data URL format', { status: 400 });
+
+    if (instruction && instructionHash && !instructionCache.has(instructionHash)) {
+      instructionCache.set(instructionHash, instruction);
+    }
+    const sys = instructionCache.get(instructionHash ?? '') ?? instruction ?? '';
+
+    const { mime, base64 } = parseDataUrl(imageDataUrl);
+
+    const payload: Record<string, unknown> = {
+      ...(sys ? { systemInstruction: { role: 'user', parts: [{ text: sys }] } } : {}),
+      contents: [
+        {
+          role: 'user',
+          parts: [
+            { text: 'Analyze the image and return strict JSON.' },
+            { inline_data: { mime_type: mime, data: base64 } }
+          ]
+        }
+      ],
+      generationConfig: {
+        responseMimeType: 'application/json',
+        responseSchema
+      }
+    };
+
+    const resp = await fetch(
+      `https://generativelanguage.googleapis.com/v1beta/models/${model}:generateContent`,
+      {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          'x-goog-api-key': apiKey
+        },
+        body: JSON.stringify(payload)
+      }
+    );
+
+    const text = await resp.text();
+    if (!resp.ok) {
+      return new Response(`Gemini error (${resp.status}): ${text}`, { status: 500 });
+    }
+
+    try {
+      const json = JSON.parse(text) as {
+        candidates?: { content?: { parts?: { text?: string; inline_data?: { data?: string } }[] } }[];
+      };
+      const candidateText =
+        json.candidates?.[0]?.content?.parts?.[0]?.text ??
+        json.candidates?.[0]?.content?.parts?.[0]?.inline_data?.data;
+      const out = typeof candidateText === 'string' ? candidateText : text;
+      return new Response(out, {
+        headers: {
+          'Content-Type': 'application/json',
+          'Access-Control-Allow-Origin': '*'
+        }
+      });
+    } catch {
+      return new Response(text, {
+        headers: {
+          'Content-Type': 'application/json',
+          'Access-Control-Allow-Origin': '*'
+        }
+      });
+    }
+  } catch (e: unknown) {
+    const msg = e instanceof Error ? e.message : String(e);
+    return new Response(`Server error: ${msg}`, { status: 500 });
+  }
+}
+
+export async function onRequestOptions() {
+  return new Response(null, {
+    headers: {
+      'Access-Control-Allow-Origin': '*',
+      'Access-Control-Allow-Methods': 'GET, POST, OPTIONS',
+      'Access-Control-Allow-Headers': 'Content-Type, Authorization',
+    },
+  });
+}

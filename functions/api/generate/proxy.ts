@@ -1,0 +1,228 @@
+// Cloudflare Pages Function: /api/generate/proxy
+
+function extractJson(text: string): Record<string, unknown> {
+  let cleaned = text.trim();
+  cleaned = cleaned.replace(/```(?:json)?\s*([\s\S]*?)\s*```/gi, '$1');
+  cleaned = cleaned.replace(/^```(?:json)?/i, '').replace(/```$/i, '').trim();
+
+  try {
+    const parsed = JSON.parse(cleaned);
+    if (parsed && typeof parsed === 'object') return parsed as Record<string, unknown>;
+  } catch {
+    // continue
+  }
+
+  const start = cleaned.indexOf('{');
+  const end = cleaned.lastIndexOf('}');
+  if (start >= 0 && end > start) {
+    const slice = cleaned.slice(start, end + 1);
+    try {
+      return JSON.parse(slice) as Record<string, unknown>;
+    } catch {
+      const repaired = slice.replace(/,\s*([\]\}])/g, '$1').replace(/[\u0000-\u001F]+/g, ' ');
+      return JSON.parse(repaired) as Record<string, unknown>;
+    }
+  }
+
+  throw new Error('Model did not return valid JSON metadata');
+}
+
+interface ProxyChatChoice {
+  message?: {
+    content?: string;
+  };
+}
+
+interface ProxyChatResponse {
+  error?: string | { message?: string };
+  choices?: ProxyChatChoice[];
+  model?: string;
+  provider?: string;
+  result?: string;
+  output?: string;
+}
+
+let roundRobinIndex = 0;
+
+export async function onRequestPost(context: { request: Request; env: Record<string, string | undefined> }) {
+  const env = context.env || {};
+
+  const PROXY_CLUSTERS = [
+    {
+      name: 'Cluster-1',
+      url:
+        env.GAS_PROXY_URL_1 ||
+        env.GAS_PROXY_URL ||
+        'https://script.google.com/macros/s/AKfycbzB-MWqSfCXRbolr5yFkS33jkRrDw7Y9mjViluIeYJ5_-PJTbyZynrz1gl1K1UW5dKm/exec',
+      token:
+        env.GAS_PROXY_TOKEN_1 ||
+        env.GAS_PROXY_TOKEN ||
+        'gas_live_8b84dd959b764b4296669623'
+    },
+    {
+      name: 'Cluster-2',
+      url:
+        env.GAS_PROXY_URL_2 ||
+        'https://script.google.com/macros/s/AKfycbyxgrWSWQGMYBwbn4mjR_0VaXa6DdkGHmbC3YUJ7cWByxdZ-uJXk76iCYzV1826syjGxA/exec',
+      token:
+        env.GAS_PROXY_TOKEN_2 ||
+        'gas_live_8b84dd959b764b4296669602'
+    }
+  ];
+
+  try {
+    const body = await context.request.json();
+    const { model, instruction, imageDataUrl, imageDataUrls } = body as {
+      model?: string;
+      instruction?: string;
+      imageDataUrl?: string;
+      imageDataUrls?: string[];
+    };
+
+    const images: string[] = Array.isArray(imageDataUrls) && imageDataUrls.length > 0
+      ? imageDataUrls
+      : (imageDataUrl ? [imageDataUrl] : []);
+
+    if (images.length === 0) {
+      return new Response('Missing imageDataUrl or imageDataUrls', { status: 400 });
+    }
+
+    const isVideoClip = images.length > 1;
+    const targetModel = (isVideoClip && (!model || model === 'auto'))
+      ? 'gemini-2.5-flash'
+      : (model || 'auto');
+
+    let contentParts: Array<{ type: string; text?: string; image_url?: { url: string } }> = [];
+
+    if (isVideoClip) {
+      const frameCount = images.length;
+      const baseInstruction = instruction || 'Generate microstock metadata for this stock video clip.';
+
+      contentParts.push({
+        type: 'text',
+        text: `${baseInstruction}\n\n=== CHRONOLOGICAL VIDEO KEYFRAME SEQUENCE (${frameCount} FRAMES) ===\nBelow are ${frameCount} sequential keyframes extracted across the duration of this stock video clip (from beginning to end). Examine the temporal progression, character/object movements, camera motion, and action unfolding across these frames:\n`
+      });
+
+      images.forEach((img, idx) => {
+        const pct = Math.round((idx / (frameCount - 1 || 1)) * 100);
+        const positionLabel = idx === 0 ? 'START' : idx === frameCount - 1 ? 'END' : 'MIDDLE';
+        contentParts.push({
+          type: 'text',
+          text: `\n[Keyframe ${idx + 1} of ${frameCount} — ${positionLabel} (Timestamp: ~${pct}% of video duration)]:`
+        });
+        contentParts.push({
+          type: 'image_url',
+          image_url: { url: img }
+        });
+      });
+
+      contentParts.push({
+        type: 'text',
+        text: `\n=== CRITICAL SYNTHESIS REQUIREMENTS ===\n1. DO NOT describe only the first frame. Your title and description MUST describe the overall dynamic action, movement progression, and change that occurs across ALL ${frameCount} keyframes from start to finish.\n2. Include video-specific motion keywords (e.g. actions, walking, panning, zoom, transitioning, sequence, footage) in addition to subject keywords.\n3. Return ONLY a valid JSON object. No explanation, no markdown wrap. Format: {"title": "...", "description": "...", "keywords": "...", "category": "19", "shutterstockCategory": "Technology"}`
+      });
+    } else {
+      const promptText = `${instruction || 'Generate microstock metadata for this image.'}\n\nIMPORTANT: Return ONLY a valid JSON object. No explanation, no markdown. Format: {"title": "...", "description": "...", "keywords": "...", "category": "19", "shutterstockCategory": "Technology"}`;
+      contentParts = [
+        { type: 'text', text: promptText },
+        { type: 'image_url', image_url: { url: images[0] } }
+      ];
+    }
+
+    const payload = {
+      model: targetModel,
+      messages: [
+        {
+          role: 'user',
+          content: contentParts
+        }
+      ],
+      temperature: 0.2
+    };
+
+    const startIdx = roundRobinIndex;
+    roundRobinIndex = (roundRobinIndex + 1) % PROXY_CLUSTERS.length;
+
+    const clusterOrder = [
+      PROXY_CLUSTERS[startIdx],
+      PROXY_CLUSTERS[(startIdx + 1) % PROXY_CLUSTERS.length]
+    ];
+
+    const errors: string[] = [];
+
+    for (const cluster of clusterOrder) {
+      try {
+        const resp = await fetch(cluster.url, {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json',
+            Authorization: `Bearer ${cluster.token}`
+          },
+          body: JSON.stringify(payload),
+          redirect: 'follow'
+        });
+
+        const resText = await resp.text();
+        if (!resp.ok) {
+          throw new Error(`HTTP ${resp.status}: ${resText.slice(0, 150)}`);
+        }
+
+        let parsedResponse: ProxyChatResponse;
+        try {
+          parsedResponse = JSON.parse(resText) as ProxyChatResponse;
+        } catch {
+          throw new Error(`Invalid JSON: ${resText.slice(0, 150)}`);
+        }
+
+        if (parsedResponse.error) {
+          const errMessage =
+            typeof parsedResponse.error === 'string'
+              ? parsedResponse.error
+              : parsedResponse.error.message || JSON.stringify(parsedResponse.error);
+          throw new Error(errMessage);
+        }
+
+        const content =
+          parsedResponse.choices?.[0]?.message?.content ||
+          parsedResponse.result ||
+          parsedResponse.output ||
+          resText;
+
+        const metadataJson = extractJson(content);
+        if (parsedResponse.model) {
+          metadataJson.aiModel = parsedResponse.model;
+        }
+        metadataJson.aiCluster = cluster.name;
+
+        return new Response(JSON.stringify(metadataJson), {
+          headers: {
+            'Content-Type': 'application/json',
+            'Access-Control-Allow-Origin': '*'
+          }
+        });
+
+      } catch (err) {
+        const errorMsg = err instanceof Error ? err.message : String(err);
+        errors.push(`${cluster.name}: ${errorMsg}`);
+      }
+    }
+
+    return new Response(
+      `Semua endpoint GAS Proxy gagal dipanggil:\n${errors.join('\n')}`,
+      { status: 500 }
+    );
+
+  } catch (e: unknown) {
+    const msg = e instanceof Error ? e.message : String(e);
+    return new Response(`Server error: ${msg}`, { status: 500 });
+  }
+}
+
+export async function onRequestOptions() {
+  return new Response(null, {
+    headers: {
+      'Access-Control-Allow-Origin': '*',
+      'Access-Control-Allow-Methods': 'GET, POST, OPTIONS',
+      'Access-Control-Allow-Headers': 'Content-Type, Authorization',
+    },
+  });
+}
