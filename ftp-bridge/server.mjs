@@ -512,6 +512,16 @@ const server = http.createServer(async (req, res) => {
   res.end(JSON.stringify({ ok: false, error: `Endpoint tidak ditemukan: ${pathname}` }));
 });
 
+server.on('error', (err) => {
+  if (err.code === 'EADDRINUSE') {
+    log('INFO', `Port ${PORT} sudah digunakan oleh proses lain (mungkin bridge sudah aktif di latar belakang).`, c.yellow);
+    process.exit(0);
+  } else {
+    log('ERROR', `Server bridge error: ${err.message}`, c.red);
+    process.exit(1);
+  }
+});
+
 server.listen(PORT, HOST, () => {
   console.log(`
 ${c.cyan}================================================================${c.reset}
@@ -535,6 +545,12 @@ process.on('SIGINT', () => {
   log('STOP', 'Menghentikan MetaGen Local FTP Bridge...', c.yellow);
   server.close(() => {
     log('STOP', 'Bridge dihentikan.', c.gray);
+    process.exit(0);
+  });
+});
+
+process.on('SIGTERM', () => {
+  server.close(() => {
     process.exit(0);
   });
 });
