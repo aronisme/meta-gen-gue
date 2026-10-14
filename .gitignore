@@ -49,4 +49,5 @@ test-results/
 ftp-bridge/accounts.json
 extracted_ftp_accounts.json
 scratch/
-.agents/
+.agents/*
+!.agents/memory/
