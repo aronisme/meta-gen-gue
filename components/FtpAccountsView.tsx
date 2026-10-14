@@ -35,6 +35,7 @@ import {
   deleteFtpProfile,
   getActiveFtpProfileId,
   loadFtpProfiles,
+  syncFtpProfilesWithBridge,
   loadUploadLedger,
   sanitizeFtpHost,
   saveFtpProfile,
@@ -157,6 +158,26 @@ export function FtpAccountsView({ onNavigateToQueue, onProfilesChange }: FtpAcco
     setActiveAccountId(id);
     await setActiveFtpProfileId(id);
     toast.success(`Akun default aktif diubah ke: "${label}"`);
+  };
+
+  const [isSyncing, setIsSyncing] = useState(false);
+
+  const handleSyncFromBridge = async () => {
+    setIsSyncing(true);
+    try {
+      const list = await syncFtpProfilesWithBridge();
+      setProfiles(list);
+      onProfilesChange?.(list);
+      if (list.length > 0) {
+        toast.success(`Berhasil memulihkan ${list.length} akun FTP dari bridge lokal!`);
+      } else {
+        toast.info('Belum ada akun di bridge lokal.');
+      }
+    } catch {
+      toast.error('Gagal menyinkronkan: pastikan start-ftp-bridge.bat sedang berjalan.');
+    } finally {
+      setIsSyncing(false);
+    }
   };
 
   // Test Connection
@@ -407,6 +428,20 @@ export function FtpAccountsView({ onNavigateToQueue, onProfilesChange }: FtpAcco
                   );
                 }
               )}
+              <div className="ml-auto">
+                <Button
+                  type="button"
+                  variant="outline"
+                  size="sm"
+                  onClick={handleSyncFromBridge}
+                  disabled={isSyncing}
+                  className="border-2 border-[#2c1810] bg-white hover:bg-[#fff5e6] text-[#2c1810] font-black text-xs h-7 px-3 cursor-pointer shadow-[2px_2px_0_#2c1810]"
+                  title="Sinkronkan akun FTP dari file accounts.json di komputer lokal via bridge"
+                >
+                  <RefreshCw className={`w-3.5 h-3.5 mr-1.5 ${isSyncing ? 'animate-spin' : ''}`} />
+                  <span>{isSyncing ? 'Menyinkronkan...' : 'Sinkronkan dari Bridge'}</span>
+                </Button>
+              </div>
             </div>
           )}
 
@@ -616,14 +651,26 @@ export function FtpAccountsView({ onNavigateToQueue, onProfilesChange }: FtpAcco
                   <p className="text-xs text-[#6b5344] max-w-sm mx-auto">
                     Tambahkan akun FTP/SFTP agensi microstock Anda untuk mengunggah otomatis file gambar & video.
                   </p>
-                  <Button
-                    type="button"
-                    onClick={() => handleStartAdd()}
-                    className="bg-[#ff6b35] hover:bg-[#e55a2b] text-white font-black text-xs border-2 border-[#2c1810] shadow-[2px_2px_0_#2c1810] px-4 py-2 cursor-pointer mt-2"
-                  >
-                    <Plus className="w-3.5 h-3.5 mr-1.5" />
-                    Tambah Akun Pertama
-                  </Button>
+                  <div className="flex items-center justify-center gap-3 pt-2 flex-wrap">
+                    <Button
+                      type="button"
+                      onClick={() => handleStartAdd()}
+                      className="bg-[#ff6b35] hover:bg-[#e55a2b] text-white font-black text-xs border-2 border-[#2c1810] shadow-[2px_2px_0_#2c1810] px-4 py-2 cursor-pointer"
+                    >
+                      <Plus className="w-3.5 h-3.5 mr-1.5" />
+                      Tambah Akun Pertama
+                    </Button>
+                    <Button
+                      type="button"
+                      variant="outline"
+                      onClick={handleSyncFromBridge}
+                      disabled={isSyncing}
+                      className="border-2 border-[#2c1810] bg-white hover:bg-[#fff5e6] text-[#2c1810] font-black text-xs px-4 py-2 cursor-pointer shadow-[2px_2px_0_#2c1810]"
+                    >
+                      <RefreshCw className={`w-3.5 h-3.5 mr-1.5 ${isSyncing ? 'animate-spin' : ''}`} />
+                      <span>{isSyncing ? 'Menyinkronkan...' : 'Pulihkan dari Bridge'}</span>
+                    </Button>
+                  </div>
                 </div>
               ) : (
                 <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-5">

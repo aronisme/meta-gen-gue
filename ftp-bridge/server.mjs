@@ -6,8 +6,14 @@
  */
 
 import http from 'http';
+import fs from 'fs';
+import path from 'path';
+import { fileURLToPath } from 'url';
 import { Readable } from 'stream';
 import { embedMetadataInFile } from './embed.mjs';
+
+const __filename = fileURLToPath(import.meta.url);
+const __dirname = path.dirname(__filename);
 
 const PORT = parseInt(process.env.PORT || '45678', 10);
 const HOST = '0.0.0.0'; // Dengarkan di semua interface lokal (127.0.0.1 & localhost)
@@ -304,6 +310,46 @@ const server = http.createServer(async (req, res) => {
     res.writeHead(200, { 'Content-Type': 'application/json' });
     res.end(JSON.stringify(healthData));
     return;
+  }
+
+  // 1.5 Profiles persistence endpoint (Syncs accounts across domains/origins)
+  if (pathname === '/api/ftp/profiles' || pathname === '/profiles') {
+    const ACCOUNTS_FILE = path.join(__dirname, 'accounts.json');
+
+    if (req.method === 'GET') {
+      try {
+        if (fs.existsSync(ACCOUNTS_FILE)) {
+          const content = fs.readFileSync(ACCOUNTS_FILE, 'utf-8');
+          res.writeHead(200, { 'Content-Type': 'application/json' });
+          res.end(content || '[]');
+        } else {
+          res.writeHead(200, { 'Content-Type': 'application/json' });
+          res.end('[]');
+        }
+      } catch (err) {
+        res.writeHead(500, { 'Content-Type': 'application/json' });
+        res.end(JSON.stringify({ ok: false, error: String(err) }));
+      }
+      return;
+    }
+
+    if (req.method === 'POST') {
+      let bodyText = '';
+      req.on('data', (chunk) => { bodyText += chunk; });
+      req.on('end', () => {
+        try {
+          const list = JSON.parse(bodyText || '[]');
+          fs.writeFileSync(ACCOUNTS_FILE, JSON.stringify(list, null, 2), 'utf-8');
+          log('PROFILES', `Menyimpan ${list.length} profil akun FTP ke accounts.json`, c.green);
+          res.writeHead(200, { 'Content-Type': 'application/json' });
+          res.end(JSON.stringify({ ok: true, count: list.length }));
+        } catch (err) {
+          res.writeHead(400, { 'Content-Type': 'application/json' });
+          res.end(JSON.stringify({ ok: false, error: String(err) }));
+        }
+      });
+      return;
+    }
   }
 
   // 2. Test FTP Connection endpoint

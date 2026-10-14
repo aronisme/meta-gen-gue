@@ -45,4 +45,8 @@ next-env.d.ts
 *.png
 playwright-report/
 test-results/
+# local accounts & scratch
+ftp-bridge/accounts.json
+extracted_ftp_accounts.json
+scratch/
 .agents/

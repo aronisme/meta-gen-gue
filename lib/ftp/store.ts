@@ -108,17 +108,72 @@ export const AGENCY_PRESETS: Record<MicrostockAgencyId, AgencyPresetInfo> = {
 };
 
 /* =========================================================================
- * 1. Account Profiles Management (IndexedDB)
+ * 1. Account Profiles Management (IndexedDB + Bridge Local File Sync)
  * ========================================================================= */
+
+const BRIDGE_PROFILES_URL = 'http://127.0.0.1:45678/api/ftp/profiles';
+
+async function syncWithBridge(list?: FtpAccountProfile[]): Promise<FtpAccountProfile[] | null> {
+  if (typeof window === 'undefined') return null;
+  try {
+    if (list) {
+      await fetch(BRIDGE_PROFILES_URL, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(list),
+        signal: AbortSignal.timeout(2000),
+      });
+      return list;
+    } else {
+      const resp = await fetch(BRIDGE_PROFILES_URL, { signal: AbortSignal.timeout(2000) });
+      if (resp.ok) {
+        const fromBridge = (await resp.json()) as FtpAccountProfile[];
+        if (Array.isArray(fromBridge) && fromBridge.length > 0) {
+          return fromBridge;
+        }
+      }
+    }
+  } catch {
+    // Bridge offline or not reachable, silently fallback
+  }
+  return null;
+}
 
 export async function loadFtpProfiles(): Promise<FtpAccountProfile[]> {
   try {
     const list = await get<FtpAccountProfile[]>(STORAGE_KEYS.ACCOUNTS);
+    // Jika IndexedDB kosong, otomatis tarik dari Bridge lokal
+    if (!Array.isArray(list) || list.length === 0) {
+      const fromBridge = await syncWithBridge();
+      if (fromBridge && fromBridge.length > 0) {
+        await set(STORAGE_KEYS.ACCOUNTS, fromBridge);
+        const activeId = await getActiveFtpProfileId();
+        if (!activeId) {
+          await setActiveFtpProfileId(fromBridge[0].id);
+        }
+        return fromBridge;
+      }
+    }
     return Array.isArray(list) ? list : [];
   } catch (err) {
     console.error('[FTP Store] Gagal memuat daftar akun:', err);
     return [];
   }
+}
+
+export async function syncFtpProfilesWithBridge(): Promise<FtpAccountProfile[]> {
+  const fromBridge = await syncWithBridge();
+  if (fromBridge && fromBridge.length > 0) {
+    const current = (await get<FtpAccountProfile[]>(STORAGE_KEYS.ACCOUNTS)) || [];
+    const mergedMap = new Map<string, FtpAccountProfile>();
+    fromBridge.forEach((p) => mergedMap.set(p.id, p));
+    current.forEach((p) => mergedMap.set(p.id, p));
+    const merged = Array.from(mergedMap.values());
+    await set(STORAGE_KEYS.ACCOUNTS, merged);
+    syncWithBridge(merged).catch(() => {});
+    return merged;
+  }
+  return loadFtpProfiles();
 }
 
 export async function saveFtpProfile(
@@ -140,6 +195,7 @@ export async function saveFtpProfile(
     : [...current, updatedProfile];
 
   await set(STORAGE_KEYS.ACCOUNTS, nextList);
+  syncWithBridge(nextList).catch(() => {});
   return updatedProfile;
 }
 
@@ -147,6 +203,7 @@ export async function deleteFtpProfile(id: string): Promise<void> {
   const current = await loadFtpProfiles();
   const nextList = current.filter((p) => p.id !== id);
   await set(STORAGE_KEYS.ACCOUNTS, nextList);
+  syncWithBridge(nextList).catch(() => {});
 
   const activeId = await getActiveFtpProfileId();
   if (activeId === id) {
@@ -165,6 +222,7 @@ export async function getActiveFtpProfileId(): Promise<string | null> {
 export async function setActiveFtpProfileId(id: string | null): Promise<void> {
   await set(STORAGE_KEYS.ACTIVE_ACCOUNT, id);
 }
+
 
 /* =========================================================================
  * 2. Deterministic File Fingerprint (SHA-256)
