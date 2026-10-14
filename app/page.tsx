@@ -1,7 +1,7 @@
 'use client';
 
 import { useCallback, useEffect, useMemo, useState } from 'react';
-import { History as HistoryIcon, Key, Sparkles, UploadCloud, Zap } from 'lucide-react';
+import { History as HistoryIcon, Key, RefreshCw, Sparkles, UploadCloud, Zap } from 'lucide-react';
 import { nanoid } from 'nanoid/non-secure';
 
 import { StudioPanel } from '@/components/StudioPanel';
@@ -224,6 +224,19 @@ export default function App() {
   const [hist, setHist] = useState<{ items: ItemMetaBox[]; total: number }>({ items: [], total: 0 });
   const [selectedIds, setSelectedIds] = useState<Set<string>>(new Set());
   const [ftpProfilesCount, setFtpProfilesCount] = useState<number>(0);
+
+  // Background upload state shared with FtpQueueView
+  const [uploadProgressState, setUploadProgressState] = useState<{
+    isUploading: boolean;
+    completedCount: number;
+    totalCount: number;
+    currentFilename?: string;
+    speed?: string;
+  }>({
+    isUploading: false,
+    completedCount: 0,
+    totalCount: 0,
+  });
 
   // Sync count of FTP profiles
   useEffect(() => {
@@ -693,184 +706,232 @@ export default function App() {
   return (
     <div className="min-h-screen flex flex-col md:flex-row bg-[#fffaf0] text-[#2c1810]">
       {/* Primary Side Rail Navigation (left vertical icon strip) */}
-      <AppSideRail activeModule={activeModule} onModuleChange={setActiveModule} />
+      <AppSideRail
+        activeModule={activeModule}
+        onModuleChange={setActiveModule}
+        isUploadingInBackground={uploadProgressState.isUploading && activeModule !== 'metadata'}
+      />
 
       {/* Main Content Area */}
       <main className="flex-1 min-w-0 max-w-[1536px] mx-auto p-4 md:p-6 lg:p-8 space-y-6 w-full">
         {/* Module 1: Metadata Generator & Multi-FTP Suite */}
-        {activeModule === 'metadata' && (
-          <>
-            {/* Sleek Editorial Header Bar */}
-            <div className="bg-white border-2 border-[#2c1810] shadow-[5px_5px_0_#2c1810] rounded-2xl px-5 py-3.5 flex flex-col md:flex-row md:items-center justify-between gap-4">
-              <div className="flex items-center gap-3">
-                <div className="w-10 h-10 rounded-xl bg-[#ff6b35] border-2 border-[#2c1810] shadow-[2px_2px_0_#2c1810] flex items-center justify-center text-white">
-                  <Zap className="w-5 h-5 fill-current" />
-                </div>
-                <div>
-                  <h1 className="text-xl md:text-2xl font-black tracking-tight text-[#2c1810]">
-                    MetaGen Studio
-                  </h1>
-                </div>
+        <div className={activeModule === 'metadata' ? 'space-y-6' : 'hidden'}>
+          {/* Sleek Editorial Header Bar */}
+          <div className="bg-white border-2 border-[#2c1810] shadow-[5px_5px_0_#2c1810] rounded-2xl px-5 py-3.5 flex flex-col md:flex-row md:items-center justify-between gap-4">
+            <div className="flex items-center gap-3">
+              <div className="w-10 h-10 rounded-xl bg-[#ff6b35] border-2 border-[#2c1810] shadow-[2px_2px_0_#2c1810] flex items-center justify-center text-white">
+                <Zap className="w-5 h-5 fill-current" />
               </div>
-
-              {/* Navigation Tabs in Top Bar */}
-              <div className="flex items-center gap-2 flex-wrap">
-                <div className="inline-flex p-1 rounded-xl bg-[#fff5e6] border-2 border-[#2c1810] shadow-[2px_2px_0_#2c1810] text-[#2c1810]">
-                  <button
-                    onClick={() => setTab('generate')}
-                    className={`rounded-lg px-3.5 py-1.5 font-bold text-xs uppercase tracking-wider transition-all flex items-center gap-1.5 cursor-pointer ${
-                      tab === 'generate'
-                        ? 'bg-[#ff6b35] text-white shadow-[2px_2px_0_#2c1810] border-2 border-[#2c1810]'
-                        : 'text-[#2c1810] hover:bg-[#ffebd1]'
-                    }`}
-                  >
-                    <Sparkles className="w-3.5 h-3.5" />
-                    <span>Studio</span>
-                  </button>
-                  <button
-                    onClick={() => setTab('history')}
-                    className={`rounded-lg px-3.5 py-1.5 font-bold text-xs uppercase tracking-wider transition-all flex items-center gap-1.5 cursor-pointer ${
-                      tab === 'history'
-                        ? 'bg-[#ff6b35] text-white shadow-[2px_2px_0_#2c1810] border-2 border-[#2c1810]'
-                        : 'text-[#2c1810] hover:bg-[#ffebd1]'
-                    }`}
-                  >
-                    <HistoryIcon className="w-3.5 h-3.5" />
-                    <span>Riwayat ({hist.total})</span>
-                  </button>
-                  <button
-                    onClick={() => setTab('upload')}
-                    className={`rounded-lg px-3.5 py-1.5 font-bold text-xs uppercase tracking-wider transition-all flex items-center gap-1.5 cursor-pointer ${
-                      tab === 'upload'
-                        ? 'bg-[#ff6b35] text-white shadow-[2px_2px_0_#2c1810] border-2 border-[#2c1810]'
-                        : 'text-[#2c1810] hover:bg-[#ffebd1]'
-                    }`}
-                  >
-                    <UploadCloud className="w-3.5 h-3.5" />
-                    <span>Antrean Upload ({items.length})</span>
-                  </button>
-                  <button
-                    onClick={() => setTab('accounts')}
-                    className={`rounded-lg px-3.5 py-1.5 font-bold text-xs uppercase tracking-wider transition-all flex items-center gap-1.5 cursor-pointer ${
-                      tab === 'accounts'
-                        ? 'bg-[#ff6b35] text-white shadow-[2px_2px_0_#2c1810] border-2 border-[#2c1810]'
-                        : 'text-[#2c1810] hover:bg-[#ffebd1]'
-                    }`}
-                  >
-                    <Key className="w-3.5 h-3.5" />
-                    <span>Kelola Akun ({ftpProfilesCount})</span>
-                  </button>
-                </div>
+              <div>
+                <h1 className="text-xl md:text-2xl font-black tracking-tight text-[#2c1810]">
+                  MetaGen Studio
+                </h1>
               </div>
             </div>
 
-            {/* 1. Studio View */}
-            {tab === 'generate' && (
-              <div className="grid grid-cols-1 lg:grid-cols-12 gap-6 items-start">
-                {/* Left Column: Unified Studio Control Panel */}
-                <div className="lg:col-span-4 xl:col-span-3 lg:sticky lg:top-6">
-                  <StudioPanel
-                    files={files}
-                    busy={busy}
-                    progress={progress}
-                    statusText={statusText}
-                    hasVideoFiles={hasVideoFiles}
-                    onFilesChange={setFiles}
-                    onGenerate={runGeneration}
-                    existingItemFilenames={items.map((it) => it.filename)}
-                    model={model}
-                    onModelChange={setModel}
-                    gasProxyModels={GAS_PROXY_MODELS}
-                    fileType={fileType}
-                    titleLength={titleLength}
-                    descriptionLength={descriptionLength}
-                    keywordsCount={keywordsCount}
-                    extra={extra}
-                    onFileTypeChange={setFileType}
-                    onTitleLengthChange={setTitleLength}
-                    onDescriptionLengthChange={setDescriptionLength}
-                    onKeywordsCountChange={setKeywordsCount}
-                    onExtraChange={setExtra}
-                  />
-                </div>
-
-                {/* Right Column: Studio Live Output, Quick Edit & CSV Export */}
-                <div className="lg:col-span-8 xl:col-span-9 min-w-0">
-                  <ResultsCard
-                    items={items}
-                    onPatchMeta={patchItemMeta}
-                    onSave={saveEdits}
-                    onTidy={tidyKeywords}
-                    onRegenerate={regenerate}
-                    onChipDrop={onChipDrop}
-                    onNewSession={handleNewSession}
-                    sessionTitle={currentSession?.title}
-                    onUpdateSessionTitle={handleUpdateSessionTitle}
-                    onOpenFtpUpload={() => setTab('upload')}
-                  />
-                </div>
+            {/* Navigation Tabs in Top Bar */}
+            <div className="flex items-center gap-2 flex-wrap">
+              <div className="inline-flex p-1 rounded-xl bg-[#fff5e6] border-2 border-[#2c1810] shadow-[2px_2px_0_#2c1810] text-[#2c1810]">
+                <button
+                  onClick={() => setTab('generate')}
+                  className={`rounded-lg px-3.5 py-1.5 font-bold text-xs uppercase tracking-wider transition-all flex items-center gap-1.5 cursor-pointer ${
+                    tab === 'generate'
+                      ? 'bg-[#ff6b35] text-white shadow-[2px_2px_0_#2c1810] border-2 border-[#2c1810]'
+                      : 'text-[#2c1810] hover:bg-[#ffebd1]'
+                  }`}
+                >
+                  <Sparkles className="w-3.5 h-3.5" />
+                  <span>Studio</span>
+                </button>
+                <button
+                  onClick={() => setTab('history')}
+                  className={`rounded-lg px-3.5 py-1.5 font-bold text-xs uppercase tracking-wider transition-all flex items-center gap-1.5 cursor-pointer ${
+                    tab === 'history'
+                      ? 'bg-[#ff6b35] text-white shadow-[2px_2px_0_#2c1810] border-2 border-[#2c1810]'
+                      : 'text-[#2c1810] hover:bg-[#ffebd1]'
+                  }`}
+                >
+                  <HistoryIcon className="w-3.5 h-3.5" />
+                  <span>Riwayat ({hist.total})</span>
+                </button>
+                <button
+                  onClick={() => setTab('upload')}
+                  className={`rounded-lg px-3.5 py-1.5 font-bold text-xs uppercase tracking-wider transition-all flex items-center gap-1.5 cursor-pointer relative ${
+                    tab === 'upload'
+                      ? 'bg-[#ff6b35] text-white shadow-[2px_2px_0_#2c1810] border-2 border-[#2c1810]'
+                      : uploadProgressState.isUploading
+                      ? 'bg-[#ffe4d6] text-[#ff6b35] border-2 border-[#ff6b35] animate-pulse shadow-[2px_2px_0_#ff6b35]'
+                      : 'text-[#2c1810] hover:bg-[#ffebd1]'
+                  }`}
+                >
+                  {uploadProgressState.isUploading ? (
+                    <RefreshCw className="w-3.5 h-3.5 animate-spin text-[#ff6b35]" />
+                  ) : (
+                    <UploadCloud className="w-3.5 h-3.5" />
+                  )}
+                  <span>
+                    {uploadProgressState.isUploading
+                      ? `Mengunggah (${uploadProgressState.completedCount}/${uploadProgressState.totalCount})`
+                      : `Antrean Upload (${items.length})`}
+                  </span>
+                  {uploadProgressState.isUploading && (
+                    <span className="w-2 h-2 rounded-full bg-emerald-500 animate-ping absolute -top-1 -right-1" />
+                  )}
+                </button>
+                <button
+                  onClick={() => setTab('accounts')}
+                  className={`rounded-lg px-3.5 py-1.5 font-bold text-xs uppercase tracking-wider transition-all flex items-center gap-1.5 cursor-pointer ${
+                    tab === 'accounts'
+                      ? 'bg-[#ff6b35] text-white shadow-[2px_2px_0_#2c1810] border-2 border-[#2c1810]'
+                      : 'text-[#2c1810] hover:bg-[#ffebd1]'
+                  }`}
+                >
+                  <Key className="w-3.5 h-3.5" />
+                  <span>Kelola Akun ({ftpProfilesCount})</span>
+                </button>
               </div>
-            )}
+            </div>
+          </div>
 
-            {/* 2. History View */}
-            {tab === 'history' && (
-              <HistoryCard
-                items={hist.items}
-                total={hist.total}
-                page={histPage}
-                pageSize={pageSize}
-                selectedIds={selectedIds}
-                onPageChange={setHistPage}
-                onToggleSelect={toggleSelect}
-                onToggleSelectAll={toggleSelectAll}
-                onDelete={handleDeleteHistoryItem}
-                onBulkDelete={handleBulkDelete}
-                editable
-                onPatchMeta={patchItemMeta}
-                onSave={saveEdits}
-                onChipDrop={onChipDrop}
-                sessions={sessions}
-                onLoadSession={handleLoadSession}
-                onDeleteSession={handleDeleteSession}
-              />
-            )}
+          {/* 1. Studio View */}
+          <div className={tab === 'generate' ? 'block' : 'hidden'}>
+            <div className="grid grid-cols-1 lg:grid-cols-12 gap-6 items-start">
+              {/* Left Column: Unified Studio Control Panel */}
+              <div className="lg:col-span-4 xl:col-span-3 lg:sticky lg:top-6">
+                <StudioPanel
+                  files={files}
+                  busy={busy}
+                  progress={progress}
+                  statusText={statusText}
+                  hasVideoFiles={hasVideoFiles}
+                  onFilesChange={setFiles}
+                  onGenerate={runGeneration}
+                  existingItemFilenames={items.map((it) => it.filename)}
+                  model={model}
+                  onModelChange={setModel}
+                  gasProxyModels={GAS_PROXY_MODELS}
+                  fileType={fileType}
+                  titleLength={titleLength}
+                  descriptionLength={descriptionLength}
+                  keywordsCount={keywordsCount}
+                  extra={extra}
+                  onFileTypeChange={setFileType}
+                  onTitleLengthChange={setTitleLength}
+                  onDescriptionLengthChange={setDescriptionLength}
+                  onKeywordsCountChange={setKeywordsCount}
+                  onExtraChange={setExtra}
+                />
+              </div>
 
-            {/* 3. Dedicated Full-Page Upload Queue View */}
-            {tab === 'upload' && (
-              <FtpQueueView
-                items={items}
-                files={sessionFiles.length > 0 ? sessionFiles : files}
-                onFilesAttached={(newFiles) => {
-                  setSessionFiles((prev) => {
-                    const map = new Map<string, File>();
-                    for (const f of prev) map.set(f.name.toLowerCase(), f);
-                    for (const f of newFiles) map.set(f.name.toLowerCase(), f);
-                    return Array.from(map.values());
-                  });
-                }}
-                onNavigateToAccounts={() => setTab('accounts')}
-                onNavigateToStudio={() => setTab('generate')}
-              />
-            )}
+              {/* Right Column: Studio Live Output, Quick Edit & CSV Export */}
+              <div className="lg:col-span-8 xl:col-span-9 min-w-0">
+                <ResultsCard
+                  items={items}
+                  onPatchMeta={patchItemMeta}
+                  onSave={saveEdits}
+                  onTidy={tidyKeywords}
+                  onRegenerate={regenerate}
+                  onChipDrop={onChipDrop}
+                  onNewSession={handleNewSession}
+                  sessionTitle={currentSession?.title}
+                  onUpdateSessionTitle={handleUpdateSessionTitle}
+                  onOpenFtpUpload={() => setTab('upload')}
+                />
+              </div>
+            </div>
+          </div>
 
-            {/* 4. Dedicated Full-Page Accounts & Ledger View */}
-            {tab === 'accounts' && (
-              <FtpAccountsView
-                onNavigateToQueue={() => setTab('upload')}
-                onProfilesChange={(pList) => setFtpProfilesCount(pList.length)}
-              />
-            )}
-          </>
-        )}
+          {/* 2. History View */}
+          <div className={tab === 'history' ? 'block' : 'hidden'}>
+            <HistoryCard
+              items={hist.items}
+              total={hist.total}
+              page={histPage}
+              pageSize={pageSize}
+              selectedIds={selectedIds}
+              onPageChange={setHistPage}
+              onToggleSelect={toggleSelect}
+              onToggleSelectAll={toggleSelectAll}
+              onDelete={handleDeleteHistoryItem}
+              onBulkDelete={handleBulkDelete}
+              editable
+              onPatchMeta={patchItemMeta}
+              onSave={saveEdits}
+              onChipDrop={onChipDrop}
+              sessions={sessions}
+              onLoadSession={handleLoadSession}
+              onDeleteSession={handleDeleteSession}
+            />
+          </div>
+
+          {/* 3. Dedicated Full-Page Upload Queue View (Stays mounted during tab switches) */}
+          <div className={tab === 'upload' ? 'block' : 'hidden'}>
+            <FtpQueueView
+              items={items}
+              files={sessionFiles.length > 0 ? sessionFiles : files}
+              onFilesAttached={(newFiles) => {
+                setSessionFiles((prev) => {
+                  const map = new Map<string, File>();
+                  for (const f of prev) map.set(f.name.toLowerCase(), f);
+                  for (const f of newFiles) map.set(f.name.toLowerCase(), f);
+                  return Array.from(map.values());
+                });
+              }}
+              onNavigateToAccounts={() => setTab('accounts')}
+              onNavigateToStudio={() => setTab('generate')}
+              onUploadStateChange={setUploadProgressState}
+            />
+          </div>
+
+          {/* 4. Dedicated Full-Page Accounts & Ledger View */}
+          <div className={tab === 'accounts' ? 'block' : 'hidden'}>
+            <FtpAccountsView
+              onNavigateToQueue={() => setTab('upload')}
+              onProfilesChange={(pList) => setFtpProfilesCount(pList.length)}
+            />
+          </div>
+        </div>
 
         {/* Module 2: AI Stock Prompt Generator */}
-        {activeModule === 'prompt-gen' && (
+        <div className={activeModule === 'prompt-gen' ? 'block' : 'hidden'}>
           <PromptGeneratorView onSwitchToMetadata={() => setActiveModule('metadata')} />
-        )}
+        </div>
 
         {/* Module 3: Microstock Keyword Research */}
-        {activeModule === 'keyword-research' && (
+        <div className={activeModule === 'keyword-research' ? 'block' : 'hidden'}>
           <KeywordResearchView onSwitchToMetadata={() => setActiveModule('metadata')} />
+        </div>
+
+        {/* Floating Background Upload Toast Pill */}
+        {uploadProgressState.isUploading && (tab !== 'upload' || activeModule !== 'metadata') && (
+          <div
+            onClick={() => {
+              setActiveModule('metadata');
+              setTab('upload');
+            }}
+            role="button"
+            tabIndex={0}
+            className="fixed bottom-5 right-5 z-50 bg-[#2c1810] text-white px-4 py-3 rounded-2xl border-2 border-white shadow-[5px_5px_0_#ff6b35] flex items-center gap-3 cursor-pointer hover:scale-105 transition-all select-none animate-bounce"
+            title="Klik untuk membuka Antrean Upload"
+          >
+            <div className="w-8 h-8 rounded-xl bg-[#ff6b35] flex items-center justify-center shrink-0">
+              <RefreshCw className="w-4 h-4 animate-spin text-white" />
+            </div>
+            <div className="text-xs">
+              <div className="font-black flex items-center gap-2">
+                <span>Unggahan Berjalan di Latar</span>
+                <span className="bg-[#ff6b35] text-white px-1.5 py-0.2 rounded text-[10px]">
+                  {uploadProgressState.completedCount}/{uploadProgressState.totalCount} Selesai
+                </span>
+              </div>
+              <div className="text-[11px] text-stone-300 font-medium truncate max-w-[200px]">
+                {uploadProgressState.currentFilename || 'Sedang memproses...'}
+              </div>
+            </div>
+            <span className="text-[10px] bg-white text-[#2c1810] font-black uppercase px-2 py-1 rounded-lg border border-[#2c1810] shadow-[1px_1px_0_#2c1810]">
+              Buka
+            </span>
+          </div>
         )}
       </main>
     </div>

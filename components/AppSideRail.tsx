@@ -20,6 +20,7 @@ export type AppModuleId = 'metadata' | 'prompt-gen' | 'keyword-research';
 export interface AppSideRailProps {
   activeModule: AppModuleId;
   onModuleChange: (mod: AppModuleId) => void;
+  isUploadingInBackground?: boolean;
 }
 
 interface NavItem {
@@ -53,7 +54,11 @@ const NAV_ITEMS: NavItem[] = [
   },
 ];
 
-export function AppSideRail({ activeModule, onModuleChange }: AppSideRailProps) {
+export function AppSideRail({
+  activeModule,
+  onModuleChange,
+  isUploadingInBackground,
+}: AppSideRailProps) {
   const [hoveredItem, setHoveredItem] = useState<AppModuleId | null>(null);
   const [showHelpModal, setShowHelpModal] = useState(false);
 
@@ -80,6 +85,7 @@ export function AppSideRail({ activeModule, onModuleChange }: AppSideRailProps) 
             {NAV_ITEMS.map((item) => {
               const Icon = item.icon;
               const isActive = activeModule === item.id;
+              const isBgUploadOnMeta = item.id === 'metadata' && isUploadingInBackground;
 
               return (
                 <div key={item.id} className="relative flex items-center justify-center w-full">
@@ -102,8 +108,16 @@ export function AppSideRail({ activeModule, onModuleChange }: AppSideRailProps) 
                       <span className="absolute -left-2 top-1/2 -translate-y-1/2 w-1.5 h-6 bg-[#ff6b35] rounded-r-full" />
                     )}
 
+                    {/* Upload in background indicator */}
+                    {isBgUploadOnMeta && (
+                      <span className="absolute -top-1 -right-1 w-3 h-3 bg-[#ff6b35] border-2 border-white rounded-full animate-ping" />
+                    )}
+                    {isBgUploadOnMeta && (
+                      <span className="absolute -top-1 -right-1 w-3 h-3 bg-[#ff6b35] border-2 border-white rounded-full" />
+                    )}
+
                     {/* New Feature Small Badge */}
-                    {item.badge && !isActive && (
+                    {item.badge && !isActive && !isBgUploadOnMeta && (
                       <span className="absolute -top-1 -right-1 w-2.5 h-2.5 bg-[#ff6b35] border border-white rounded-full" />
                     )}
                   </button>

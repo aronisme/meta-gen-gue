@@ -1,6 +1,6 @@
 'use client';
 
-import { useCallback, useEffect, useMemo, useState } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import {
   AlertTriangle,
   CheckCircle2,
@@ -11,6 +11,7 @@ import {
   Maximize2,
   RefreshCw,
   Sparkles,
+  Square,
   Upload,
   X,
 } from 'lucide-react';
@@ -43,6 +44,13 @@ export interface FtpQueueViewProps {
   onFilesAttached?: (files: File[]) => void;
   onNavigateToAccounts?: () => void;
   onNavigateToStudio?: () => void;
+  onUploadStateChange?: (state: {
+    isUploading: boolean;
+    completedCount: number;
+    totalCount: number;
+    currentFilename?: string;
+    speed?: string;
+  }) => void;
 }
 
 interface LocalQueueItem {
@@ -66,6 +74,7 @@ export function FtpQueueView({
   onFilesAttached,
   onNavigateToAccounts,
   onNavigateToStudio,
+  onUploadStateChange,
 }: FtpQueueViewProps) {
   const {
     status: bridgeStatus,
@@ -84,6 +93,11 @@ export function FtpQueueView({
   const [skipDuplicates, setSkipDuplicates] = useState(true);
   const [autoEmbedMetadata, setAutoEmbedMetadata] = useState(true);
   const [isUploading, setIsUploading] = useState(false);
+  const isUploadingRef = useRef(false);
+  const abortUploadRef = useRef(false);
+  const activeAbortControllerRef = useRef<AbortController | null>(null);
+  const [currentUploadingFilename, setCurrentUploadingFilename] = useState<string>('');
+
   const [uploadStats, setUploadStats] = useState<{
     speed: string;
     bytesUploaded: number;
@@ -125,11 +139,28 @@ export function FtpQueueView({
     [profiles, selectedAccountId]
   );
 
+  // Warn on accidental tab close / page refresh while uploading
+  useEffect(() => {
+    const handleBeforeUnload = (e: BeforeUnloadEvent) => {
+      if (isUploading) {
+        e.preventDefault();
+        e.returnValue = '';
+      }
+    };
+    window.addEventListener('beforeunload', handleBeforeUnload);
+    return () => window.removeEventListener('beforeunload', handleBeforeUnload);
+  }, [isUploading]);
+
   // Build Queue & scan duplicates deterministically
   useEffect(() => {
     let isCancelled = false;
 
     async function buildAndScanQueue() {
+      // JANGAN timpa antrean jika proses upload sedang berjalan di latar!
+      if (isUploadingRef.current) {
+        return;
+      }
+
       const fileMap = new Map<string, File>();
       for (const f of availableFiles) {
         fileMap.set(f.name.toLowerCase(), f);
@@ -206,16 +237,42 @@ export function FtpQueueView({
       }
 
       if (isCancelled) return;
-      setQueue(newQueue);
 
-      // Default selection: If skipDuplicates is active, uncheck duplicate items!
-      const initialSelected = new Set<string>();
-      for (const q of newQueue) {
-        if (!skipDuplicates || !q.duplicateInfo?.isDuplicate) {
-          initialSelected.add(q.id);
+      // Pertahankan status (success, error, progress) dari antrean sebelumnya
+      setQueue((prevQueue) => {
+        if (prevQueue.length === 0) return newQueue;
+        const prevMap = new Map<string, LocalQueueItem>();
+        for (const it of prevQueue) {
+          prevMap.set(it.id, it);
+          prevMap.set(it.filename.toLowerCase(), it);
         }
-      }
-      setSelectedQueueIds(initialSelected);
+
+        return newQueue.map((item) => {
+          const prev = prevMap.get(item.id) || prevMap.get(item.filename.toLowerCase());
+          if (prev && prev.status !== 'pending') {
+            return {
+              ...item,
+              status: prev.status,
+              progress: prev.progress,
+              error: prev.error,
+              metadataEmbedded: prev.metadataEmbedded,
+            };
+          }
+          return item;
+        });
+      });
+
+      // Default selection: Pertahankan pilihan user jika sudah ada
+      setSelectedQueueIds((prevSelected) => {
+        if (prevSelected.size > 0) return prevSelected;
+        const initialSelected = new Set<string>();
+        for (const q of newQueue) {
+          if (!skipDuplicates || !q.duplicateInfo?.isDuplicate) {
+            initialSelected.add(q.id);
+          }
+        }
+        return initialSelected;
+      });
     }
 
     void buildAndScanQueue();
@@ -238,6 +295,24 @@ export function FtpQueueView({
     }).length;
   }, [queue, selectedQueueIds, skipDuplicates]);
 
+  // Kirim update status ke parent (agar tab lain tahu ada proses berjalan di latar)
+  useEffect(() => {
+    onUploadStateChange?.({
+      isUploading,
+      completedCount: uploadStats.completedCount,
+      totalCount: selectedReadyCount + uploadStats.completedCount,
+      currentFilename: currentUploadingFilename,
+      speed: uploadStats.speed,
+    });
+  }, [
+    isUploading,
+    uploadStats.completedCount,
+    selectedReadyCount,
+    currentUploadingFilename,
+    uploadStats.speed,
+    onUploadStateChange,
+  ]);
+
   const handleAttachFiles = useCallback(
     (newFiles: File[]) => {
       if (!newFiles.length) return;
@@ -248,6 +323,7 @@ export function FtpQueueView({
       const matchedCount = items.filter((it) =>
         newFiles.some((f) => f.name.toLowerCase() === it.filename.toLowerCase())
       ).length;
+
       if (matchedCount > 0) {
         toast.success(`${matchedCount} file fisik berhasil dipasangkan ke antrean!`);
       } else {
@@ -281,6 +357,20 @@ export function FtpQueueView({
     setSelectedQueueIds(new Set());
   };
 
+  // Upload cancellation handler
+  const handleCancelUpload = () => {
+    abortUploadRef.current = true;
+    if (activeAbortControllerRef.current) {
+      try {
+        activeAbortControllerRef.current.abort();
+      } catch {}
+    }
+    setIsUploading(false);
+    isUploadingRef.current = false;
+    setCurrentUploadingFilename('');
+    toast.info('Unggahan dihentikan oleh pengguna.');
+  };
+
   // Upload handler
   const handleStartUpload = async () => {
     if (!selectedProfile) {
@@ -288,9 +378,13 @@ export function FtpQueueView({
       return;
     }
 
-    const targetItems = queue.filter((q) => selectedQueueIds.has(q.id));
+    const targetItems = queue.filter((q) => selectedQueueIds.has(q.id) && q.status !== 'success');
     if (targetItems.length === 0) {
-      toast.error('Pilih setidaknya satu file untuk diunggah.');
+      if (queue.some((q) => selectedQueueIds.has(q.id) && q.status === 'success')) {
+        toast.info('Semua file yang dipilih sudah berhasil diunggah.');
+      } else {
+        toast.error('Pilih setidaknya satu file untuk diunggah.');
+      }
       return;
     }
 
@@ -313,6 +407,8 @@ export function FtpQueueView({
     }
 
     setIsUploading(true);
+    isUploadingRef.current = true;
+    abortUploadRef.current = false;
 
     const totalBytes = readyItems.reduce((acc, it) => acc + it.fileSize, 0);
     setUploadStats({
@@ -326,7 +422,12 @@ export function FtpQueueView({
     let cumulativeBytes = 0;
 
     for (let i = 0; i < targetItems.length; i++) {
+      if (abortUploadRef.current) {
+        break;
+      }
+
       const qItem = targetItems[i];
+      setCurrentUploadingFilename(qItem.filename);
 
       // Pre-flight check terhadap ledger live
       if (qItem.file && selectedProfile) {
@@ -379,6 +480,9 @@ export function FtpQueueView({
         prev.map((item) => (item.id === qItem.id ? { ...item, status: 'uploading', progress: 30 } : item))
       );
 
+      const abortController = new AbortController();
+      activeAbortControllerRef.current = abortController;
+
       try {
         const formData = new FormData();
         formData.append('file', qItem.file);
@@ -415,6 +519,7 @@ export function FtpQueueView({
         const res = await fetch(uploadUrl, {
           method: 'POST',
           body: formData,
+          signal: abortController.signal,
         });
 
         const data = await res.json();
@@ -460,15 +565,27 @@ export function FtpQueueView({
           remotePath: data.remotePath,
         });
       } catch (err: unknown) {
+        if (abortUploadRef.current) {
+          setQueue((prev) =>
+            prev.map((item) => (item.id === qItem.id ? { ...item, status: 'pending', progress: 0 } : item))
+          );
+          break;
+        }
         const msg = err instanceof Error ? err.message : String(err);
         setQueue((prev) =>
           prev.map((item) => (item.id === qItem.id ? { ...item, status: 'error', error: msg } : item))
         );
+      } finally {
+        activeAbortControllerRef.current = null;
       }
     }
 
     setIsUploading(false);
-    toast.success('Proses batch upload selesai!');
+    isUploadingRef.current = false;
+    setCurrentUploadingFilename('');
+    if (!abortUploadRef.current) {
+      toast.success('Proses batch upload selesai!');
+    }
   };
 
   // Hidden file input helpers
@@ -771,25 +888,40 @@ export function FtpQueueView({
               )}
 
               {/* Main Upload Trigger */}
-              <Button
-                disabled={isUploading || selectedReadyCount === 0 || !selectedProfile}
-                onClick={handleStartUpload}
-                className="h-9.5 bg-[#ff6b35] hover:bg-[#e55a2b] text-white border-2 border-[#2c1810] shadow-[2px_2px_0_#2c1810] font-black text-xs px-4 cursor-pointer disabled:opacity-50 transition-all hover:translate-x-[1px] hover:translate-y-[1px] active:translate-x-[2px] active:translate-y-[2px]"
-              >
-                {isUploading ? (
-                  <span className="flex items-center gap-1.5">
-                    <RefreshCw className="w-3.5 h-3.5 animate-spin" />
-                    <span>
-                      Mengunggah ({uploadStats.completedCount}/{selectedReadyCount})...
+              <div className="flex items-center gap-2">
+                <Button
+                  disabled={isUploading || selectedReadyCount === 0 || !selectedProfile}
+                  onClick={handleStartUpload}
+                  className="h-9.5 bg-[#ff6b35] hover:bg-[#e55a2b] text-white border-2 border-[#2c1810] shadow-[2px_2px_0_#2c1810] font-black text-xs px-4 cursor-pointer disabled:opacity-50 transition-all hover:translate-x-[1px] hover:translate-y-[1px] active:translate-x-[2px] active:translate-y-[2px]"
+                >
+                  {isUploading ? (
+                    <span className="flex items-center gap-1.5">
+                      <RefreshCw className="w-3.5 h-3.5 animate-spin" />
+                      <span>
+                        Mengunggah ({uploadStats.completedCount}/{selectedReadyCount})...
+                      </span>
                     </span>
-                  </span>
-                ) : (
-                  <span className="flex items-center gap-1.5">
-                    <Upload className="w-3.5 h-3.5" />
-                    <span>Mulai Upload {selectedReadyCount > 0 ? `(${selectedReadyCount})` : ''}</span>
-                  </span>
+                  ) : (
+                    <span className="flex items-center gap-1.5">
+                      <Upload className="w-3.5 h-3.5" />
+                      <span>Mulai Upload {selectedReadyCount > 0 ? `(${selectedReadyCount})` : ''}</span>
+                    </span>
+                  )}
+                </Button>
+
+                {isUploading && (
+                  <Button
+                    type="button"
+                    variant="outline"
+                    onClick={handleCancelUpload}
+                    className="h-9.5 bg-red-50 hover:bg-red-100 text-red-700 border-2 border-red-700 font-bold text-xs px-3 shadow-[1px_1px_0_#b91c1c] cursor-pointer"
+                    title="Hentikan proses unggahan saat ini"
+                  >
+                    <Square className="w-3 h-3 mr-1 fill-current" />
+                    <span>Hentikan</span>
+                  </Button>
                 )}
-              </Button>
+              </div>
             </div>
           </div>
 
