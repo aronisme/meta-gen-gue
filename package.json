@@ -3,6 +3,9 @@
   "version": "0.1.0",
   "private": true,
   "main": "electron/main.js",
+  "bin": {
+    "metagen-bridge": "./ftp-bridge/cli.mjs"
+  },
   "scripts": {
     "dev": "next dev",
     "bridge": "node ftp-bridge/server.mjs",
