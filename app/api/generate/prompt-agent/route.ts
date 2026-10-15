@@ -118,7 +118,7 @@ export async function POST(req: NextRequest) {
       return new Response('Missing instruction', { status: 400 });
     }
 
-    const targetModel = !model || model === 'auto' ? 'gemini-2.5-flash' : model;
+    const targetModel = model || 'auto';
 
     const contentParts: Array<{ type: string; text?: string; image_url?: { url: string } }> = [];
 
@@ -145,13 +145,17 @@ export async function POST(req: NextRequest) {
 
     // If direct OpenAI provider is selected and key is provided
     if (provider === 'openai' && apiKey) {
+      const openAiPayload = {
+        ...payload,
+        model: targetModel === 'auto' ? 'gpt-4o-mini' : targetModel,
+      };
       const openAiRes = await fetch('https://api.openai.com/v1/chat/completions', {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',
           Authorization: `Bearer ${apiKey}`,
         },
-        body: JSON.stringify(payload),
+        body: JSON.stringify(openAiPayload),
       });
 
       if (!openAiRes.ok) {
