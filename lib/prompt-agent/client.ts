@@ -14,6 +14,7 @@ import type {
 } from './types';
 import { getApiKey } from '@/lib/store';
 import type { Provider } from '@/lib/types';
+import { getRandomCuratedIdeas, type InspirationIdea } from './inspirations';
 
 export interface GeneratePromptsParams {
   mode: VCPAMode;
@@ -226,3 +227,77 @@ Output ONLY a JSON object:
     isEdited: false,
   };
 }
+
+export async function brainstormBriefIdeas(
+  seedTopic?: string,
+  provider: Provider = 'gas-proxy',
+  model = 'auto',
+  customApiKey?: string
+): Promise<InspirationIdea[]> {
+  const apiKey = customApiKey || getApiKey(provider);
+  const topicQuery = seedTopic?.trim();
+
+  const instruction = `You are a world-class creative director for commercial microstock photography.
+TASK: Brainstorm 5 fresh, high-demand, high-commercial-value stock photography concept briefs ${
+    topicQuery ? `specifically expanding and exploring unique angles of the topic: "${topicQuery}"` : 'based on currently trending visual themes in global advertising'
+  }.
+
+STRICT FORMAT REQUIREMENTS:
+Output ONLY a JSON object with an "ideas" array containing exactly 5 items:
+{
+  "ideas": [
+    {
+      "title": "Short Catchy Indonesian Title (2-4 words, e.g. 'Pekerja Konstruksi Cerdas')",
+      "category": "Broad Category (e.g. 'Bisnis & Karir' or 'Gaya Hidup')",
+      "brief": "Rich English visual description for image generation describing subject, setting, natural lighting, candid mood, clean copy space (1-2 sentences)."
+    }
+  ]
+}
+Do NOT include markdown backticks or explanations. Output pure JSON only.`;
+
+  try {
+    const res = await withRetry(
+      () =>
+        fetch('/api/generate/prompt-agent', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            mode: 'text_ideation',
+            brief: topicQuery || 'Commercial stock brainstorm',
+            apiKey: apiKey || undefined,
+            provider,
+            model,
+            instruction,
+          }),
+        }).then(async (r) => {
+          if (!r.ok) {
+            const errText = await r.text();
+            throw new Error(`HTTP ${r.status}: ${errText.slice(0, 150)}`);
+          }
+          return r;
+        }),
+      2,
+      600
+    );
+
+    const data = (await res.json()) as { ideas?: Array<Record<string, unknown>> } & Record<string, unknown>;
+    const rawIdeas = Array.isArray(data.ideas) ? data.ideas : [];
+    if (rawIdeas.length > 0) {
+      return rawIdeas.map((item, idx) => ({
+        id: `ai-idea-${nanoid()}`,
+        title: (typeof item.title === 'string' && item.title) || `Ide AI #${idx + 1}`,
+        brief:
+          (typeof item.brief === 'string' && item.brief) ||
+          'Modern high-commercial stock visual concept with authentic lighting and clean background.',
+        category: (typeof item.category === 'string' && item.category) || 'Ide AI',
+        isAiGenerated: true,
+      }));
+    }
+  } catch (err) {
+    console.warn('[Brainstorm AI Warning] Fallback to curated pool:', err);
+  }
+
+  // Graceful fallback to curated pool if AI call times out or errors
+  return getRandomCuratedIdeas(5).map((item) => ({ ...item, isAiGenerated: false }));
+}
+

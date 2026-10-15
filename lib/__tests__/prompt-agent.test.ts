@@ -122,4 +122,25 @@ describe('VCPA Engine Utilities', () => {
     expect(json.totalPrompts).toBe(1);
     expect(json.prompts[0].title).toBe('Architectural Stillness');
   });
+
+  it('provides diverse curated inspirations with shuffle functionality', async () => {
+    const { getRandomCuratedIdeas, CURATED_INSPIRATION_POOL } = await import('../prompt-agent/inspirations');
+    expect(CURATED_INSPIRATION_POOL.length).toBeGreaterThanOrEqual(20);
+
+    const ideas = getRandomCuratedIdeas(5);
+    expect(ideas).toHaveLength(5);
+    ideas.forEach((item) => {
+      expect(item).toHaveProperty('title');
+      expect(item).toHaveProperty('brief');
+      expect(item.brief.length).toBeGreaterThan(15);
+    });
+
+    const excludedIds = ideas.map((i) => i.id);
+    const nextIdeas = getRandomCuratedIdeas(5, excludedIds);
+    expect(nextIdeas).toHaveLength(5);
+    // At least some should be distinct when pool is large
+    const overlap = nextIdeas.filter((n) => excludedIds.includes(n.id));
+    expect(overlap.length).toBeLessThan(5);
+  });
 });
+

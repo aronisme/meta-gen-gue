@@ -11,9 +11,12 @@ import {
   Eye,
   ImageIcon,
   Lightbulb,
+  Loader2,
   Palette,
+  Plus,
   RefreshCw,
   ShieldCheck,
+  Shuffle,
   Sliders,
   Sparkles,
   Star,
@@ -33,7 +36,12 @@ import {
   exportPromptsToText,
   formatPromptForEngine,
 } from '@/lib/prompt-agent/engine';
-import { executeVCPAGeneration, regenerateSinglePromptCard } from '@/lib/prompt-agent/client';
+import {
+  brainstormBriefIdeas,
+  executeVCPAGeneration,
+  regenerateSinglePromptCard,
+} from '@/lib/prompt-agent/client';
+import { getRandomCuratedIdeas, type InspirationIdea } from '@/lib/prompt-agent/inspirations';
 import type {
   AspectRatio,
   CreativeFocus,
@@ -54,28 +62,6 @@ const STORAGE_KEY_PROMPTS = 'vcpa_prompts_v1';
 const STORAGE_KEY_SETTINGS = 'vcpa_settings_v1';
 const STORAGE_KEY_DNA = 'vcpa_dna_v1';
 
-const QUICK_INSPIRATION_TEMPLATES = [
-  {
-    title: 'Pekerja Profesional & AI',
-    brief: 'Asian female data scientist collaborating with futuristic holographic analytics in a bright glass modern office, candid smile, commercial lifestyle',
-  },
-  {
-    title: 'Energi Hijau Terbarukan',
-    brief: 'Engineers in clean safety gear inspecting solar panel fields and wind turbines under dramatic sunset clouds, sustainable technology',
-  },
-  {
-    title: 'Produk Mewah Minimalis',
-    brief: 'Luxury organic skincare glass bottle on wet volcanic stone with gentle water ripples, dramatic side lighting, negative space',
-  },
-  {
-    title: 'Kuliner & Artisan Kopi',
-    brief: 'Barista pouring hot water over fresh artisanal coffee filter, steam rising in rustic cafe morning light, macro bean textures',
-  },
-  {
-    title: 'Kesehatan & Gaya Hidup',
-    brief: 'Young man stretching in lush morning city park, natural sunlight flare, authentic candid athleticism, clean background',
-  },
-];
 
 const VISUAL_DIRECTION_OPTIONS: Array<{ id: VisualDirection; label: string; desc: string }> = [
   { id: 'photorealistic', label: 'Foto Komersial (Stock Photo)', desc: 'Sony A7R V, 85mm f/1.4, tekstur natural 8K' },
@@ -142,17 +128,6 @@ export function PromptGeneratorView({ onSwitchToMetadata }: PromptGeneratorViewP
     setFoldedSections((prev) => ({ ...prev, [key]: !prev[key] }));
   };
 
-  const isAllFolded = Object.values(foldedSections).every(Boolean);
-  const toggleAllFold = () => {
-    const nextVal = !isAllFolded;
-    setFoldedSections({
-      input: nextVal,
-      engine: nextVal,
-      visual: nextVal,
-      safety: nextVal,
-    });
-  };
-
   // 4. Output & Visual DNA State
   const [visualDna, setVisualDna] = useState<VisualDNAProfile | null>(null);
   const [isDnaExpanded, setIsDnaExpanded] = useState<boolean>(true);
@@ -162,6 +137,40 @@ export function PromptGeneratorView({ onSwitchToMetadata }: PromptGeneratorViewP
   const [regeneratingId, setRegeneratingId] = useState<string | null>(null);
   const [copiedId, setCopiedId] = useState<string | null>(null);
   const [copiedAll, setCopiedAll] = useState<boolean>(false);
+
+  // 5. Inspirasi Ide Komersial (Shuffle & AI Brainstorm)
+  const [inspirations, setInspirations] = useState<InspirationIdea[]>(() => getRandomCuratedIdeas(5));
+  const [isBrainstorming, setIsBrainstorming] = useState<boolean>(false);
+
+  const handleShuffleInspirations = () => {
+    const currentIds = inspirations.map((i) => i.id);
+    const nextIdeas = getRandomCuratedIdeas(5, currentIds);
+    setInspirations(nextIdeas);
+    toast.info('5 ide baru dimuat dari katalog inspirasi.');
+  };
+
+  const handleBrainstormIdeas = async () => {
+    setIsBrainstorming(true);
+    const toastId = toast.loading(
+      brief.trim()
+        ? `Merancang ide AI sesuai topik "${brief.slice(0, 20)}..."`
+        : 'Merancang 5 ide microstock tren baru via AI...'
+    );
+
+    try {
+      const newIdeas = await brainstormBriefIdeas(brief || undefined, 'gas-proxy', 'auto');
+      setInspirations(newIdeas);
+      toast.success(
+        brief.trim() ? 'Ide AI baru berhasil dirancang!' : '5 ide segar dari AI siap digunakan!',
+        { id: toastId }
+      );
+    } catch (err: unknown) {
+      const msg = err instanceof Error ? err.message : String(err);
+      toast.error(`Gagal merancang ide: ${msg}`, { id: toastId });
+    } finally {
+      setIsBrainstorming(false);
+    }
+  };
 
   // Restore saved state from localStorage on initial render
   useEffect(() => {
@@ -466,28 +475,11 @@ export function PromptGeneratorView({ onSwitchToMetadata }: PromptGeneratorViewP
       <div className="grid grid-cols-1 lg:grid-cols-12 gap-6 items-start">
         {/* Left Column: Creator Controls */}
         <div className="lg:col-span-5 space-y-4">
-          {/* Top Accordion Controls Bar */}
-          <div className="flex items-center justify-between px-1">
+          {/* Left Column Header */}
+          <div className="px-1">
             <span className="text-[11px] font-black uppercase tracking-wider text-[#6b5344]">
               Panel Pengaturan Generator
             </span>
-            <button
-              type="button"
-              onClick={toggleAllFold}
-              className="text-[11px] font-bold text-[#2c1810] hover:text-[#ff6b35] flex items-center gap-1.5 bg-[#fffdf9] px-2.5 py-1 rounded-lg border-2 border-[#2c1810] shadow-[2px_2px_0_#2c1810] cursor-pointer transition-all hover:bg-[#fff5e6]"
-            >
-              {isAllFolded ? (
-                <>
-                  <ChevronDown className="w-3.5 h-3.5 text-[#ff6b35]" />
-                  <span>Buka Semua Panel</span>
-                </>
-              ) : (
-                <>
-                  <ChevronUp className="w-3.5 h-3.5 text-[#ff6b35]" />
-                  <span>Lipat Semua Panel</span>
-                </>
-              )}
-            </button>
           </div>
 
           {/* CARD 1: Input Konsep & Acuan (Foldable) */}
@@ -629,25 +621,103 @@ export function PromptGeneratorView({ onSwitchToMetadata }: PromptGeneratorViewP
                     className="border-2 border-[#2c1810] font-medium text-xs bg-white resize-none shadow-[2px_2px_0_#2c1810]"
                   />
 
-                  {/* Quick Template Pills */}
-                  <div className="space-y-1.5 pt-0.5">
-                    <span className="text-[11px] font-bold text-[#6b5344] block">Inspirasi Cepat:</span>
-                    <div className="flex flex-wrap gap-1.5">
-                      {QUICK_INSPIRATION_TEMPLATES.map((tmpl) => (
-                        <button
-                          key={tmpl.title}
-                          type="button"
-                          onClick={() => {
-                            setBrief(tmpl.brief);
-                            toast.info(`Inspirasi "${tmpl.title}" diterapkan.`);
-                          }}
-                          className="px-2 py-0.5 rounded-md bg-white hover:bg-[#fff5e6] text-[#2c1810] border border-[#2c1810] text-[11px] font-bold shadow-[1px_1px_0_#2c1810] cursor-pointer transition-all"
-                        >
-                          ⚡ {tmpl.title}
-                        </button>
-                      ))}
+                  {/* Quick Inspirations & Dynamic Brainstorming (Mode 2 Only) */}
+                  {mode === 'text_ideation' && (
+                    <div className="space-y-2 pt-0.5">
+                      <div className="flex items-center justify-between gap-1 flex-wrap">
+                        <span className="text-[11px] font-black uppercase tracking-wider text-[#6b5344] flex items-center gap-1.5">
+                          <Sparkles className="w-3.5 h-3.5 text-[#ff6b35]" />
+                          <span>Inspirasi Ide Komersial</span>
+                        </span>
+
+                        <div className="flex items-center gap-1.5">
+                          {/* 1. Shuffle from rich curated pool */}
+                          <button
+                            type="button"
+                            onClick={handleShuffleInspirations}
+                            title="Acak 5 ide baru dari bank inspirasi komersial"
+                            className="text-[11px] font-bold text-[#2c1810] bg-white hover:bg-[#fff5e6] px-2.5 py-1 rounded-lg border border-[#2c1810] shadow-[1px_1px_0_#2c1810] flex items-center gap-1 cursor-pointer transition-all active:translate-y-0.5"
+                          >
+                            <Shuffle className="w-3 h-3 text-[#ff6b35]" />
+                            <span>Acak Ide</span>
+                          </button>
+
+                          {/* 2. Brainstorm AI to generate fresh ideas on the fly */}
+                          <button
+                            type="button"
+                            disabled={isBrainstorming}
+                            onClick={handleBrainstormIdeas}
+                            title={
+                              brief.trim()
+                                ? `Rancang ide AI baru berdasarkan topik "${brief.slice(0, 24)}..."`
+                                : 'Rancang 5 ide microstock tren baru via AI'
+                            }
+                            className="text-[11px] font-black text-white bg-[#2c1810] hover:bg-[#ff6b35] disabled:opacity-60 px-2.5 py-1 rounded-lg border border-[#2c1810] shadow-[1px_1px_0_#2c1810] flex items-center gap-1 cursor-pointer transition-all active:translate-y-0.5"
+                          >
+                            {isBrainstorming ? (
+                              <>
+                                <Loader2 className="w-3 h-3 animate-spin text-[#ff6b35]" />
+                                <span>Merancang...</span>
+                              </>
+                            ) : (
+                              <>
+                                <Wand2 className="w-3 h-3 text-[#ff6b35]" />
+                                <span>+ Ide AI Baru</span>
+                              </>
+                            )}
+                          </button>
+                        </div>
+                      </div>
+
+                      {/* Pills List */}
+                      <div className="flex flex-wrap gap-1.5">
+                        {inspirations.map((idea) => (
+                          <div
+                            key={idea.id}
+                            className={`inline-flex items-center rounded-lg border border-[#2c1810] text-[11px] font-bold shadow-[1px_1px_0_#2c1810] transition-all overflow-hidden ${
+                              idea.isAiGenerated
+                                ? 'bg-gradient-to-r from-[#fff5e6] to-[#fff0e0] border-[#ff6b35]'
+                                : 'bg-white hover:bg-[#fff5e6]'
+                            }`}
+                          >
+                            <button
+                              type="button"
+                              onClick={() => {
+                                setBrief(idea.brief);
+                                toast.success(`Inspirasi "${idea.title}" diterapkan ke brief.`);
+                              }}
+                              title={idea.brief}
+                              className="px-2 py-1 text-[#2c1810] cursor-pointer flex items-center gap-1 text-left"
+                            >
+                              {idea.isAiGenerated ? (
+                                <span className="text-[9px] px-1 py-0.2 rounded bg-[#ff6b35] text-white font-black leading-none">
+                                  AI
+                                </span>
+                              ) : (
+                                <span className="text-[#ff6b35]">⚡</span>
+                              )}
+                              <span>{idea.title}</span>
+                            </button>
+
+                            {/* Append button if brief already has text */}
+                            {brief.trim() && (
+                              <button
+                                type="button"
+                                onClick={() => {
+                                  setBrief((prev) => `${prev.trim()}, ${idea.brief}`);
+                                  toast.info(`Ditambahkan ke brief: "${idea.title}"`);
+                                }}
+                                title="Tambahkan ke akhir brief saat ini"
+                                className="px-1.5 py-1 border-l border-[#2c1810]/30 text-[#6b5344] hover:text-[#ff6b35] hover:bg-[#ffe0cc] cursor-pointer"
+                              >
+                                <Plus className="w-3 h-3" />
+                              </button>
+                            )}
+                          </div>
+                        ))}
+                      </div>
                     </div>
-                  </div>
+                  )}
                 </div>
               </div>
             )}
