@@ -120,9 +120,7 @@ export async function POST(req: NextRequest) {
 
     const targetModel = !model || model === 'auto' ? 'gemini-2.5-flash' : model;
 
-    const contentParts: Array<{ type: string; text?: string; image_url?: { url: string } }> = [
-      { type: 'text', text: instruction },
-    ];
+    const contentParts: Array<{ type: string; text?: string; image_url?: { url: string } }> = [];
 
     if (imageDataUrl) {
       contentParts.push({
@@ -130,6 +128,8 @@ export async function POST(req: NextRequest) {
         image_url: { url: imageDataUrl },
       });
     }
+
+    contentParts.push({ type: 'text', text: instruction });
 
     const payload = {
       model: targetModel,

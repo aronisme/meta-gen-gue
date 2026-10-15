@@ -20,6 +20,7 @@ export interface GeneratePromptsParams {
   mode: VCPAMode;
   brief: string;
   imageDataUrl?: string;
+  visualDna?: VisualDNAProfile;
   settings: VCPASettings;
   provider?: Provider;
   model?: string;
@@ -43,18 +44,19 @@ async function withRetry<T>(fn: () => Promise<T>, tries = 3, backoffMs = 600): P
 export async function executeVCPAGeneration(
   params: GeneratePromptsParams
 ): Promise<VCPAResult> {
-  const { mode, brief, imageDataUrl, settings, provider = 'gas-proxy', model = 'auto', onProgressStep } = params;
+  const { mode, brief, imageDataUrl, visualDna, settings, provider = 'gas-proxy', model = 'auto', onProgressStep } = params;
   const apiKey = params.apiKey || getApiKey(provider);
 
   onProgressStep?.(
     mode === 'reference_to_prompt'
-      ? 'Menganalisis Visual DNA & Fitur Referensi...'
+      ? 'Menganalisis Visual DNA & Fitur Citra Referensi...'
       : 'Membedah Brief & Membangun Creative Space...'
   );
 
   const instruction = buildVCPAPromptInstruction({
     mode,
     brief,
+    visualDna,
     settings,
   });
 

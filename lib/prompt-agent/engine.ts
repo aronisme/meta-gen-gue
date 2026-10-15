@@ -117,8 +117,9 @@ export function buildVCPAPromptInstruction(params: {
   const count = Math.min(Math.max(settings.count, 1), 50);
 
   let contextIntro = '';
-  if (mode === 'reference_to_prompt' && visualDna) {
-    contextIntro = `=== REFERENCE IMAGE VISUAL DNA ===
+  if (mode === 'reference_to_prompt') {
+    if (visualDna) {
+      contextIntro = `=== REFERENCE IMAGE VISUAL DNA (PREVIOUSLY ANALYZED) ===
 Observed elements: ${visualDna.observed.join(', ')}
 Inferred mood/atmosphere: ${visualDna.inferred.join(', ')}
 Core anchors to respect: ${visualDna.anchors.join(', ')}
@@ -127,7 +128,40 @@ ${visualDna.semanticProfile?.coreTheme ? `Core semantic theme: ${visualDna.seman
 ${visualDna.semanticProfile?.metaphor ? `Metaphors: ${visualDna.semanticProfile.metaphor.join(', ')}` : ''}
 
 Similarity Level: ${settings.similarity}% (0 = wide creative exploration while preserving core essence; 100 = strict visual fidelity to subject and style).
-Semantic Preservation Mode: ${settings.semanticMode}`;
+Semantic Preservation Mode: ${settings.semanticMode}
+${brief ? `User's Additional Creative Exploration / Focus Request: "${brief}"` : ''}
+Visual Direction: ${settings.visualDirection}`;
+    } else {
+      contextIntro = `=== ATTACHED REFERENCE IMAGE ANALYSIS & VISUAL DNA REMIX (MODE 1) ===
+The user has attached an image as the primary visual reference (Anchor).
+YOUR MANDATORY FIRST STEP:
+Thoroughly examine the attached image pixels and extract its full Visual DNA into the "visualDna" output object:
+1. "subject": Identify the primary physical subject (type, specific physical attributes, clothing/materials, posture).
+2. "observed": Concrete visual elements observed directly in the image (textures, background setting, props, colors).
+3. "inferred": Atmosphere, lighting quality, mood, color palette, and camera technique.
+4. "anchors": The essential signature traits that MUST be preserved to maintain visual lineage with this reference.
+5. "editableVariables": Key elements that can be tastefully transformed, remixed, or varied across the prompt batch.
+6. "semanticProfile": Core commercial theme, symbolic metaphors, and emotion tension.
+
+YOUR MANDATORY SECOND STEP:
+Generate ${count} distinct commercial stock image prompt concepts grounded in the reference image's visual DNA.
+${brief ? `User's Creative Direction / Exploration Focus: "${brief}"` : 'Deconstruct the reference image directly and generate diverse commercial microstock variations.'}
+Similarity Level: ${settings.similarity}% (${
+        settings.similarity < 40
+          ? 'Creative Departure: Retain only core mood/essence, freely explore new subjects, settings, and lighting'
+          : settings.similarity > 75
+          ? 'High Fidelity: Keep the primary subject, setting, and composition closely faithful to the reference image'
+          : 'Balanced Remix: Preserve core visual anchors and style while varying camera angles, lighting conditions, and narrative context'
+      }).
+Semantic Preservation Mode: ${
+        settings.semanticMode === 'meaning_preservation'
+          ? 'Meaning Preservation (Preserve the underlying concept, story, and metaphor)'
+          : settings.semanticMode === 'visual_replication'
+          ? 'Visual Replication (Replicate physical visual features, materials, and composition closely)'
+          : 'Free Ideation (Creative exploration sparked by the reference image)'
+      }.
+Visual Direction: ${settings.visualDirection}`;
+    }
   } else {
     contextIntro = `=== CREATIVE BRIEF (TEXT-ONLY IDEATION) ===
 User Brief: "${brief || 'Versatile modern commercial concept'}"

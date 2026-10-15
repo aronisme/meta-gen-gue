@@ -229,6 +229,7 @@ export function PromptGeneratorView({ onSwitchToMetadata }: PromptGeneratorViewP
     }
     try {
       setRefImageFile(file);
+      setVisualDna(null);
       const resized = await resizeImageToMax1024(file);
       setRefImageDataUrl(resized.dataUrl);
       toast.success(`Gambar referensi dimuat: ${file.name}`);
@@ -263,6 +264,7 @@ export function PromptGeneratorView({ onSwitchToMetadata }: PromptGeneratorViewP
         mode,
         brief,
         imageDataUrl: refImageDataUrl || undefined,
+        visualDna: visualDna || undefined,
         settings,
         provider: 'gas-proxy',
         model: 'auto',
