@@ -1,6 +1,6 @@
 'use client';
 
-import { memo, useState } from 'react';
+import { memo, useEffect, useState } from 'react';
 import Image from 'next/image';
 import { Input } from '@/components/ui/input';
 import { Textarea } from '@/components/ui/textarea';
@@ -13,6 +13,8 @@ import {
   SelectValue,
 } from '@/components/ui/select';
 import {
+  ChevronDown,
+  ChevronUp,
   Copy,
   RotateCw,
   Save,
@@ -36,6 +38,7 @@ interface MetadataItemProps {
   editable?: boolean;
   selectable?: boolean;
   selected?: boolean;
+  forceFoldKeywords?: boolean;
   onSelect?: (id: string) => void;
   onPatchMeta?: (id: string, patch: Partial<MetaOutput>) => void;
   onSave?: (id: string) => void;
@@ -50,6 +53,7 @@ function MetadataItemComponent({
   editable = false,
   selectable = false,
   selected = false,
+  forceFoldKeywords,
   onSelect,
   onPatchMeta,
   onSave,
@@ -61,6 +65,14 @@ function MetadataItemComponent({
   const [newKw, setNewKw] = useState('');
   const [previewOpen, setPreviewOpen] = useState(false);
   const [activePreviewImage, setActivePreviewImage] = useState<string | null>(null);
+  const [isKeywordsFolded, setIsKeywordsFolded] = useState<boolean>(true);
+
+  // Sinkronkan state lipatan saat parent mengubah toggle global
+  useEffect(() => {
+    if (forceFoldKeywords !== undefined) {
+      setIsKeywordsFolded(forceFoldKeywords);
+    }
+  }, [forceFoldKeywords]);
 
   const copy = (text: string) => {
     void navigator.clipboard.writeText(text || '');
@@ -333,7 +345,14 @@ function MetadataItemComponent({
             {/* Description (editable) */}
             <div className="space-y-1">
               <div className="flex items-center justify-between gap-2">
-                <span className="font-bold text-xs uppercase tracking-wider text-[#6b5344]">Description</span>
+                <div className="flex items-center gap-2">
+                  <span className="font-bold text-xs uppercase tracking-wider text-[#6b5344]">Description</span>
+                  {item.meta?.description && (
+                    <span className="text-[10px] font-bold px-1.5 py-0.5 rounded border border-[#2c1810] bg-[#fff5e6] text-[#2c1810] shadow-[1px_1px_0_#2c1810]">
+                      {item.meta.description.trim().split(/\s+/).filter(Boolean).length} kata
+                    </span>
+                  )}
+                </div>
                 <button
                   className="p-1.5 rounded bg-white hover:bg-[#fff5e6] text-[#2c1810] border border-[#2c1810] shadow-[1px_1px_0_#2c1810] hover:shadow-none hover:translate-x-[0.5px] hover:translate-y-[0.5px] transition-all cursor-pointer"
                   onClick={() => copy(item.meta?.description || '')}
@@ -415,14 +434,23 @@ function MetadataItemComponent({
               </div>
             </div>
 
-            {/* Keywords (chips + add box) */}
+            {/* Keywords (chips + add box with accordion fold) */}
             <div className="space-y-2 pt-1">
-              <div className="flex items-center justify-between">
-                <div className="flex items-center gap-2">
+              <div className="flex items-center justify-between flex-wrap gap-1.5">
+                <div className="flex items-center gap-2 flex-wrap">
                   <span className="font-bold text-xs uppercase tracking-wider text-[#6b5344]">Keywords</span>
                   <span className="text-[11px] font-bold px-2 py-0.5 rounded border-2 border-[#2c1810] bg-[#fff5e6] text-[#2c1810] shadow-[1px_1px_0_#2c1810]">
                     {parseKeywords(item.meta?.keywords || '').length} keywords
                   </span>
+                  <button
+                    type="button"
+                    onClick={() => setIsKeywordsFolded(!isKeywordsFolded)}
+                    className="text-xs font-bold text-[#ff6b35] hover:text-[#e55a2b] flex items-center gap-1 cursor-pointer bg-white px-2 py-0.5 rounded-lg border border-[#2c1810] shadow-[1px_1px_0_#2c1810] hover:shadow-none hover:translate-x-[0.5px] hover:translate-y-[0.5px] transition-all"
+                    title={isKeywordsFolded ? 'Buka lipatan kata kunci kartu ini' : 'Lipat kata kunci kartu ini'}
+                  >
+                    <span>{isKeywordsFolded ? `Buka (${parseKeywords(item.meta?.keywords || '').length})` : 'Lipat'}</span>
+                    {isKeywordsFolded ? <ChevronDown className="w-3.5 h-3.5" /> : <ChevronUp className="w-3.5 h-3.5" />}
+                  </button>
                 </div>
                 <div className="shrink-0 flex gap-1.5">
                   {onTidy && (
@@ -430,6 +458,7 @@ function MetadataItemComponent({
                       className="p-1.5 rounded-lg bg-white hover:bg-[#fff5e6] text-[#2c1810] border-2 border-[#2c1810] shadow-[2px_2px_0_#2c1810] hover:shadow-none hover:translate-x-[1px] hover:translate-y-[1px] transition-all cursor-pointer"
                       onClick={() => onTidy(item.id)}
                       aria-label="Tidy keywords"
+                      title="Rapikan & hapus duplikat keywords"
                     >
                       <Wand2 className="w-3.5 h-3.5 text-[#ff6b35]" />
                     </button>
@@ -438,61 +467,92 @@ function MetadataItemComponent({
                     className="p-1.5 rounded-lg bg-white hover:bg-[#fff5e6] text-[#2c1810] border-2 border-[#2c1810] shadow-[2px_2px_0_#2c1810] hover:shadow-none hover:translate-x-[1px] hover:translate-y-[1px] transition-all cursor-pointer"
                     onClick={() => copy(item.meta?.keywords || '')}
                     aria-label="Copy keywords"
+                    title="Salin seluruh kata kunci"
                   >
                     <Copy className="w-3.5 h-3.5" />
                   </button>
                 </div>
               </div>
 
-              {/* Draggable chips */}
-              <div className="flex flex-wrap gap-1.5">
-                {parseKeywords(item.meta?.keywords || '').map((kw, idx) => (
-                  <span
-                    key={`${kw}-${idx}`}
-                    draggable
-                    onDragStart={(e) => e.dataTransfer.setData('text/plain', String(idx))}
-                    onDragOver={(e) => e.preventDefault()}
-                    onDrop={(e) => {
-                      const from = parseInt(e.dataTransfer.getData('text/plain'), 10);
-                      onChipDrop?.(item.id, from, idx);
-                    }}
-                    className="px-3 py-1 rounded-full border-2 border-[#2c1810] bg-[#fff5e6] text-[#2c1810] font-bold text-xs shadow-[1.5px_1.5px_0_#2c1810] hover:shadow-[0.5px_0.5px_0_#2c1810] hover:translate-x-[1px] hover:translate-y-[1px] cursor-move select-none inline-flex items-center gap-1.5 transition-all"
-                  >
-                    <span>{kw}</span>
-                    <button
-                      className="ml-1 font-bold text-[#6b5344] hover:text-[#ff6b35] cursor-pointer inline-flex items-center"
-                      onClick={() => removeKeyword(idx)}
-                      type="button"
-                      aria-label={`Remove ${kw}`}
+              {/* Folded Mode: Compact top 8 keywords + expand pill */}
+              {isKeywordsFolded ? (
+                <div className="bg-[#fffdf9] p-2 rounded-xl border border-[#2c1810]/20 flex flex-wrap gap-1.5 items-center">
+                  {parseKeywords(item.meta?.keywords || '').slice(0, 8).map((kw, idx) => (
+                    <span
+                      key={`${kw}-${idx}`}
+                      className="px-2.5 py-0.5 rounded-full border border-[#2c1810] bg-[#fff5e6] text-[#2c1810] font-semibold text-xs shadow-[1px_1px_0_#2c1810]"
                     >
-                      <X className="w-3 h-3 hover:text-red-600" />
+                      {kw}
+                    </span>
+                  ))}
+                  {parseKeywords(item.meta?.keywords || '').length > 8 && (
+                    <button
+                      type="button"
+                      onClick={() => setIsKeywordsFolded(false)}
+                      className="px-2.5 py-0.5 rounded-full border-2 border-dashed border-[#ff6b35] bg-[#fff5e6] text-[#ff6b35] font-extrabold text-xs hover:bg-[#ffe0b2] transition-colors cursor-pointer flex items-center gap-1 shadow-[1px_1px_0_#ff6b35]"
+                      title="Klik untuk membuka semua keyword"
+                    >
+                      <span>+{parseKeywords(item.meta?.keywords || '').length - 8} lainnya...</span>
+                      <ChevronDown className="w-3 h-3" />
                     </button>
-                  </span>
-                ))}
-              </div>
+                  )}
+                  {parseKeywords(item.meta?.keywords || '').length === 0 && (
+                    <span className="text-xs text-[#6b5344] italic">Belum ada keywords. Tekan Buka untuk menambah.</span>
+                  )}
+                </div>
+              ) : (
+                /* Unfolded Mode: Full Draggable Chips & Add Box */
+                <div className="space-y-2 animate-in fade-in duration-150">
+                  <div className="flex flex-wrap gap-1.5">
+                    {parseKeywords(item.meta?.keywords || '').map((kw, idx) => (
+                      <span
+                        key={`${kw}-${idx}`}
+                        draggable
+                        onDragStart={(e) => e.dataTransfer.setData('text/plain', String(idx))}
+                        onDragOver={(e) => e.preventDefault()}
+                        onDrop={(e) => {
+                          const from = parseInt(e.dataTransfer.getData('text/plain'), 10);
+                          onChipDrop?.(item.id, from, idx);
+                        }}
+                        className="px-3 py-1 rounded-full border-2 border-[#2c1810] bg-[#fff5e6] text-[#2c1810] font-bold text-xs shadow-[1.5px_1.5px_0_#2c1810] hover:shadow-[0.5px_0.5px_0_#2c1810] hover:translate-x-[1px] hover:translate-y-[1px] cursor-move select-none inline-flex items-center gap-1.5 transition-all"
+                      >
+                        <span>{kw}</span>
+                        <button
+                          className="ml-1 font-bold text-[#6b5344] hover:text-[#ff6b35] cursor-pointer inline-flex items-center"
+                          onClick={() => removeKeyword(idx)}
+                          type="button"
+                          aria-label={`Remove ${kw}`}
+                        >
+                          <X className="w-3 h-3 hover:text-red-600" />
+                        </button>
+                      </span>
+                    ))}
+                  </div>
 
-              {/* Add keyword input */}
-              <div className="flex items-center gap-2 pt-1">
-                <Input
-                  placeholder="Tambah kata kunci..."
-                  value={newKw}
-                  onChange={(e) => setNewKw(e.target.value)}
-                  onKeyDown={(e) => {
-                    if (e.key === 'Enter') {
-                      e.preventDefault();
-                      addKeyword();
-                    }
-                  }}
-                  className="h-9 flex-1 min-w-[140px] max-w-xs bg-white border-2 border-[#2c1810] text-[#2c1810] font-semibold text-xs shadow-[2px_2px_0_#2c1810]"
-                />
-                <button
-                  onClick={addKeyword}
-                  className="h-9 w-9 bg-[#ff6b35] hover:bg-[#e55a2b] text-white border-2 border-[#2c1810] shadow-[2px_2px_0_#2c1810] hover:shadow-none hover:translate-x-[1px] hover:translate-y-[1px] font-bold rounded-lg flex items-center justify-center transition-all cursor-pointer"
-                  aria-label="Add keyword"
-                >
-                  <Plus className="w-4 h-4" />
-                </button>
-              </div>
+                  {/* Add keyword input */}
+                  <div className="flex items-center gap-2 pt-1">
+                    <Input
+                      placeholder="Tambah kata kunci..."
+                      value={newKw}
+                      onChange={(e) => setNewKw(e.target.value)}
+                      onKeyDown={(e) => {
+                        if (e.key === 'Enter') {
+                          e.preventDefault();
+                          addKeyword();
+                        }
+                      }}
+                      className="h-9 flex-1 min-w-[140px] max-w-xs bg-white border-2 border-[#2c1810] text-[#2c1810] font-semibold text-xs shadow-[2px_2px_0_#2c1810]"
+                    />
+                    <button
+                      onClick={addKeyword}
+                      className="h-9 w-9 bg-[#ff6b35] hover:bg-[#e55a2b] text-white border-2 border-[#2c1810] shadow-[2px_2px_0_#2c1810] hover:shadow-none hover:translate-x-[1px] hover:translate-y-[1px] font-bold rounded-lg flex items-center justify-center transition-all cursor-pointer"
+                      aria-label="Add keyword"
+                    >
+                      <Plus className="w-4 h-4" />
+                    </button>
+                  </div>
+                </div>
+              )}
             </div>
           </>
         ) : (
@@ -520,9 +580,35 @@ function MetadataItemComponent({
             </div>
             <div className="flex items-start gap-2">
               <span className="font-bold min-w-[70px] text-xs uppercase text-[#6b5344]">Keywords:</span>
-              <span className="flex-1 text-[#2c1810] break-words text-xs">{item.meta?.keywords}</span>
+              <div className="flex-1 text-xs">
+                {isKeywordsFolded && parseKeywords(item.meta?.keywords || '').length > 8 ? (
+                  <div className="flex flex-wrap gap-1 items-center">
+                    <span>{parseKeywords(item.meta?.keywords || '').slice(0, 8).join(', ')}</span>
+                    <button
+                      type="button"
+                      onClick={() => setIsKeywordsFolded(false)}
+                      className="text-[11px] font-bold text-[#ff6b35] underline ml-1 cursor-pointer"
+                    >
+                      +{parseKeywords(item.meta?.keywords || '').length - 8} lainnya...
+                    </button>
+                  </div>
+                ) : (
+                  <div className="flex flex-wrap gap-1 items-center">
+                    <span className="break-words">{item.meta?.keywords}</span>
+                    {parseKeywords(item.meta?.keywords || '').length > 8 && (
+                      <button
+                        type="button"
+                        onClick={() => setIsKeywordsFolded(true)}
+                        className="text-[11px] font-bold text-[#6b5344] underline ml-1 cursor-pointer"
+                      >
+                        (Lipat)
+                      </button>
+                    )}
+                  </div>
+                )}
+              </div>
               <button
-                className="p-1 rounded bg-white border border-[#2c1810] shadow-[1px_1px_0_#2c1810]"
+                className="p-1 rounded bg-white border border-[#2c1810] shadow-[1px_1px_0_#2c1810] shrink-0"
                 onClick={() => copy(item.meta?.keywords || '')}
               >
                 <Copy className="w-3.5 h-3.5" />

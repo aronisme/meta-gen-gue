@@ -226,5 +226,71 @@ describe('CSV Exporters (2026 Microstock Compliance)', () => {
       expect(mockClick).toHaveBeenCalled();
       expect(mockRevokeObjectURL).toHaveBeenCalled();
     });
+
+    it('should omit items that failed generation or have missing metadata', () => {
+      const mixedItems: ItemMetaBox[] = [
+        ...mockItems,
+        {
+          id: 'failed-1',
+          filename: 'corrupted_or_failed.jpg',
+          fileType: 'photo',
+          assetType: 'image',
+          createdAt: Date.now(),
+          status: 'error',
+          error: 'Model returned invalid JSON shape.',
+        },
+        {
+          id: 'empty-1',
+          filename: 'no_metadata.jpg',
+          fileType: 'photo',
+          assetType: 'image',
+          createdAt: Date.now(),
+        },
+      ];
+
+      const csv = generateAgencyCSV('adobe', mixedItems);
+      expect(csv).toContain('image1.jpg');
+      expect(csv).toContain('vector-art.eps');
+      expect(csv).not.toContain('corrupted_or_failed.jpg');
+      expect(csv).not.toContain('no_metadata.jpg');
+    });
+
+    it('should sanitize non-numeric Adobe categories to empty string to prevent rejection', () => {
+      const itemsWithTextCategory: ItemMetaBox[] = [
+        {
+          id: 'text-cat',
+          filename: 'photo.jpg',
+          fileType: 'photo',
+          assetType: 'image',
+          createdAt: Date.now(),
+          meta: {
+            title: 'Sample Photo',
+            description: 'Sample description',
+            keywords: 'sample, photo',
+            category: 'Technology', // invalid for Adobe, must be numeric 1-21
+          },
+        },
+        {
+          id: 'valid-num-cat',
+          filename: 'valid.jpg',
+          fileType: 'photo',
+          assetType: 'image',
+          createdAt: Date.now(),
+          meta: {
+            title: 'Valid Photo',
+            description: 'Valid description',
+            keywords: 'valid, photo',
+            category: '19', // valid numeric
+          },
+        },
+      ];
+
+      const csv = generateAgencyCSV('adobe', itemsWithTextCategory);
+      // Non-numeric should be emptied out ("")
+      expect(csv).toContain('"photo.jpg","Sample Photo","sample, photo","",""');
+      // Valid numeric should remain ("19")
+      expect(csv).toContain('"valid.jpg","Valid Photo","valid, photo","19",""');
+    });
   });
 });
+

@@ -1,7 +1,17 @@
 'use client';
 
 import { memo, useState } from 'react';
-import { Download, Edit2, FolderPlus, LayoutGrid, LayoutList, Sparkles, UploadCloud } from 'lucide-react';
+import {
+  ChevronDown,
+  ChevronUp,
+  Download,
+  Edit2,
+  FolderPlus,
+  LayoutGrid,
+  LayoutList,
+  Sparkles,
+  UploadCloud,
+} from 'lucide-react';
 import { MetadataItem } from '@/components/MetadataItem';
 import { downloadAgencyCSV, type Agency } from '@/lib/csv';
 import type { ItemMetaBox, MetaOutput } from '@/lib/types';
@@ -40,9 +50,23 @@ function ResultsCardComponent({
   onUpdateSessionTitle,
   onOpenFtpUpload,
 }: ResultsCardProps) {
-  const [viewMode, setViewMode] = useState<'auto' | '1col' | '2col'>('auto');
+  const [viewMode, setViewMode] = useState<'auto' | '1col' | '2col'>(() => {
+    if (typeof window !== 'undefined') {
+      const saved = localStorage.getItem('metagen_view_mode');
+      if (saved === '1col' || saved === '2col' || saved === 'auto') return saved;
+    }
+    return 'auto';
+  });
+  const [allKeywordsFolded, setAllKeywordsFolded] = useState<boolean>(true);
   const [isEditingTitle, setIsEditingTitle] = useState(false);
   const [titleInput, setTitleInput] = useState('');
+
+  const handleSetViewMode = (mode: 'auto' | '1col' | '2col') => {
+    setViewMode(mode);
+    if (typeof window !== 'undefined') {
+      localStorage.setItem('metagen_view_mode', mode);
+    }
+  };
 
   const handleStartEditTitle = () => {
     setTitleInput(sessionTitle || '');
@@ -61,7 +85,7 @@ function ResultsCardComponent({
       ? 'grid-cols-1'
       : viewMode === '2col'
         ? 'grid-cols-1 md:grid-cols-2'
-        : 'grid-cols-1 xl:grid-cols-2';
+        : 'grid-cols-1 md:grid-cols-2 min-[1680px]:grid-cols-3';
 
   return (
     <div className="space-y-4">
@@ -122,25 +146,55 @@ function ResultsCardComponent({
                 <span>+ Sesi Tugas Baru</span>
               </button>
             )}
+
+            {/* Global Keyword Fold Toggle */}
+            {items.length > 0 && (
+              <button
+                type="button"
+                onClick={() => setAllKeywordsFolded((prev) => !prev)}
+                className={`px-3 py-1 text-xs font-bold rounded-xl border-2 border-[#2c1810]
+                           shadow-[2px_2px_0_#2c1810] hover:shadow-[1px_1px_0_#2c1810]
+                           hover:translate-x-[1px] hover:translate-y-[1px]
+                           active:translate-x-[2px] active:translate-y-[2px] active:shadow-none
+                           flex items-center gap-1.5 transition-all cursor-pointer ${
+                             allKeywordsFolded
+                               ? 'bg-[#fff5e6] text-[#2c1810] hover:bg-[#ffe0b2]'
+                               : 'bg-[#ff6b35] text-white hover:bg-[#e85a25]'
+                           }`}
+                title={allKeywordsFolded ? 'Buka semua lipatan keywords di seluruh kartu' : 'Lipat semua keywords untuk menghemat ruang'}
+              >
+                {allKeywordsFolded ? (
+                  <>
+                    <ChevronDown className="w-3.5 h-3.5 text-[#ff6b35]" />
+                    <span>Buka Keyword</span>
+                  </>
+                ) : (
+                  <>
+                    <ChevronUp className="w-3.5 h-3.5 text-white" />
+                    <span>Lipat Keyword</span>
+                  </>
+                )}
+              </button>
+            )}
           </div>
 
           {/* View mode toggle on the right */}
           <div className="flex items-center gap-1 bg-[#fff5e6] p-1 rounded-xl border-2 border-[#2c1810]">
             <button
               type="button"
-              onClick={() => setViewMode('auto')}
+              onClick={() => handleSetViewMode('auto')}
               className={`px-2.5 py-0.5 text-xs font-bold rounded-lg transition-all cursor-pointer ${
                 viewMode === 'auto'
                   ? 'bg-[#ff6b35] text-white shadow-[1px_1px_0_#2c1810]'
                   : 'text-[#2c1810] hover:bg-white/60'
               }`}
-              title="Responsif Otomatis"
+              title="Responsif Otomatis (2 kolom di laptop/desktop, 3 kolom di layar lebar)"
             >
               Auto
             </button>
             <button
               type="button"
-              onClick={() => setViewMode('1col')}
+              onClick={() => handleSetViewMode('1col')}
               className={`px-2.5 py-0.5 rounded-lg transition-all cursor-pointer flex items-center gap-1 text-xs font-bold ${
                 viewMode === '1col'
                   ? 'bg-[#ff6b35] text-white shadow-[1px_1px_0_#2c1810]'
@@ -154,7 +208,7 @@ function ResultsCardComponent({
             </button>
             <button
               type="button"
-              onClick={() => setViewMode('2col')}
+              onClick={() => handleSetViewMode('2col')}
               className={`px-2.5 py-0.5 rounded-lg transition-all cursor-pointer flex items-center gap-1 text-xs font-bold ${
                 viewMode === '2col'
                   ? 'bg-[#ff6b35] text-white shadow-[1px_1px_0_#2c1810]'
@@ -248,6 +302,7 @@ function ResultsCardComponent({
               key={item.id}
               item={item}
               editable
+              forceFoldKeywords={allKeywordsFolded}
               onPatchMeta={onPatchMeta}
               onSave={onSave}
               onTidy={onTidy}

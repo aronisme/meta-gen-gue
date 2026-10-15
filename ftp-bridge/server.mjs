@@ -102,7 +102,9 @@ async function testFtpConnection(profile) {
         username,
         password,
         readyTimeout: 20000,
-        retries: 1,
+        retries: 2,
+        keepaliveInterval: 10000,
+        keepaliveCountMax: 5,
         algorithms: {
           serverHostKey: [
             'ssh-ed25519',
@@ -186,49 +188,79 @@ async function uploadFileToFtp(profile, buffer, remoteFilename) {
 
   if (protocol === 'sftp') {
     const Client = (await import('ssh2-sftp-client')).default;
-    const sftp = new Client();
+    const maxRetries = 2;
+    let lastErr = null;
 
-    try {
-      await sftp.connect({
-        host,
-        port,
-        username,
-        password,
-        readyTimeout: 35000,
-        retries: 2,
-        retry_factor: 2,
-        retry_minTimeout: 2000,
-      });
+    const sftpConfig = {
+      host,
+      port,
+      username,
+      password,
+      readyTimeout: 40000,
+      retries: 2,
+      retry_factor: 2,
+      retry_minTimeout: 2000,
+      keepaliveInterval: 10000,
+      keepaliveCountMax: 5,
+      algorithms: {
+        serverHostKey: [
+          'ssh-ed25519',
+          'ecdsa-sha2-nistp256',
+          'ecdsa-sha2-nistp384',
+          'ecdsa-sha2-nistp521',
+          'rsa-sha2-512',
+          'rsa-sha2-256',
+          'ssh-rsa',
+        ],
+      },
+    };
 
-      if (remoteDir !== '/') {
-        try {
-          await sftp.mkdir(remoteDir, true);
-        } catch {
-          // Folder mungkin sudah ada
+    for (let attempt = 1; attempt <= maxRetries; attempt++) {
+      const sftp = new Client();
+      try {
+        await sftp.connect(sftpConfig);
+
+        if (remoteDir !== '/') {
+          try {
+            await sftp.mkdir(remoteDir, true);
+          } catch {
+            // Folder mungkin sudah ada
+          }
         }
+
+        await sftp.put(buffer, remotePath);
+        await sftp.end();
+
+        const durationMs = Date.now() - start;
+        return {
+          ok: true,
+          remotePath,
+          bytesUploaded: buffer.length,
+          durationMs,
+        };
+      } catch (err) {
+        try { await sftp.end(); } catch {}
+        lastErr = err;
+        const msg = err instanceof Error ? err.message : String(err);
+        const isTransient = /ECONNRESET|ETIMEDOUT|Connection lost|handshake/i.test(msg);
+
+        if (attempt < maxRetries && isTransient) {
+          log('SFTP-RETRY', `Koneksi SFTP terputus (${msg}). Mencoba ulang otomatis (${attempt}/${maxRetries}) setelah jeda 2.5 detik...`, c.yellow);
+          await new Promise((res) => setTimeout(res, 2500));
+          continue;
+        }
+        break;
       }
-
-      await sftp.put(buffer, remotePath);
-      await sftp.end();
-
-      const durationMs = Date.now() - start;
-      return {
-        ok: true,
-        remotePath,
-        bytesUploaded: buffer.length,
-        durationMs,
-      };
-    } catch (err) {
-      try { await sftp.end(); } catch {}
-      const msg = err instanceof Error ? err.message : String(err);
-      return {
-        ok: false,
-        remotePath,
-        bytesUploaded: 0,
-        durationMs: Date.now() - start,
-        error: `SFTP upload gagal: ${msg}`,
-      };
     }
+
+    const msg = lastErr instanceof Error ? lastErr.message : String(lastErr);
+    return {
+      ok: false,
+      remotePath,
+      bytesUploaded: 0,
+      durationMs: Date.now() - start,
+      error: `SFTP upload gagal: ${msg}`,
+    };
   } else {
     const ftp = await import('basic-ftp');
     const client = new ftp.Client(35000);

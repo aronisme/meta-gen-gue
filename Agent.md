@@ -76,3 +76,18 @@ Edit `OPENAI_MODELS` and `GEMINI_MODELS` arrays in `app/page.tsx`.
 - Unit tests: `lib/__tests__/*.test.ts`
 - E2E tests: `e2e/*.spec.ts`
 - Run `pnpm test:run` before committing
+
+<!-- antislop:start -->
+## antislop
+Wajib menggunakan skill `antislop` untuk setiap pekerjaan antarmuka pengguna (UI), tata letak (layout), copywriting/teks, aksesibilitas, dan penulisan komentar kode.
+- UI / visual: gunakan skill `antislop-ui`
+- Copy & text: gunakan skill `antislop-copywriting`
+- People & Aksesibilitas: gunakan skill `antislop-human` (kontras WCAG AA, navigasi keyboard)
+- Mobile / responsif: gunakan skill `antislop-layoutmobile` (bebas overflow horizontal, tap target min 44px)
+- Code comments: gunakan skill `antislop-code` (bebas komentar AI-slop generik)
+
+Terapkan standar keahlian (Craftsmanship Standard C-1 s/d C-5):
+- Menolak teknik visual tanpa tujuan (Purpose-Gate).
+- Larangan keras (Hard Gate): Tidak ada elemen interaktif/tombol mati (R-26), teks tidak kontras (R-25), link tanpa tujuan (R-24), atau data/klaim palsu (R-17/R-36).
+- Verifikasi interaksi satu per satu sebelum menyelesaikan tugas (R-35).
+<!-- antislop:end -->

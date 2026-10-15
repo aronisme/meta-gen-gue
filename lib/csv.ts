@@ -1,4 +1,5 @@
 // lib/csv.ts
+import { toast } from 'sonner';
 import type { ItemMetaBox } from './types';
 
 export type Agency = 'adobe' | 'shutterstock' | 'vecteezy' | 'freepik' | 'dreamstime';
@@ -33,6 +34,21 @@ function sanitizeAdobeTitle(title: string): string {
 }
 
 /**
+ * Sanitizes category for Adobe Stock:
+ * - Adobe CSV requires a numeric ID from 1 to 21.
+ * - If category is not a valid number 1-21, return empty string so Adobe auto-detects or doesn't reject.
+ */
+function sanitizeAdobeCategory(cat: string | undefined): string {
+  if (!cat) return '';
+  const trimmed = cat.trim();
+  const num = parseInt(trimmed, 10);
+  if (!isNaN(num) && num >= 1 && num <= 21) {
+    return String(num);
+  }
+  return '';
+}
+
+/**
  * Generates agency-compliant CSV string for the given agency and items.
  */
 export function generateAgencyCSV(
@@ -44,15 +60,21 @@ export function generateAgencyCSV(
   let rows: Record<string, string>[];
   let delimiter = ',';
 
+  // Filter out items without metadata or with errors so we don't produce invalid empty rows
+  // which causes marketplace portals (like Adobe Stock) to reject the entire CSV upload.
+  const validItems = items.filter(
+    (it) => !it.error && it.meta && Boolean(it.meta.title?.trim() || it.meta.keywords?.trim())
+  );
+
   switch (agency) {
     // Official Adobe header: Filename,Title,Keywords,Category,Releases
     case 'adobe':
       headers = ['Filename', 'Title', 'Keywords', 'Category', 'Releases'];
-      rows = items.map((it) => ({
+      rows = validItems.map((it) => ({
         Filename: it.filename,
         Title: sanitizeAdobeTitle(it.meta?.title ?? ''),
         Keywords: it.meta?.keywords ?? '',
-        Category: it.meta?.category ?? '',
+        Category: sanitizeAdobeCategory(it.meta?.category),
         Releases: (it.meta?.releases ?? '').slice(0, 30),
       }));
       break;
@@ -69,7 +91,7 @@ export function generateAgencyCSV(
         'Mature Content',
         'Editorial',
       ];
-      rows = items.map((it) => {
+      rows = validItems.map((it) => {
         const isIllustration =
           it.meta?.illustration ?? (it.fileType === 'illustration' || it.fileType === 'vector');
         const categories = it.meta?.shutterstockCategory || it.meta?.category || '';
@@ -87,12 +109,12 @@ export function generateAgencyCSV(
 
     // Official Vecteezy header: Filename,Title,Description,Keywords,License (+ Id if present)
     case 'vecteezy': {
-      const hasId = items.some((it) => Boolean(it.meta?.vecteezyId));
+      const hasId = validItems.some((it) => Boolean(it.meta?.vecteezyId));
       headers = hasId
         ? ['Id', 'Filename', 'Title', 'Description', 'Keywords', 'License']
         : ['Filename', 'Title', 'Description', 'Keywords', 'License'];
 
-      rows = items.map((it) => {
+      rows = validItems.map((it) => {
         const fname = options?.vecteezyFtpMode
           ? it.filename.replace(/\.[^/.]+$/, '')
           : it.filename;
@@ -117,7 +139,7 @@ export function generateAgencyCSV(
     case 'freepik': {
       delimiter = ';';
       headers = ['File name', 'Title', 'Keywords', 'Prompt', 'Model'];
-      rows = items.map((it) => {
+      rows = validItems.map((it) => {
         let kw = (it.meta?.keywords ?? '').replace(/,\s+/g, ',');
         // Auto-tag AI content if flagged or AI prompt is present
         if (it.meta?.aiGenerated && !kw.includes('_ai_generated')) {
@@ -137,7 +159,7 @@ export function generateAgencyCSV(
     // Dreamstime header (Official Dreamstime template)
     case 'dreamstime':
       headers = ['Filename', 'Title', 'Description', 'Keywords'];
-      rows = items.map((it) => ({
+      rows = validItems.map((it) => ({
         Filename: it.filename,
         Title: it.meta?.title ?? '',
         Description: it.meta?.description ?? '',
@@ -163,7 +185,25 @@ export function downloadAgencyCSV(
   items: ItemMetaBox[],
   options?: CSVExportOptions
 ) {
+  const validItems = items.filter(
+    (it) => !it.error && it.meta && Boolean(it.meta.title?.trim() || it.meta.keywords?.trim())
+  );
+  const skippedCount = items.length - validItems.length;
+
+  if (validItems.length === 0) {
+    if (typeof window !== 'undefined') {
+      toast.error('Tidak ada item dengan metadata lengkap untuk diekspor ke CSV.');
+    }
+    return;
+  }
+
+  if (skippedCount > 0 && typeof window !== 'undefined') {
+    toast.warning(
+      `${skippedCount} file tanpa metadata dilewati dari CSV agar upload ke agensi tidak ditolak.`
+    );
+  }
+
   const stamp = new Date().toISOString().slice(0, 19).replace(/[:T]/g, '-');
-  const csv = generateAgencyCSV(agency, items, options);
+  const csv = generateAgencyCSV(agency, validItems, options);
   download(`${agency}-metadata-${stamp}.csv`, csv);
 }

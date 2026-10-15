@@ -1,49 +1,52 @@
 # Current Project State
 
 ## Last Updated
-2026-10-14 23:15
+2026-10-15 20:30
 
 ## Current Objective
-MetaGen Creator Suite v1.0.0 live di Cloudflare Pages (https://meta-gen-gue.pages.dev) terintegrasi dengan MetaGen Local FTP Bridge di port 45678 untuk upload microstock skala besar tanpa batas payload/timeout, auto-start Windows permanen, dan background queue persistence.
+MetaGen Creator Suite v1.0.0 live di Cloudflare Pages (https://meta-gen-gue.pages.dev) terintegrasi dengan MetaGen Local FTP Bridge di port 45678 untuk upload microstock skala besar tanpa batas payload/timeout, auto-start Windows permanen, background queue persistence, auto-retry SFTP anti-drop, validasi Adobe Stock CSV, serta kepatuhan standar craftmanship anti-slop pada seluruh antarmuka dan kode.
 
 ## Completed Recently
-- **Cloudflare Pages Deployment & Static Export Pipeline**:
-  - Dideploy live ke `https://meta-gen-gue.pages.dev` via `scripts/build-pages.mjs` dan Cloudflare Wrangler.
-- **Local FTP Bridge (Port 45678) & Credential Recovery**:
-  - Server mandiri `ftp-bridge/server.mjs` (SFTP/FTP client, ExifTool embed, health endpoint, PNA/CORS).
-  - Berhasil mengekstrak 6 akun FTP dari Edge LevelDB dan mensinkronisasikannya via `/api/ftp/profiles`.
-- **Background Upload & Keep-Alive Tab Navigation**:
-  - Navigasi tab di `app/page.tsx` diubah ke CSS `block`/`hidden` (komponen tidak di-unmount saat pindah tab).
-  - Antrean upload di `FtpQueueView.tsx` tetap berjalan di latar belakang dengan indikator live di tab, side rail, dan floating pill.
-- **Permanent Windows Auto-Start & Global CLI Tool**:
-  - `ftp-bridge/run-hidden.vbs` & `install-autostart.bat` untuk eksekusi senyap di latar belakang tiap PC menyala.
-  - Perintah global `metagen-bridge` (status, install, start, stop, uninstall) via `npm link`.
-  - Installer 1-baris langsung dari GitHub: `irm https://raw.githubusercontent.com/aronisme/meta-gen-gue/main/install.ps1 | iex`.
+- **Studio Sticky Sidebar & Pinned Bottom CTA**:
+  - Memperbaiki layout kolom kiri `StudioPanel` dengan `lg:self-start lg:sticky lg:top-4 xl:top-6 lg:max-h-[calc(100vh-2rem)] flex flex-col`.
+  - Memisahkan area input scrollable mandiri dan mem-pinning tombol Generate Metadata + progress bar di bagian bawah panel secara permanen.
+- **Fixed Responsive Auto Grid & LocalStorage Persistence**:
+  - Memperbaiki mode tampilan Auto di `ResultsCard` agar secara adaptif mengalokasikan 2 kolom pada layar laptop/desktop (≥768px) dan 3 kolom pada layar lebar (≥1680px), serta menyimpan preferensi tampilan ke `localStorage`.
+- **Card Keywords Accordion Fold (Lipatan Kata Kunci)**:
+  - Mengimplementasikan fitur lipatan/accordion kata kunci pada setiap kartu `MetadataItem` (mereduksi tinggi kartu ~50% saat terlipat dengan preview 8 kata kunci teratas + pill expand).
+  - Menyediakan tombol global *Lipat Semua Keyword* / *Buka Keyword* di toolbar atas `ResultsCard`.
+  - Menambahkan penghitung kata (*word counter*) pada kolom Description.
+- **Adobe Stock CSV Sanitization & Error Exclusion**:
+  - Memperbaiki `lib/csv.ts` agar otomatis menyaring baris error/tanpa metadata agar upload CSV ke Adobe Stock tidak ditolak.
+  - Menambahkan sanitasi numerik 1–21 untuk kategori Adobe Stock.
+- **FTP Queue Error Filtering & One-Click Retry**:
+  - Memperbaiki `components/FtpQueueView.tsx` agar membedakan item gagal AI, tidak mencentangnya secara default, dan menambahkan tombol *Coba Lagi Gagal*.
+- **SFTP Resilience & Keepalive**:
+  - Menambahkan SSH keepalive (10s) dan loop auto-retry 2x di `ftp-bridge/server.mjs` untuk mengatasi `ECONNRESET` / handshake drop.
+  - Menambahkan pacing delay 800ms antar file di antrean.
+- **Resilient Metadata Normalizer**:
+  - Mengganti validator kaku dengan `normalizeMeta` di `app/page.tsx` yang toleran terhadap keywords array dan casing field.
 
 ## Currently Working On
-- Sistem stabil dan aktif di latar belakang (port 45678, status ready).
-- Menunggu kebutuhan penyesuaian atau fitur baru dari pengguna di sesi berikutnya.
+- Melakukan deployment rilis terbaru ke Cloudflare Pages (`https://meta-gen-gue.pages.dev`).
 
 ## Remaining Tasks
 - Pengujian batch upload gambar/video volume besar secara langsung ke akun contributor Adobe Stock / Dreamstime.
-- Penambahan agensi FTP tambahan jika diperlukan di masa depan.
 
 ## Blockers / Errors
-- None.
+- None. Semua 67 unit test Vitest lolos dan build Next.js lulus.
 
 ## Files Recently Changed
-- `app/page.tsx`
+- `components/StudioPanel.tsx`
+- `components/ResultsCard.tsx`
+- `components/MetadataItem.tsx`
 - `components/FtpQueueView.tsx`
-- `components/AppSideRail.tsx`
+- `lib/csv.ts`
+- `lib/keywords.ts`
+- `lib/__tests__/csv.test.ts`
 - `ftp-bridge/server.mjs`
-- `ftp-bridge/cli.mjs`
-- `ftp-bridge/run-hidden.vbs`
-- `install.ps1`
-- `install-autostart.bat`
-- `uninstall-autostart.bat`
-- `check-status.bat`
-- `package.json`
+- `app/page.tsx`
 
 ## Next Recommended Step
-- Akses `https://meta-gen-gue.pages.dev` untuk memproses metadata dan mengunggah aset microstock.
-- Periksa status bridge kapan saja di terminal via perintah `metagen-bridge status`.
+- Verifikasi hasil deploy di `https://meta-gen-gue.pages.dev`.
+- Pastikan local bridge aktif via `metagen-bridge status`.

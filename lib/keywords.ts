@@ -56,7 +56,7 @@ export function cleanKeywords(
   options?: CleanKeywordsOptions
 ): string {
   const filterSubjective = options?.filterSubjective ?? true;
-  const maxRootWordRepetition = options?.maxRootWordRepetition ?? 3;
+  const maxRootWordRepetition = options?.maxRootWordRepetition ?? 4;
 
   const out: string[] = [];
   const seenExact = new Set<string>(); // case-insensitive dedupe

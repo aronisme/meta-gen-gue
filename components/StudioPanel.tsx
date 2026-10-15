@@ -120,37 +120,49 @@ function StudioPanelComponent({
     void addFiles(Array.from(e.dataTransfer.files || []));
   };
 
+  const hasFiles = files.length > 0;
+
   return (
-    <div className="bg-[#fffdf9] border-2 border-[#2c1810] shadow-[6px_6px_0_#2c1810] rounded-2xl p-5 space-y-4">
-      {/* 1. Upload Dropzone */}
-      <div
-        onDrop={onDrop}
-        onDragOver={(e) => e.preventDefault()}
-        className="border-2 border-dashed border-[#2c1810] rounded-xl p-6 text-center bg-[#fff5e6]/60 transition-all hover:bg-[#fff5e6] flex flex-col items-center justify-center cursor-pointer"
-        onClick={() => document.getElementById(fileInputId)?.click()}
-      >
-        <input
-          id={fileInputId}
-          type="file"
-          accept="image/*,video/mp4,video/webm,video/quicktime"
-          multiple
-          className="sr-only"
-          onChange={(e) => {
-            void addFiles(Array.from(e.target.files || []));
-            e.target.value = '';
-          }}
-        />
-        <div className="w-10 h-10 mb-2 rounded-xl bg-white border-2 border-[#2c1810] shadow-[2px_2px_0_#2c1810] flex items-center justify-center text-[#ff6b35]">
-          <Upload className="w-5 h-5" />
+    <div className="bg-[#fffdf9] border-2 border-[#2c1810] shadow-[6px_6px_0_#2c1810] rounded-2xl p-4 sm:p-5 flex flex-col max-h-[calc(100vh-2.5rem)] lg:max-h-[calc(100vh-3rem)]">
+      {/* Scrollable Upper Section for Inputs & Settings */}
+      <div className="flex-1 min-h-0 overflow-y-auto pr-1 space-y-3.5 scrollbar-thin">
+        {/* 1. Upload Dropzone */}
+        <div
+          onDrop={onDrop}
+          onDragOver={(e) => e.preventDefault()}
+          className={`border-2 border-dashed border-[#2c1810] rounded-xl text-center bg-[#fff5e6]/60 transition-all hover:bg-[#fff5e6] flex flex-col items-center justify-center cursor-pointer ${
+            hasFiles ? 'p-3.5' : 'p-6'
+          }`}
+          onClick={() => document.getElementById(fileInputId)?.click()}
+        >
+          <input
+            id={fileInputId}
+            type="file"
+            accept="image/*,video/mp4,video/webm,video/quicktime"
+            multiple
+            className="sr-only"
+            onChange={(e) => {
+              void addFiles(Array.from(e.target.files || []));
+              e.target.value = '';
+            }}
+          />
+          <div
+            className={`rounded-xl bg-white border-2 border-[#2c1810] shadow-[2px_2px_0_#2c1810] flex items-center justify-center text-[#ff6b35] ${
+              hasFiles ? 'w-8 h-8 mb-1.5' : 'w-10 h-10 mb-2'
+            }`}
+          >
+            <Upload className={hasFiles ? 'w-4 h-4' : 'w-5 h-5'} />
+          </div>
+          <p className="font-bold text-[#2c1810] text-sm">
+            {hasFiles ? '+ Tambah Gambar / Video' : 'Drag & Drop Gambar / Video'}
+          </p>
+          <p className="text-xs text-[#6b5344] mt-0.5 font-medium">
+            JPG, PNG, WEBP, MP4/MOV (Maks. 30 detik)
+          </p>
+          <span className="inline-flex items-center gap-1 text-[10px] text-emerald-800 bg-emerald-50 border border-emerald-300 font-bold px-2 py-0.5 rounded-full mt-2">
+            🛡️ Proteksi Anti-Duplikat Sesi Aktif
+          </span>
         </div>
-        <p className="font-bold text-[#2c1810] text-sm">Drag & Drop Gambar / Video</p>
-        <p className="text-xs text-[#6b5344] mt-0.5 font-medium">
-          JPG, PNG, WEBP, MP4/MOV (Maks. 30 detik)
-        </p>
-        <span className="inline-flex items-center gap-1 text-[10px] text-emerald-800 bg-emerald-50 border border-emerald-300 font-bold px-2 py-0.5 rounded-full mt-2.5">
-          🛡️ Proteksi Anti-Duplikat Sesi Aktif
-        </span>
-      </div>
 
       {/* Selected files badge info */}
       {!!files.length && (
@@ -312,26 +324,30 @@ function StudioPanelComponent({
           )}
         </div>
       </div>
+      {/* End of Scrollable Upper Section */}
+      </div>
 
-      {/* 4. Bottom Terracotta CTA Button matching Mockup */}
-      <div className="pt-2">
+      {/* 4. Pinned Bottom CTA Button & Live Progress */}
+      <div className="shrink-0 pt-3 border-t-2 border-[#2c1810]/15 bg-[#fffdf9] mt-1 space-y-2">
         <Button
           disabled={!files.length || busy}
           onClick={onGenerate}
-          className="w-full h-12 bg-[#ff6b35] hover:bg-[#e55a2b] text-white border-2 border-[#2c1810] shadow-[4px_4px_0_#2c1810] hover:shadow-[2px_2px_0_#2c1810] hover:translate-x-[2px] hover:translate-y-[2px] active:translate-x-[4px] active:translate-y-[4px] active:shadow-none font-bold text-base rounded-xl transition-all cursor-pointer disabled:opacity-50 disabled:cursor-not-allowed disabled:transform-none"
+          className="w-full h-12 bg-[#ff6b35] hover:bg-[#e55a2b] text-white border-2 border-[#2c1810] shadow-[4px_4px_0_#2c1810] hover:shadow-[2px_2px_0_#2c1810] hover:translate-x-[2px] hover:translate-y-[2px] active:translate-x-[4px] active:translate-y-[4px] active:shadow-none font-bold text-sm sm:text-base rounded-xl transition-all cursor-pointer disabled:opacity-50 disabled:cursor-not-allowed disabled:transform-none"
         >
           {busy ? (
-            <span className="flex items-center gap-2 truncate px-2">
+            <span className="flex items-center justify-center gap-2 truncate px-1 w-full">
               <span className="inline-block w-4 h-4 border-2 border-white border-t-transparent rounded-full animate-spin shrink-0"></span>
-              <span className="truncate">{statusText || `Memproses (${Math.round(progress)}%)...`}</span>
+              <span className="truncate">
+                Memproses ({Math.round((progress / 100) * files.length) || 1}/{files.length})...
+              </span>
             </span>
           ) : (
-            'Generate Metadata'
+            `Generate Metadata (${files.length})`
           )}
         </Button>
 
         {busy && (
-          <div className="mt-2 space-y-1">
+          <div className="space-y-1.5 pt-0.5">
             <div className="w-full h-3 bg-[#fff5e6] border-2 border-[#2c1810] rounded-full overflow-hidden p-0.5 shadow-[2px_2px_0_#2c1810]">
               <div
                 className="h-full bg-[#ff6b35] rounded-full transition-all duration-300"
@@ -339,10 +355,10 @@ function StudioPanelComponent({
               />
             </div>
             <div className="flex justify-between items-center text-[11px] font-bold text-[#6b5344] gap-2">
-              <span className="truncate max-w-[200px]" title={statusText || `Progress: ${Math.round(progress)}%`}>
+              <span className="truncate flex-1 min-w-0" title={statusText || `Progress: ${Math.round(progress)}%`}>
                 {statusText || `Progress: ${Math.round(progress)}%`}
               </span>
-              <span className="shrink-0 font-mono">
+              <span className="shrink-0 font-mono text-[10px] bg-[#fff5e6] px-1.5 py-0.5 rounded border border-[#2c1810]">
                 {Math.round((progress / 100) * files.length)} / {files.length} Selesai
               </span>
             </div>

@@ -66,6 +66,8 @@ interface LocalQueueItem {
   error?: string;
   thumbDataUrl?: string;
   metadataEmbedded?: boolean;
+  hasValidMeta?: boolean;
+  metaError?: string;
 }
 
 export function FtpQueueView({
@@ -171,6 +173,9 @@ export function FtpQueueView({
 
       const itemsWithFiles = items.map((it) => {
         const matchedFile = fileMap.get(it.filename.toLowerCase());
+        const hasValidMeta = Boolean(
+          !it.error && it.meta && Boolean(it.meta.title?.trim()) && Boolean(it.meta.keywords?.trim())
+        );
         return {
           id: it.id,
           itemId: it.id,
@@ -179,6 +184,8 @@ export function FtpQueueView({
           fileSize: matchedFile?.size || 0,
           assetType: it.assetType,
           thumbDataUrl: it.thumbDataUrl,
+          hasValidMeta,
+          metaError: it.error,
           status: 'pending' as const,
           progress: 0,
         };
@@ -262,12 +269,12 @@ export function FtpQueueView({
         });
       });
 
-      // Default selection: Pertahankan pilihan user jika sudah ada
+      // Default selection: Jangan centang item yang gagal AI / belum ada metadata
       setSelectedQueueIds((prevSelected) => {
         if (prevSelected.size > 0) return prevSelected;
         const initialSelected = new Set<string>();
         for (const q of newQueue) {
-          if (!skipDuplicates || !q.duplicateInfo?.isDuplicate) {
+          if (q.file && q.hasValidMeta && (!skipDuplicates || !q.duplicateInfo?.isDuplicate)) {
             initialSelected.add(q.id);
           }
         }
@@ -290,6 +297,7 @@ export function FtpQueueView({
     return queue.filter((q) => {
       if (!selectedQueueIds.has(q.id) || !q.file) return false;
       if (q.status === 'success') return false;
+      if (!q.hasValidMeta) return false;
       if (skipDuplicates && q.duplicateInfo?.isDuplicate) return false;
       return true;
     }).length;
@@ -348,13 +356,34 @@ export function FtpQueueView({
   };
 
   const selectUnuploadedOnly = () => {
-    const unuploaded = queue.filter((q) => !q.duplicateInfo?.isDuplicate && q.status !== 'success');
+    const unuploaded = queue.filter(
+      (q) => q.hasValidMeta && !q.duplicateInfo?.isDuplicate && q.status !== 'success'
+    );
     setSelectedQueueIds(new Set(unuploaded.map((q) => q.id)));
     toast.info(`Memilih ${unuploaded.length} file yang belum pernah diunggah.`);
   };
 
   const clearSelection = () => {
     setSelectedQueueIds(new Set());
+  };
+
+  // Coba ulang unggahan yang sebelumnya gagal
+  const handleRetryFailed = () => {
+    const failedItems = queue.filter((q) => q.status === 'error' && q.file && q.hasValidMeta);
+    if (failedItems.length === 0) {
+      toast.info('Tidak ada file gagal yang dapat dicoba lagi.');
+      return;
+    }
+    const failedIds = new Set(failedItems.map((q) => q.id));
+    setQueue((prev) =>
+      prev.map((item) =>
+        failedIds.has(item.id)
+          ? { ...item, status: 'pending', error: undefined, progress: 0 }
+          : item
+      )
+    );
+    setSelectedQueueIds(failedIds);
+    toast.success(`${failedItems.length} file gagal direset ke antrean. Klik "Mulai Upload" untuk mencoba kembali.`);
   };
 
   // Upload cancellation handler
@@ -395,15 +424,23 @@ export function FtpQueueView({
       return;
     }
 
-    const readyItems = targetItems.filter((q) => !!q.file);
+    const readyItems = targetItems.filter((q) => Boolean(q.file && q.hasValidMeta));
     if (readyItems.length === 0) {
+      const missingMeta = targetItems.filter((q) => !q.hasValidMeta);
+      if (missingMeta.length > 0) {
+        toast.error(
+          `${missingMeta.length} file yang dipilih tidak dapat diunggah karena belum memiliki metadata lengkap atau gagal AI generate.`
+        );
+        return;
+      }
       toast.error('File fisik belum dimuat ke memori browser (0.0 MB). Klik "Pasangkan File Asli dari Komputer".');
       document.getElementById('ftp-queue-attach-input')?.click();
       return;
     }
 
     if (readyItems.length < targetItems.length) {
-      toast.warning(`${targetItems.length - readyItems.length} file dilewati karena file fisiknya belum dipasangkan.`);
+      const skippedCount = targetItems.length - readyItems.length;
+      toast.warning(`${skippedCount} file dilewati karena belum memiliki file fisik atau metadata.`);
     }
 
     setIsUploading(true);
@@ -470,6 +507,17 @@ export function FtpQueueView({
           prev.map((item) =>
             item.id === qItem.id
               ? { ...item, status: 'error', error: 'File sumber tidak tersedia di memori' }
+              : item
+          )
+        );
+        continue;
+      }
+
+      if (!qItem.hasValidMeta) {
+        setQueue((prev) =>
+          prev.map((item) =>
+            item.id === qItem.id
+              ? { ...item, status: 'error', error: 'Metadata belum digenerate atau gagal' }
               : item
           )
         );
@@ -577,6 +625,11 @@ export function FtpQueueView({
         );
       } finally {
         activeAbortControllerRef.current = null;
+      }
+
+      // Pacing delay (800ms) antar file agar server SFTP agensi (Adobe Stock) tidak me-reset koneksi (ECONNRESET)
+      if (i < targetItems.length - 1 && !abortUploadRef.current) {
+        await new Promise((res) => setTimeout(res, 800));
       }
     }
 
@@ -887,27 +940,40 @@ export function FtpQueueView({
                 </div>
               )}
 
-              {/* Main Upload Trigger */}
-              <div className="flex items-center gap-2">
-                <Button
-                  disabled={isUploading || selectedReadyCount === 0 || !selectedProfile}
-                  onClick={handleStartUpload}
-                  className="h-9.5 bg-[#ff6b35] hover:bg-[#e55a2b] text-white border-2 border-[#2c1810] shadow-[2px_2px_0_#2c1810] font-black text-xs px-4 cursor-pointer disabled:opacity-50 transition-all hover:translate-x-[1px] hover:translate-y-[1px] active:translate-x-[2px] active:translate-y-[2px]"
-                >
-                  {isUploading ? (
-                    <span className="flex items-center gap-1.5">
-                      <RefreshCw className="w-3.5 h-3.5 animate-spin" />
-                      <span>
-                        Mengunggah ({uploadStats.completedCount}/{selectedReadyCount})...
+                {/* Retry Failed Button */}
+                {queue.some((q) => q.status === 'error' && q.file && q.hasValidMeta) && !isUploading && (
+                  <Button
+                    type="button"
+                    onClick={handleRetryFailed}
+                    className="h-9.5 bg-amber-500 hover:bg-amber-600 text-white border-2 border-[#2c1810] shadow-[2px_2px_0_#2c1810] font-black text-xs px-3.5 cursor-pointer transition-all hover:translate-x-[1px] hover:translate-y-[1px]"
+                    title="Pilih dan reset file yang gagal diunggah untuk dicoba kembali"
+                  >
+                    <RefreshCw className="w-3.5 h-3.5 mr-1.5" />
+                    <span>Coba Lagi Gagal ({queue.filter((q) => q.status === 'error' && q.file && q.hasValidMeta).length})</span>
+                  </Button>
+                )}
+
+                {/* Main Upload Trigger */}
+                <div className="flex items-center gap-2">
+                  <Button
+                    disabled={isUploading || selectedReadyCount === 0 || !selectedProfile}
+                    onClick={handleStartUpload}
+                    className="h-9.5 bg-[#ff6b35] hover:bg-[#e55a2b] text-white border-2 border-[#2c1810] shadow-[2px_2px_0_#2c1810] font-black text-xs px-4 cursor-pointer disabled:opacity-50 transition-all hover:translate-x-[1px] hover:translate-y-[1px] active:translate-x-[2px] active:translate-y-[2px]"
+                  >
+                    {isUploading ? (
+                      <span className="flex items-center gap-1.5">
+                        <RefreshCw className="w-3.5 h-3.5 animate-spin" />
+                        <span>
+                          Mengunggah ({uploadStats.completedCount}/{selectedReadyCount})...
+                        </span>
                       </span>
-                    </span>
-                  ) : (
-                    <span className="flex items-center gap-1.5">
-                      <Upload className="w-3.5 h-3.5" />
-                      <span>Mulai Upload {selectedReadyCount > 0 ? `(${selectedReadyCount})` : ''}</span>
-                    </span>
-                  )}
-                </Button>
+                    ) : (
+                      <span className="flex items-center gap-1.5">
+                        <Upload className="w-3.5 h-3.5" />
+                        <span>Mulai Upload {selectedReadyCount > 0 ? `(${selectedReadyCount})` : ''}</span>
+                      </span>
+                    )}
+                  </Button>
 
                 {isUploading && (
                   <Button
@@ -1088,6 +1154,13 @@ export function FtpQueueView({
                             <AlertTriangle className="w-3.5 h-3.5 text-stone-500 shrink-0" />
                             <span>Menunggu File Fisik</span>
                           </div>
+                        ) : !qItem.hasValidMeta ? (
+                          <div className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-lg bg-red-50 border border-red-300 text-red-800 text-[11px] font-semibold">
+                            <AlertTriangle className="w-3.5 h-3.5 text-red-600 shrink-0" />
+                            <span title={qItem.metaError || 'Metadata belum lengkap atau gagal generate'}>
+                              {qItem.metaError ? 'Gagal AI (Perlu Metadata)' : 'Belum Ada Metadata'}
+                            </span>
+                          </div>
                         ) : isDup ? (
                           <div className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-lg bg-amber-50 border border-amber-300 text-amber-900 text-[11px] font-semibold">
                             <AlertTriangle className="w-3.5 h-3.5 text-amber-600 shrink-0" />
@@ -1107,12 +1180,28 @@ export function FtpQueueView({
 
                       {/* Upload Status */}
                       <td className="p-3 text-right font-mono text-[11px]">
-                        {!qItem.file && qItem.status === 'pending' && (
+                        {!qItem.hasValidMeta && (
+                          <div className="flex flex-col items-end gap-1">
+                            <span className="text-red-700 font-bold bg-red-50 px-2 py-0.5 rounded border border-red-200 text-[10px]">
+                              Perlu Metadata
+                            </span>
+                            {onNavigateToStudio && (
+                              <button
+                                type="button"
+                                onClick={onNavigateToStudio}
+                                className="text-[10px] text-[#ff6b35] hover:underline font-bold cursor-pointer"
+                              >
+                                Ke Studio &rarr;
+                              </button>
+                            )}
+                          </div>
+                        )}
+                        {qItem.hasValidMeta && !qItem.file && qItem.status === 'pending' && (
                           <span className="text-amber-800 font-bold bg-amber-50 px-2 py-0.5 rounded border border-amber-200">
                             Perlu File Asli
                           </span>
                         )}
-                        {qItem.file && qItem.status === 'pending' && (
+                        {qItem.hasValidMeta && qItem.file && qItem.status === 'pending' && (
                           <span className="text-[#6b5344] font-bold">Antrean</span>
                         )}
                         {qItem.status === 'uploading' && (

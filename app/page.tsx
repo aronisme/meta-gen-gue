@@ -67,7 +67,7 @@ Analyze the provided sequence of chronological keyframes captured across the dur
 1. **Title & Description Guidelines:**
    - **Title:** Create a concise, commercially appealing video title around ${titleLength} characters (maximum 70 characters). Crucial: DO NOT use any commas in the title (Adobe Stock CSV strictly forbids commas in title). Synthesize the main subject, continuous action, and setting across the footage (e.g., 'Woman walking in sunny park while holding smartphone').
    - **Description:** Write a factual, detailed description around ${descriptionLength} words detailing the complete progression of action from beginning to end, camera motion (e.g., static, panning, tracking, aerial, slow motion), lighting, and setting.
-   - **Keyword Best Practices:** Generate exactly ${keywordsCount} comma-separated, SEO-friendly keywords. In addition to primary subjects and setting, include video-specific motion keywords (e.g., action verbs, walking, running, panning, movement, footage, 4k, slow motion, aerial, timelapse, tracking shot). The first 10 keywords MUST be the most direct visual subjects and actions.
+   - **Keyword Best Practices:** Generate a rich list of exactly ${keywordsCount} comma-separated, SEO-friendly keywords without stopping early. In addition to primary subjects and setting, include video-specific motion keywords (e.g., action verbs, walking, running, panning, movement, footage, 4k, slow motion, aerial, timelapse, tracking shot). The first 10 keywords MUST be the most direct visual subjects and actions.
 
 2. **Guidelines for People & Action in Video:**
    - Identify activities as dynamic processes (e.g., running, gesturing, smiling, typing). Include gender, age group, and emotion if relevant.
@@ -99,7 +99,7 @@ Strict JSON format: {"title": "...", "description": "...", "keywords": "...", "c
 1. **General Guidelines for Titles and Keywords**
    - **Title:** Create a concise, descriptive, and commercially appealing title around ${titleLength} characters (maximum 70 characters). Crucial: DO NOT use any commas in the title (Adobe Stock CSV strictly forbids commas in title). Capitalize only the first word and proper nouns. Avoid brand or people's names.
    - **Description:** Write a detailed, factual description around ${descriptionLength} words. Capitalize only the first word and proper nouns.
-   - **Keyword Best Practices:** Use singular nouns. Use factual adjectives (color, texture) and avoid subjective ones (cute, beautiful). Generate exactly ${keywordsCount} comma-separated, SEO-friendly keywords. The first 10 keywords MUST be the most direct, observable visual subjects.
+   - **Keyword Best Practices:** Use singular nouns. Use factual adjectives (color, texture) and avoid subjective ones (cute, beautiful). Generate a rich, comprehensive list of exactly ${keywordsCount} comma-separated, SEO-friendly keywords without stopping early (cover visual subjects, background, environment, lighting, mood, concept, industry, and composition). The first 10 keywords MUST be the most direct, observable visual subjects.
 
 2. **Guidelines for People**
    - **Representation:** Describe subjects accurately. Include gender, age, and ethnicity/race if known.
@@ -154,9 +154,58 @@ async function withRetry<T>(fn: () => Promise<T>, tries = 3, backoffMs = 600): P
   throw last;
 }
 
-function isValidMeta(x: unknown): x is MetaOutput {
-  const obj = x as Partial<MetaOutput> | null;
-  return !!obj && typeof obj.title === 'string' && typeof obj.description === 'string' && typeof obj.keywords === 'string';
+function normalizeMeta(raw: unknown): MetaOutput | null {
+  if (!raw || typeof raw !== 'object') return null;
+
+  let obj = raw as Record<string, unknown>;
+  // Unwrap nested objects if model wrapped output in a data/metadata container
+  if (obj.data && typeof obj.data === 'object') obj = obj.data as Record<string, unknown>;
+  else if (obj.metadata && typeof obj.metadata === 'object') obj = obj.metadata as Record<string, unknown>;
+  else if (obj.result && typeof obj.result === 'object') obj = obj.result as Record<string, unknown>;
+
+  // Case-insensitive key lookup helper
+  const getField = (keys: string[]): unknown => {
+    for (const k of keys) {
+      if (obj[k] !== undefined && obj[k] !== null) return obj[k];
+      const foundKey = Object.keys(obj).find((x) => x.toLowerCase() === k.toLowerCase());
+      if (foundKey && obj[foundKey] !== undefined && obj[foundKey] !== null) return obj[foundKey];
+    }
+    return undefined;
+  };
+
+  const rawTitle = getField(['title', 'name', 'headline']);
+  const rawDesc = getField(['description', 'desc', 'caption', 'summary']);
+  const rawKeywords = getField(['keywords', 'tags', 'keyword_list', 'tag_list']);
+
+  const title = typeof rawTitle === 'string' ? rawTitle.trim() : '';
+  let description = typeof rawDesc === 'string' ? rawDesc.trim() : '';
+  if (!description && title) description = title;
+
+  let keywords = '';
+  if (Array.isArray(rawKeywords)) {
+    keywords = rawKeywords.map((k) => String(k).trim()).filter(Boolean).join(', ');
+  } else if (typeof rawKeywords === 'string') {
+    keywords = rawKeywords.trim();
+  }
+
+  // Minimum requirement: title and keywords
+  if (!title || !keywords) return null;
+
+  const rawCat = getField(['category', 'category_id', 'adobeCategory']);
+  const rawShutterCat = getField(['shutterstockCategory', 'shutterstock_category']);
+  const rawIllus = getField(['illustration', 'is_illustration', 'vector']);
+  const rawModel = getField(['aiModel', 'model']);
+
+  return {
+    title,
+    description: description || title,
+    keywords,
+    category: typeof rawCat === 'string' || typeof rawCat === 'number' ? String(rawCat).trim() : undefined,
+    shutterstockCategory: typeof rawShutterCat === 'string' ? rawShutterCat.trim() : undefined,
+    illustration: typeof rawIllus === 'boolean' ? rawIllus : undefined,
+    aiGenerated: true,
+    aiModel: typeof rawModel === 'string' ? rawModel : undefined,
+  };
 }
 
 async function pLimit<T>(
@@ -484,26 +533,23 @@ export default function App() {
         );
 
         const parsed: unknown = await res.json();
-        if (!isValidMeta(parsed)) throw new Error('Model returned invalid JSON shape.');
+        const normalized = normalizeMeta(parsed);
+        if (!normalized) throw new Error('Model returned invalid JSON shape.');
 
-        const parsedMeta = parsed as unknown as Record<string, unknown>;
         const detectedIllustration =
-          typeof parsedMeta.illustration === 'boolean'
-            ? parsedMeta.illustration
+          typeof normalized.illustration === 'boolean'
+            ? normalized.illustration
             : fileType === 'illustration' || fileType === 'vector';
 
         const fixed: MetaOutput = {
-          title: parsed.title,
-          description: parsed.description,
-          keywords: cleanKeywords(parsed.keywords, keywordsCount),
-          category: typeof parsedMeta.category === 'string' ? parsedMeta.category.trim() : undefined,
-          shutterstockCategory:
-            typeof parsedMeta.shutterstockCategory === 'string'
-              ? parsedMeta.shutterstockCategory.trim()
-              : undefined,
+          title: normalized.title,
+          description: normalized.description,
+          keywords: cleanKeywords(normalized.keywords, keywordsCount),
+          category: normalized.category,
+          shutterstockCategory: normalized.shutterstockCategory,
           illustration: detectedIllustration,
           aiGenerated: true,
-          aiModel: (parsedMeta.aiModel as string) || (model === 'auto' ? 'Auto (GAS Proxy)' : model),
+          aiModel: normalized.aiModel || (model === 'auto' ? 'Auto (GAS Proxy)' : model),
         };
 
         const resolvedFileType: FileType = isVideo
@@ -656,13 +702,19 @@ export default function App() {
       );
 
       const parsed: unknown = await res.json();
-      if (!isValidMeta(parsed)) throw new Error('Model returned invalid JSON shape.');
+      const normalized = normalizeMeta(parsed);
+      if (!normalized) throw new Error('Model returned invalid JSON shape.');
       const fixed: MetaOutput = {
-        title: parsed.title,
-        description: parsed.description,
-        keywords: cleanKeywords(parsed.keywords, keywordsCount),
+        title: normalized.title,
+        description: normalized.description,
+        keywords: cleanKeywords(normalized.keywords, keywordsCount),
+        category: normalized.category ?? it.meta?.category,
+        shutterstockCategory: normalized.shutterstockCategory ?? it.meta?.shutterstockCategory,
+        illustration: normalized.illustration ?? it.meta?.illustration,
+        aiGenerated: true,
+        aiModel: normalized.aiModel || it.meta?.aiModel,
       };
-      const updated: ItemMetaBox = { ...it, meta: fixed, error: undefined };
+      const updated: ItemMetaBox = { ...it, meta: fixed, error: undefined, status: 'success' };
       setItems((prev) => prev.map((i) => (i.id === id ? updated : i)));
       await saveHistoryItem(updated);
     } catch (e: unknown) {
@@ -797,7 +849,7 @@ export default function App() {
           <div className={tab === 'generate' ? 'block' : 'hidden'}>
             <div className="grid grid-cols-1 lg:grid-cols-12 gap-6 items-start">
               {/* Left Column: Unified Studio Control Panel */}
-              <div className="lg:col-span-4 xl:col-span-3 lg:sticky lg:top-6">
+              <div className="lg:col-span-4 xl:col-span-3 lg:sticky lg:top-4 xl:top-6 lg:self-start lg:max-h-[calc(100vh-2rem)] flex flex-col">
                 <StudioPanel
                   files={files}
                   busy={busy}

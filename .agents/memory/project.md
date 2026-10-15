@@ -76,6 +76,7 @@
 - **No Direct UI Edit**: Komponen di `components/ui/*` adalah modul shadcn/ui murni. Kustomisasi dilakukan melalui *wrapper* atau penyesuaian kelas di komponen fitur.
 - **Privacy First**: API key tidak pernah disimpan di server backend; hanya tersimpan di `localStorage` peramban pengguna dan dikirim langsung per request.
 - **Resilience**: Setiap panggilan generasi dibungkus fungsi retry (`withRetry`, 3 kali percobaan dengan exponential backoff). Batch upload dijalankan secara concurrency-controlled (`pLimit` 4 tugas paralel).
+- **Anti-Slop Filter & Craftsmanship Standard (Mandatory)**: Wajib selalu mengaktifkan dan mengacu pada skill `antislop` (serta sub-skill: `antislop-ui`, `antislop-copywriting`, `antislop-human`, `antislop-layoutmobile`, `antislop-code`) dalam setiap pengerjaan UI, layout, copywriting, dan kode. Menolak tampilan generik "AI slop", melarang tombol/kontrol mati (R-26), mematuhi standar kontras WCAG AA (R-25), memastikan kesempurnaan layout mobile tanpa overflow (R-03), dan melarang klaim/statistik palsu (R-17/R-36).
 
 ## Important Constraints
 - **Video Input Hanya Didukung oleh Gemini**: OpenAI API tidak mendukung unggahan video raw mandiri dengan format yang sama, sehingga antarmuka menampilkan peringatan jika video diunggah dengan provider OpenAI aktif.

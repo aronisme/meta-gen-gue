@@ -143,3 +143,12 @@
   3. Mendaftarkan CLI global `metagen-bridge` via field `"bin"` di `package.json` dan `npm link`.
   4. Menyediakan script instalasi 1-baris langsung dari repositori GitHub via PowerShell: `irm https://raw.githubusercontent.com/aronisme/meta-gen-gue/main/install.ps1 | iex`.
 - **Rationale**: Pengalaman pengguna tanpa hambatan (*frictionless*) di mana backend selalu otomatis siap di latar belakang begitu komputer menyala.
+
+## [2026-10-15] Mandatory Anti-Slop Filter for AI Agents
+- **Context**: Kode dan antarmuka pengguna yang dihasilkan oleh coding agent AI rentan terperangkap dalam pola template generik ("AI slop") seperti palet ungu/cyan klise, tombol kapsul/rounded tanpa variasi, teks buzzwords ("AI-Powered, Seamless"), tombol/interaksi mati tanpa fungsi nyata, serta tata letak yang rusak di perangkat mobile.
+- **Decision**: Menetapkan kewajiban bagi seluruh AI agent yang bekerja di repositori ini untuk mengaktifkan dan mematuhi panduan skill `antislop` (beserta rangkaian sub-skill: `antislop-ui`, `antislop-copywriting`, `antislop-human`, `antislop-layoutmobile`, `antislop-code`).
+- **Rationale**: Menegakkan standar keahlian desainer profesional (*Craftsmanship Standard* C-1 s/d C-5):
+  1. *Purpose-Gate*: Setiap teknik visual harus memiliki alasan yang jelas, bukan sekadar dekorasi bawaan AI.
+  2. *Hard Gate Compliance*: Wajib kontras warna WCAG AA (R-25), navigasi dan elemen interaktif 100% berfungsi (R-24 & R-26), dukungan keyboard (R-32), tata letak mobile sempurna tanpa overflow (R-03), dan melarang klaim/statistik palsu (R-17 & R-36).
+  3. Menjamin UI terasa berkarakter, unik, dan nyaman digunakan oleh kontributor profesional microstock.
+- **Consequences & Constraints**: Setiap perancangan atau audit komponen UI wajib menerapkan filter ini, baik di mode *during* (saat pengerjaan) maupun *after* (audit).
