@@ -1,52 +1,52 @@
 # Current Project State
 
 ## Last Updated
-2026-10-15 20:30
+2026-10-15 23:32
 
 ## Current Objective
-MetaGen Creator Suite v1.0.0 live di Cloudflare Pages (https://meta-gen-gue.pages.dev) terintegrasi dengan MetaGen Local FTP Bridge di port 45678 untuk upload microstock skala besar tanpa batas payload/timeout, auto-start Windows permanen, background queue persistence, auto-retry SFTP anti-drop, validasi Adobe Stock CSV, serta kepatuhan standar craftmanship anti-slop pada seluruh antarmuka dan kode.
+Implementasi arsitektur Visual Concept Prompt Agent (VCPA) pada tab `Prompt Img Generator` menggantikan sistem perakit prompt statis sebelumnya dengan Creative AI Agent multimodal (ekstraksi Visual DNA, preservasi makna, batch diverse generation, dan export microstock-ready) serta mempertahankan stabilitas Cloudflare Pages & Local FTP Bridge.
 
 ## Completed Recently
-- **Studio Sticky Sidebar & Pinned Bottom CTA**:
-  - Memperbaiki layout kolom kiri `StudioPanel` dengan `lg:self-start lg:sticky lg:top-4 xl:top-6 lg:max-h-[calc(100vh-2rem)] flex flex-col`.
-  - Memisahkan area input scrollable mandiri dan mem-pinning tombol Generate Metadata + progress bar di bagian bawah panel secara permanen.
-- **Fixed Responsive Auto Grid & LocalStorage Persistence**:
-  - Memperbaiki mode tampilan Auto di `ResultsCard` agar secara adaptif mengalokasikan 2 kolom pada layar laptop/desktop (≥768px) dan 3 kolom pada layar lebar (≥1680px), serta menyimpan preferensi tampilan ke `localStorage`.
-- **Card Keywords Accordion Fold (Lipatan Kata Kunci)**:
-  - Mengimplementasikan fitur lipatan/accordion kata kunci pada setiap kartu `MetadataItem` (mereduksi tinggi kartu ~50% saat terlipat dengan preview 8 kata kunci teratas + pill expand).
-  - Menyediakan tombol global *Lipat Semua Keyword* / *Buka Keyword* di toolbar atas `ResultsCard`.
-  - Menambahkan penghitung kata (*word counter*) pada kolom Description.
-- **Adobe Stock CSV Sanitization & Error Exclusion**:
-  - Memperbaiki `lib/csv.ts` agar otomatis menyaring baris error/tanpa metadata agar upload CSV ke Adobe Stock tidak ditolak.
-  - Menambahkan sanitasi numerik 1–21 untuk kategori Adobe Stock.
-- **FTP Queue Error Filtering & One-Click Retry**:
-  - Memperbaiki `components/FtpQueueView.tsx` agar membedakan item gagal AI, tidak mencentangnya secara default, dan menambahkan tombol *Coba Lagi Gagal*.
-- **SFTP Resilience & Keepalive**:
-  - Menambahkan SSH keepalive (10s) dan loop auto-retry 2x di `ftp-bridge/server.mjs` untuk mengatasi `ECONNRESET` / handshake drop.
-  - Menambahkan pacing delay 800ms antar file di antrean.
-- **Resilient Metadata Normalizer**:
-  - Mengganti validator kaku dengan `normalizeMeta` di `app/page.tsx` yang toleran terhadap keywords array dan casing field.
+- **Deployment Production ke Cloudflare Pages**:
+  - Berhasil dideploy ke Cloudflare Pages Production via Wrangler (`npx wrangler pages deploy out --project-name meta-gen-gue --branch main`).
+  - Deployment ID preview: `998ca22f` (`https://998ca22f.meta-gen-gue.pages.dev`).
+  - Production URL live: `https://meta-gen-gue.pages.dev`.
+  - Menambahkan [app/not-found.tsx](file:///c:/App%20Tools/meta-gen-gue/app/not-found.tsx) untuk menangani prerendering rute 404 pada Next.js static export.
+  - Membersihkan cache `.next` otomatis sebelum proses static export di [scripts/build-pages.mjs](file:///c:/App%20Tools/meta-gen-gue/scripts/build-pages.mjs).
+- **Visual Concept Prompt Agent (VCPA) System**:
+  - Menghapus sistem generator prompt statis string concatenator lama di `PromptGeneratorView.tsx`.
+  - Mengimplementasikan Creative AI Agent multimodal dengan 2 mode: Mode 1 (Image Reference dengan Visual DNA Extraction) & Mode 2 (Text-only Brief Ideation).
+  - Menambahkan panel ekstraksi Visual DNA (`observed`, `inferred`, `anchors`, `editableVariables`, `semanticProfile`).
+  - Menambahkan kendali batch N (1, 5, 10, 20), slider similarity (0–100%), preservasi semantik, dan format sintaks engine (Midjourney v6.1, FLUX.1, SDXL).
+  - Menyediakan feed kartu prompt interaktif dengan nomor konsep, judul, badge strategi, inline editable textarea, micro-copy, toggle favorit, dan regenerasi per-kartu.
+  - Menambahkan export multi-format (TXT terstruktur & JSON sesuai skema PRD) serta persistensi otomatis ke `localStorage`.
+- **VCPA Edge & Cloudflare Routes**:
+  - Membuat route `app/api/generate/prompt-agent/route.ts` dan Cloudflare Pages function `functions/api/generate/prompt-agent.ts` dengan failover multi-cluster GAS Proxy.
+  - Memperbaiki `scripts/build-pages.mjs` menggunakan `cpSync`/`rmSync` agar kebal dari folder lock Windows saat static export.
+- **Unit Testing & Build Verification**:
+  - Menambahkan 6 unit test baru di `lib/__tests__/prompt-agent.test.ts`. Total 73 unit tests Vitest lolos 100%.
+  - `pnpm build` dan `pnpm pages:build` terverifikasi sukses menghasilkan static assets di `out/`.
 
 ## Currently Working On
-- Deployment rilis terbaru selesai dan live di Cloudflare Pages (`https://meta-gen-gue.pages.dev`, deployment ID `206ca13a-1b12-4128-8e26-989f68738277`).
+- Fitur VCPA telah live di Cloudflare Pages dan siap digunakan.
 
 ## Remaining Tasks
-- Pengujian batch upload gambar/video volume besar secara langsung ke akun contributor Adobe Stock / Dreamstime.
+- Opsional: Jembatan kirim hasil batch prompt langsung ke antrean Metadata Studio untuk asset production pipeline.
 
 ## Blockers / Errors
-- None. Semua 67 unit test Vitest lolos, static export Next.js berhasil, dan deployment Cloudflare Pages sukses 100%.
+- None. Semua 73 unit test Vitest lolos, static export Next.js berhasil, dan deployment Cloudflare Pages sukses 100%.
 
 ## Files Recently Changed
-- `components/StudioPanel.tsx`
-- `components/ResultsCard.tsx`
-- `components/MetadataItem.tsx`
-- `components/FtpQueueView.tsx`
-- `lib/csv.ts`
-- `lib/keywords.ts`
-- `lib/__tests__/csv.test.ts`
-- `ftp-bridge/server.mjs`
-- `app/page.tsx`
+- `app/not-found.tsx`
+- `components/PromptGeneratorView.tsx`
+- `components/AppSideRail.tsx`
+- `lib/prompt-agent/types.ts`
+- `lib/prompt-agent/engine.ts`
+- `lib/prompt-agent/client.ts`
+- `lib/__tests__/prompt-agent.test.ts`
+- `app/api/generate/prompt-agent/route.ts`
+- `functions/api/generate/prompt-agent.ts`
+- `scripts/build-pages.mjs`
 
 ## Next Recommended Step
-- Verifikasi hasil deploy di `https://meta-gen-gue.pages.dev`.
-- Pastikan local bridge aktif via `metagen-bridge status`.
+- Verifikasi fitur pembuatan prompt referensi visual langsung pada versi live (`https://meta-gen-gue.pages.dev`).

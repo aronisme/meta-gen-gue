@@ -70,6 +70,12 @@
    - **Freepik / Magnific**: `File name;Title;Keywords;Prompt;Model` (pemisah kolom titik koma `;`, pemisah keyword koma `,`, dan otomatis tag `_ai_generated` untuk aset AI).
    - **Dreamstime**: `filename,title,description,keywords`.
    - Format file menggunakan baris penutup CRLF (`\r\n`) dan quote-escaping sesuai standar parsing spreadsheet agensi.
+5. **Visual Concept Prompt Agent (VCPA)**:
+   - Agen prompt kreatif berbasis AI yang menggantikan sistem perakit statis lama.
+   - Mendukung dua mode: Mode 1 (analisis citra acuan untuk mengekstrak Visual DNA Profile: *observed*, *inferred*, *anchors*, *variables*, dan tema semantik) & Mode 2 (ideasi brief teks komersial).
+   - Menghasilkan batch N prompt beragam secara konseptual (1, 5, 10, 20) dengan slider kemiripan (0–100%) dan preservasi makna.
+   - Format sintaks otomatis untuk Midjourney v6.1, FLUX.1, dan SDXL.
+   - Feed kartu prompt interaktif dengan edit inline, regenerasi kartu tunggal, favorit, serta ekspor batch ke TXT & JSON.
 
 ## Project Conventions
 - **Path Aliasing**: `@/*` dipetakan ke root proyek (contoh: `@/lib/types`, `@/components/ui/button`).

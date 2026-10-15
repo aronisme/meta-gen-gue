@@ -2,14 +2,9 @@
 
 import { useState } from 'react';
 import {
-  Compass,
-  FileSpreadsheet,
   HelpCircle,
-  ImagePlus,
-  PenTool,
   Search,
   Sparkles,
-  TrendingUp,
   User,
   Wand2,
   Zap,
@@ -41,9 +36,9 @@ const NAV_ITEMS: NavItem[] = [
   {
     id: 'prompt-gen',
     label: 'Prompt Img Generator',
-    tagline: 'Midjourney, FLUX & SD Stock Prompts',
+    tagline: 'Visual Concept Agent (Midjourney, FLUX & SDXL)',
     icon: Wand2,
-    badge: 'Baru',
+    badge: 'VCPA',
   },
   {
     id: 'keyword-research',
@@ -236,8 +231,8 @@ export function AppSideRail({
                   Analisis visual gambar & video AI, pembuatan judul/deskripsi/keyword, serta auto-embed IPTC & XMP ke file JPG/PNG via FTP.
                 </div>
                 <div className="p-2.5 rounded-xl bg-white border border-[#2c1810] shadow-[1px_1px_0_#2c1810]">
-                  <span className="font-black text-[#2c1810] block mb-0.5">2. Prompt Img Generator</span>
-                  Pembuat prompt visual khusus stock photography (komposisi, pencahayaan, lensa, copy space) untuk Midjourney, FLUX, & SD.
+                  <span className="font-black text-[#2c1810] block mb-0.5">2. Prompt Img Generator (VCPA)</span>
+                  Agen AI cerdas untuk analisis citra referensi (Visual DNA), ideasi brief bebas, dan perancangan batch prompt komersial beragam secara konseptual.
                 </div>
                 <div className="p-2.5 rounded-xl bg-white border border-[#2c1810] shadow-[1px_1px_0_#2c1810]">
                   <span className="font-black text-[#2c1810] block mb-0.5">3. Keyword Research</span>

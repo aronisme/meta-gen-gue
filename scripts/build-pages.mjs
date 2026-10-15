@@ -10,9 +10,20 @@ let apiMoved = false;
 
 try {
   if (fs.existsSync(appApiDir)) {
-    console.log('[build-pages] Temporarily moving app/api to app/.api_disabled for clean static export...');
-    fs.renameSync(appApiDir, tempApiDir);
+    console.log('[build-pages] Temporarily backing up app/api for clean static export...');
+    fs.cpSync(appApiDir, tempApiDir, { recursive: true });
+    fs.rmSync(appApiDir, { recursive: true, force: true });
     apiMoved = true;
+  }
+
+  const dotNextDir = path.join(rootDir, '.next');
+  if (fs.existsSync(dotNextDir)) {
+    console.log('[build-pages] Cleaning stale .next cache...');
+    try {
+      fs.rmSync(dotNextDir, { recursive: true, force: true });
+    } catch {
+      // Ignore if some file is locked
+    }
   }
 
   console.log('[build-pages] Running next build with NEXT_EXPORT=true...');
@@ -25,6 +36,7 @@ try {
 } finally {
   if (apiMoved && fs.existsSync(tempApiDir)) {
     console.log('[build-pages] Restoring app/api for local development...');
-    fs.renameSync(tempApiDir, appApiDir);
+    fs.cpSync(tempApiDir, appApiDir, { recursive: true });
+    fs.rmSync(tempApiDir, { recursive: true, force: true });
   }
 }

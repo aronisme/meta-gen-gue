@@ -152,3 +152,16 @@
   2. *Hard Gate Compliance*: Wajib kontras warna WCAG AA (R-25), navigasi dan elemen interaktif 100% berfungsi (R-24 & R-26), dukungan keyboard (R-32), tata letak mobile sempurna tanpa overflow (R-03), dan melarang klaim/statistik palsu (R-17 & R-36).
   3. Menjamin UI terasa berkarakter, unik, dan nyaman digunakan oleh kontributor profesional microstock.
 - **Consequences & Constraints**: Setiap perancangan atau audit komponen UI wajib menerapkan filter ini, baik di mode *during* (saat pengerjaan) maupun *after* (audit).
+
+## [2026-10-15] Visual Concept Prompt Agent (VCPA) Architecture
+- **Context**: Sistem generator prompt sebelumnya di tab `Prompt Img Generator` hanya menggabungkan string statis (subjek + suffix preset) menjadi 1 prompt tunggal secara offline tanpa kecerdasan buatan, tanpa dukungan citra acuan (image reference), dan tanpa diversitas konsep.
+- **Decision**: Menghapus sistem perakit statis lama dan menggantinya dengan arsitektur **Visual Concept Prompt Agent (VCPA)** terstruktur:
+  1. *Dual Mode*: Mode 1 (Dengan Citra Referensi untuk ekstraksi Visual DNA) dan Mode 2 (Ideasi Brief Teks Bebas).
+  2. *Visual DNA Separation*: Membedakan *observed* (fakta visual), *inferred* (suasana/tafsir), *anchors* (elemen identitas yang dikunci), *variables* (variabel kreatif yang diubah), dan *semantic theme*.
+  3. *Batch Diverse Generation*: Menghasilkan N prompt (1, 5, 10, 20) yang tersebar di beragam sumbu kreatif (sudut pandang kamera, pencahayaan, material, narasi, copy-space komersial).
+  4. *Multi-Engine Tailoring*: Sintaks otomatis khusus Midjourney v6.1 (`--ar`, `--style raw`, `--v 6.1`, `--no`), FLUX.1 (deskriptif natural tanpa watermark), dan SDXL (pemisahan prompt positif dan negatif).
+  5. *Failover Edge Route*: Menyediakan endpoint `/api/generate/prompt-agent` di Next.js App Router dan Cloudflare Pages Functions (`functions/api/generate/prompt-agent.ts`) dengan rotasi proxy multi-cluster.
+  6. *Local Persistence & Export*: Menyimpan state ke `localStorage` dan menyediakan export batch ke format TXT dan JSON.
+- **Rationale**: Menghasilkan prompt komersial berkualitas tinggi yang siap dieksekusi di generator eksternal dengan variasi konseptual mendalam dan nol duplikasi malas (anti-slop).
+- **Consequences & Constraints**: Perubahan ini membutuhkan koneksi AI (GAS Proxy, Gemini, atau OpenAI) untuk menghasilkan batch prompt, namun tetap mempertahankan kontrol fallback yang anggun jika kuota habis.
+
