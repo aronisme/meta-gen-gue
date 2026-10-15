@@ -1,44 +1,43 @@
 # Current Project State
 
 ## Last Updated
-2026-10-15 23:48
+2026-10-16 02:08
 
 ## Current Objective
-Implementasi arsitektur Visual Concept Prompt Agent (VCPA) pada tab `Prompt Img Generator` menggantikan sistem perakit prompt statis sebelumnya dengan Creative AI Agent multimodal yang tersinkron penuh dengan sistem AI Metadata Studio (model auto failover, Google Gemini, Groq, Mistral, Nvidia NIM, xKiro, multi-cluster proxy GAS v3.1, dan OpenAI) serta live di Cloudflare Pages.
+Optimasi kecepatan dan arsitektur pengunggahan file massal FTP/SFTP pada Local Bridge (`ftp-bridge/server.mjs`) dan antrean frontend (`components/FtpQueueView.tsx`) dengan persistent connection, controlled concurrency (2–3 parallel streams), dan pipelining.
 
 ## Completed Recently
-- **Penyelarasan Sistem AI Generator Prompt dengan Metadata Studio**:
-  - Menghubungkan state `model`, `provider`, `apiKey`, dan `gasProxyModels` dari `app/page.tsx` ke [PromptGeneratorView.tsx](file:///c:/App%20Tools/meta-gen-gue/components/PromptGeneratorView.tsx).
-  - Menambahkan kartu selector Mesin AI di panel kontrol kiri tab generator prompt lengkap dengan pilihan model Auto, Gemini, Groq, Mistral, Nvidia NIM, dan xKiro.
-  - Memperbarui [lib/prompt-agent/client.ts](file:///c:/App%20Tools/meta-gen-gue/lib/prompt-agent/client.ts) dengan mekanisme `withRetry` (3 percobaan, backoff otomatis) dan fallback proxy.
-  - Memperbarui [app/api/generate/proxy/route.ts](file:///c:/App%20Tools/meta-gen-gue/app/api/generate/proxy/route.ts) dan [functions/api/generate/proxy.ts](file:///c:/App%20Tools/meta-gen-gue/functions/api/generate/proxy.ts) agar mendukung input teks murni tanpa gambar.
-  - Menambahkan proteksi *robust truncation recovery* di [lib/prompt-agent/engine.ts](file:///c:/App%20Tools/meta-gen-gue/lib/prompt-agent/engine.ts) dan fungsi route agar tidak crash jika LLM mengalami cutoff token.
-  - Memperbesar `max_tokens: 4096` pada request cluster GAS Proxy.
-- **Unit Testing & Verifikasi Live**:
-  - Menambahkan test case recovery token terpotong di [lib/__tests__/prompt-agent.test.ts](file:///c:/App%20Tools/meta-gen-gue/lib/__tests__/prompt-agent.test.ts). Seluruh 74 test Vitest lolos 100%.
-  - Build static export `pnpm pages:build` sukses 100%.
-  - Deploy ke Cloudflare Pages (`https://meta-gen-gue.pages.dev` & `https://e4d8f9c9.meta-gen-gue.pages.dev`) berhasil dan telah diverifikasi live menghasilkan prompt dengan HTTP 200.
+- **Refinement Visual Concept Prompt Agent (VCPA)**:
+  - Opsi engine Google Flow & Nano Banana + opsi rasio bebas/tanpa rasio.
+  - Section setting foldable/collapsible dan pembersihan tombol yang tidak perlu di Mode 1.
+  - Penyelarasan penuh model `auto` di Mode 1 agar mendukung seluruh model vision kustom pada proxy GAS.
+  - Build dan deployment sukses ke Cloudflare Pages (`https://meta-gen-gue.pages.dev`).
+- **Analisis Bottleneck Upload FTP**:
+  - Mengidentifikasi pemborosan waktu handshake/auth per-file (overhead 1.5–3 detik/file) dan antrean sekuensial tunggal.
+  - Merancang arsitektur optimasi Session Pool & Parallel Workers.
 
 ## Currently Working On
-- Fitur VCPA dengan integrasi AI penuh telah live di Cloudflare Pages dan terverifikasi.
+- Persiapan implementasi optimasi kecepatan batch upload FTP untuk sesi kerja berikutnya.
 
 ## Remaining Tasks
-- Opsional: Jembatan kirim hasil batch prompt langsung ke antrean Metadata Studio untuk asset production pipeline.
+- [ ] **Persistent Session Pool di Bridge**: Perbarui `ftp-bridge/server.mjs` agar mempertahankan sesi aktif (keep-alive) selama antrean berjalan dan tidak disconnect per file.
+- [ ] **Controlled Parallel Concurrency di UI**: Tambahkan multi-worker upload (2–3 stream paralel) di `components/FtpQueueView.tsx` dengan selektor concurrency.
+- [ ] **Metadata Pipelining**: Lakukan pre-buffering penyematan metadata sebelum file berikutnya di-upload.
+- [ ] **Benchmarking**: Uji perbandingan kecepatan upload 10–20 file sebelum vs sesudah optimasi.
 
 ## Blockers / Errors
-- None. Semua 73 unit test Vitest lolos, static export Next.js berhasil, dan deployment Cloudflare Pages sukses 100%.
+- None. Seluruh test lolos, build Cloudflare Pages hijau, dan server lokal berjalan normal.
 
 ## Files Recently Changed
-- `app/not-found.tsx`
 - `components/PromptGeneratorView.tsx`
-- `components/AppSideRail.tsx`
-- `lib/prompt-agent/types.ts`
-- `lib/prompt-agent/engine.ts`
 - `lib/prompt-agent/client.ts`
-- `lib/__tests__/prompt-agent.test.ts`
+- `lib/prompt-agent/engine.ts`
+- `lib/prompt-agent/types.ts`
 - `app/api/generate/prompt-agent/route.ts`
 - `functions/api/generate/prompt-agent.ts`
-- `scripts/build-pages.mjs`
 
 ## Next Recommended Step
-- Verifikasi fitur pembuatan prompt referensi visual langsung pada versi live (`https://meta-gen-gue.pages.dev`).
+Buka dan mulai sesi kerja berikutnya dengan mengimplementasikan **Session Reuse / Keep-Alive** pada `ftp-bridge/server.mjs`, lalu hubungkan dengan **Concurrency Controller** di `components/FtpQueueView.tsx`.
+
+## Notes for Next Session
+Fokus besok adalah memotong waktu upload FTP hingga 60–70% lebih cepat dengan mengubah loop sekuensial menjadi 2 worker paralel dan menjaga koneksi SSH/FTPS tetap terbuka (keep-alive) selama batch berlangsung.

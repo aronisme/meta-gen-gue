@@ -165,3 +165,14 @@
 - **Rationale**: Menghasilkan prompt komersial berkualitas tinggi yang siap dieksekusi di generator eksternal dengan variasi konseptual mendalam dan nol duplikasi malas (anti-slop).
 - **Consequences & Constraints**: Perubahan ini membutuhkan koneksi AI (GAS Proxy, Gemini, atau OpenAI) untuk menghasilkan batch prompt, namun tetap mempertahankan kontrol fallback yang anggun jika kuota habis.
 
+## [2026-10-16] Unified Vision Model Selection for Prompt Agent & Planned FTP Bridge Optimization
+- **Context**:
+  1. Pengguna memiliki berbagai model vision pada proxy GAS AI (misal Gemini, Claude, Groq/Llama-vision, Mistral-vision) yang sebelumnya terfilter atau hanya mengandalkan Gemini di Mode 1.
+  2. Proses upload FTP via local bridge dirasakan lebih lambat dibandingkan upload langsung ke web portal agensi karena arsitektur per-file TCP/SSH teardown dan eksekusi sekuensial murni.
+- **Decision**:
+  1. Menghapus batasan hardcoded vision model pada Mode 1 sehingga seluruh model vision kustom yang didaftarkan pengguna di proxy GAS dapat dipilih dan dirotasikan secara otomatis oleh algoritma failover.
+  2. Merencanakan arsitektur optimasi FTP Bridge untuk sesi kerja berikutnya:
+     - *Persistent Connection / Session Reuse*: Menggunakan kembali sesi client SFTP/FTPS aktif tanpa re-handshake dan re-auth per file.
+     - *Controlled Concurrency*: Mengizinkan 2–3 stream upload paralel terkontrol pada antrean UI.
+     - *Pipelining*: Menyematkan metadata secara asinkron mendahului antrean upload file berikutnya.
+- **Rationale**: Memaksimalkan fleksibilitas AI multimodal dan memangkas waktu tunggu upload FTP massal hingga 60–70% tanpa melanggar batasan rate-limit agensi microstock.
