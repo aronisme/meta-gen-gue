@@ -45,6 +45,28 @@ describe('VCPA Engine Utilities', () => {
     expect(res.negativePrompt).toContain('watermark');
   });
 
+  it('formats prompt correctly for Google Imagen 3 / Flow and Google Nano Banana', () => {
+    const imagenSettings: VCPASettings = { ...baseSettings, engine: 'imagen3' };
+    const resImagen = formatPromptForEngine('A sleek luxury perfume bottle on wet dark slate', imagenSettings);
+    expect(resImagen.prompt).toContain('High dynamic range');
+    expect(resImagen.prompt).toContain('16:9 composition framing');
+
+    const bananaSettings: VCPASettings = { ...baseSettings, engine: 'nanobanana' };
+    const resBanana = formatPromptForEngine('A sleek luxury perfume bottle on wet dark slate', bananaSettings);
+    expect(resBanana.prompt).toContain('crisp subject separation');
+    expect(resBanana.prompt).toContain('aspect ratio 16:9');
+  });
+
+  it('omits aspect ratio when aspectRatio is none', () => {
+    const freeSettings: VCPASettings = { ...baseSettings, aspectRatio: 'none', engine: 'midjourney' };
+    const res = formatPromptForEngine('A sleek luxury perfume bottle on wet dark slate', freeSettings);
+    expect(res.prompt).not.toContain('--ar');
+
+    const freeFlux: VCPASettings = { ...baseSettings, aspectRatio: 'none', engine: 'flux' };
+    const resFlux = formatPromptForEngine('A sleek luxury perfume bottle on wet dark slate', freeFlux);
+    expect(resFlux.prompt).not.toContain('aspect ratio');
+  });
+
   it('resiliently extracts JSON from messy markdown model response', () => {
     const messyOutput = `Here is your concept:\n\`\`\`json\n{\n  "title": "Quiet Confidence",\n  "prompts": []\n}\n\`\`\`\nHope this helps!`;
     const parsed = extractJsonFromText(messyOutput);

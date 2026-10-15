@@ -11,6 +11,8 @@ export const ENGINE_LABELS: Record<EngineType, string> = {
   midjourney: 'Midjourney v6.1',
   flux: 'FLUX.1 (Black Forest Labs)',
   sdxl: 'Stable Diffusion XL (SDXL)',
+  imagen3: 'Google Imagen 3 / Flow',
+  nanobanana: 'Google Nano Banana',
 };
 
 export const VISUAL_DIRECTION_SUFFIXES: Record<string, string> = {
@@ -45,8 +47,10 @@ export function formatPromptForEngine(
     ? `${cleanBase}, ${styleSuffix}`
     : cleanBase;
 
+  const hasAr = settings.aspectRatio && settings.aspectRatio !== 'none';
+
   if (settings.engine === 'midjourney') {
-    const arFlag = `--ar ${settings.aspectRatio}`;
+    const arFlag = hasAr ? `--ar ${settings.aspectRatio}` : '';
     const qualityFlags = '--style raw --v 6.1';
     const noFlag = settings.commercialSafety
       ? '--no watermark, text, logo, signature, blurry, deformed hands, extra fingers'
@@ -56,10 +60,35 @@ export function formatPromptForEngine(
   }
 
   if (settings.engine === 'flux') {
+    const arText = hasAr ? `, aspect ratio ${settings.aspectRatio}.` : '.';
     const safetyNote = settings.commercialSafety
       ? ' Commercial microstock aesthetics, strictly devoid of any unwanted watermark, brand trademarks, logos, or text artifacts.'
       : '';
-    const finalPrompt = `${combined}, aspect ratio ${settings.aspectRatio}.${safetyNote}`
+    const finalPrompt = `${combined}${arText}${safetyNote}`
+      .trim()
+      .replace(/\s+/g, ' ');
+    return { prompt: finalPrompt };
+  }
+
+  if (settings.engine === 'imagen3') {
+    // Google Imagen 3 / Flow: natural prose, studio fidelity, clean commercial composition
+    const arText = hasAr ? `, ${settings.aspectRatio} composition framing` : '';
+    const safetyNote = settings.commercialSafety
+      ? ' Clean commercial composition, free from watermarks, logos, or unwanted text artifacts.'
+      : '';
+    const finalPrompt = `${combined}${arText}. High dynamic range, natural studio lighting, authentic material textures.${safetyNote}`
+      .trim()
+      .replace(/\s+/g, ' ');
+    return { prompt: finalPrompt };
+  }
+
+  if (settings.engine === 'nanobanana') {
+    // Google Nano Banana: high-speed generation, crisp subject separation, vibrant commercial fidelity
+    const arText = hasAr ? `, aspect ratio ${settings.aspectRatio}` : '';
+    const safetyNote = settings.commercialSafety
+      ? ' Clean stock aesthetics, no watermark, pristine presentation.'
+      : '';
+    const finalPrompt = `${combined}${arText}, crisp subject separation, vibrant commercial fidelity.${safetyNote}`
       .trim()
       .replace(/\s+/g, ' ');
     return { prompt: finalPrompt };

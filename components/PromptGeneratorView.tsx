@@ -2,7 +2,6 @@
 
 import { useEffect, useRef, useState } from 'react';
 import {
-  Bot,
   Camera,
   Check,
   ChevronDown,
@@ -12,8 +11,10 @@ import {
   Eye,
   ImageIcon,
   Lightbulb,
+  Palette,
   RefreshCw,
   ShieldCheck,
+  Sliders,
   Sparkles,
   Star,
   Trash2,
@@ -23,13 +24,6 @@ import {
 import { Button } from '@/components/ui/button';
 import { Label } from '@/components/ui/label';
 import { Textarea } from '@/components/ui/textarea';
-import {
-  Select,
-  SelectContent,
-  SelectItem,
-  SelectTrigger,
-  SelectValue,
-} from '@/components/ui/select';
 import { toast } from 'sonner';
 import { resizeImageToMax1024 } from '@/lib/resize';
 import {
@@ -51,26 +45,10 @@ import type {
   VisualDirection,
   VisualDNAProfile,
 } from '@/lib/prompt-agent/types';
-import type { Provider } from '@/lib/types';
 
 export interface PromptGeneratorViewProps {
   onSwitchToMetadata?: () => void;
-  model?: string;
-  onModelChange?: (model: string) => void;
-  gasProxyModels?: string[];
-  provider?: Provider;
-  apiKey?: string;
 }
-
-const MODEL_LABELS: Record<string, string> = {
-  auto: 'Auto: Tercepat & Auto-Failover',
-  'gemini-2.5-flash': 'Google Gemini (gemini-2.5-flash)',
-  'qwen/qwen3.8-27b': 'Groq (qwen/qwen3.8-27b)',
-  'pixtral-12b-2409': 'Mistral AI (pixtral-12b-2409)',
-  'mistralai/mistral-large-3-675b-instruct-2512': 'Nvidia NIM (mistral-large-3-675b)',
-  'mistralai/ministral-14b': 'xKiro (ministral-14b)',
-  'sensenova/sensenova-6.8-flash-lite': 'xKiro (sensenova-6.8-flash-lite)',
-};
 
 const STORAGE_KEY_PROMPTS = 'vcpa_prompts_v1';
 const STORAGE_KEY_SETTINGS = 'vcpa_settings_v1';
@@ -107,15 +85,24 @@ const VISUAL_DIRECTION_OPTIONS: Array<{ id: VisualDirection; label: string; desc
   { id: 'cinematic', label: 'Sinematik 4K Still', desc: 'Anamorphic lens flare, film color grading' },
 ];
 
-export function PromptGeneratorView({
-  onSwitchToMetadata,
-  model = 'auto',
-  onModelChange,
-  gasProxyModels = [],
-  provider = 'gas-proxy',
-  apiKey,
-}: PromptGeneratorViewProps) {
-  const models = gasProxyModels.length > 0 ? gasProxyModels : Object.keys(MODEL_LABELS);
+const ENGINE_ITEMS: Array<{ id: EngineType; label: string; badge: string }> = [
+  { id: 'midjourney', label: 'Midjourney v6.1', badge: '--v 6.1' },
+  { id: 'flux', label: 'FLUX.1', badge: 'Black Forest' },
+  { id: 'imagen3', label: 'Google Imagen 3 / Flow', badge: 'Google Studio' },
+  { id: 'nanobanana', label: 'Google Nano Banana', badge: 'High-Speed' },
+  { id: 'sdxl', label: 'Stable Diffusion XL', badge: 'SDXL' },
+];
+
+const ASPECT_RATIO_ITEMS: Array<{ id: AspectRatio; label: string; desc: string }> = [
+  { id: 'none', label: 'Bebas', desc: 'Tanpa batasan rasio' },
+  { id: '16:9', label: '16:9', desc: 'Lanskap Lebar' },
+  { id: '3:2', label: '3:2', desc: 'DSLR Standar' },
+  { id: '1:1', label: '1:1', desc: 'Square Persegi' },
+  { id: '4:3', label: '4:3', desc: 'Klasik' },
+  { id: '9:16', label: '9:16', desc: 'Vertikal Story' },
+];
+
+export function PromptGeneratorView({ onSwitchToMetadata }: PromptGeneratorViewProps) {
   // 1. Generation Mode: reference_to_prompt vs text_ideation
   const [mode, setMode] = useState<VCPAMode>('reference_to_prompt');
 
@@ -137,6 +124,34 @@ export function PromptGeneratorView({
     commercialSafety: true,
     promptLanguage: 'en',
   });
+
+  // 4. Fold / Accordion States for Left Side Panel
+  const [foldedSections, setFoldedSections] = useState<{
+    input: boolean;
+    engine: boolean;
+    visual: boolean;
+    safety: boolean;
+  }>({
+    input: false,
+    engine: false,
+    visual: false,
+    safety: true, // folded by default
+  });
+
+  const toggleFold = (key: keyof typeof foldedSections) => {
+    setFoldedSections((prev) => ({ ...prev, [key]: !prev[key] }));
+  };
+
+  const isAllFolded = Object.values(foldedSections).every(Boolean);
+  const toggleAllFold = () => {
+    const nextVal = !isAllFolded;
+    setFoldedSections({
+      input: nextVal,
+      engine: nextVal,
+      visual: nextVal,
+      safety: nextVal,
+    });
+  };
 
   // 4. Output & Visual DNA State
   const [visualDna, setVisualDna] = useState<VisualDNAProfile | null>(null);
@@ -240,9 +255,8 @@ export function PromptGeneratorView({
         brief,
         imageDataUrl: refImageDataUrl || undefined,
         settings,
-        provider,
-        model,
-        apiKey,
+        provider: 'gas-proxy',
+        model: 'auto',
         onProgressStep: (step) => setProgressStep(step),
       });
 
@@ -269,9 +283,8 @@ export function PromptGeneratorView({
         prompts,
         settings,
         visualDna || undefined,
-        provider,
-        model,
-        apiKey
+        'gas-proxy',
+        'auto'
       );
       setPrompts((prev) => prev.map((c) => (c.id === card.id ? newCard : c)));
       toast.success(`Konsep #${card.ordinal} diperbarui!`);
@@ -452,343 +465,494 @@ export function PromptGeneratorView({
       {/* 3. Main Workspace Grid (Left Panel 5 cols, Right Panel 7 cols) */}
       <div className="grid grid-cols-1 lg:grid-cols-12 gap-6 items-start">
         {/* Left Column: Creator Controls */}
-        <div className="lg:col-span-5 space-y-5">
-          {/* AI Engine & Model Selector Card (Synced with Studio) */}
-          <div className="bg-[#fffdf9] border-2 border-[#2c1810] rounded-2xl p-4 shadow-[4px_4px_0_#2c1810] space-y-2.5">
-            <div className="flex items-center justify-between">
-              <Label className="text-xs font-black uppercase text-[#2c1810] flex items-center gap-1.5">
-                <Bot className="w-4 h-4 text-[#ff6b35]" />
-                <span>Mesin AI (Sama dengan Studio Metadata)</span>
-              </Label>
-              <span className="text-[10px] font-black bg-[#fff5e6] text-[#2c1810] border-2 border-[#2c1810] px-2 py-0.5 rounded-full shadow-[1px_1px_0_#2c1810]">
-                {provider === 'openai' ? 'OpenAI Direct' : 'GAS Proxy v3.1'}
-              </span>
-            </div>
-
-            <Select value={model || 'auto'} onValueChange={onModelChange}>
-              <SelectTrigger className="w-full bg-white border-2 border-[#2c1810] rounded-xl h-10 font-bold text-xs text-[#2c1810] shadow-[2px_2px_0_#2c1810]">
-                <SelectValue placeholder="Pilih Model AI" />
-              </SelectTrigger>
-              <SelectContent className="bg-white border-2 border-[#2c1810] shadow-[4px_4px_0_#2c1810] rounded-xl">
-                {models.map((m) => (
-                  <SelectItem key={m} value={m} className="text-xs font-bold py-2 cursor-pointer">
-                    {MODEL_LABELS[m] || m}
-                  </SelectItem>
-                ))}
-              </SelectContent>
-            </Select>
-
-            <div className="flex items-center justify-between text-[11px] text-[#6b5344] font-medium pt-0.5">
-              <span>Failover: 2 Cluster Aktif</span>
-              <span className="text-emerald-700 font-bold flex items-center gap-1">
-                <span className="w-2 h-2 rounded-full bg-emerald-500 animate-pulse inline-block" />
-                Online & Terhubung
-              </span>
-            </div>
+        <div className="lg:col-span-5 space-y-4">
+          {/* Top Accordion Controls Bar */}
+          <div className="flex items-center justify-between px-1">
+            <span className="text-[11px] font-black uppercase tracking-wider text-[#6b5344]">
+              Panel Pengaturan Generator
+            </span>
+            <button
+              type="button"
+              onClick={toggleAllFold}
+              className="text-[11px] font-bold text-[#2c1810] hover:text-[#ff6b35] flex items-center gap-1.5 bg-[#fffdf9] px-2.5 py-1 rounded-lg border-2 border-[#2c1810] shadow-[2px_2px_0_#2c1810] cursor-pointer transition-all hover:bg-[#fff5e6]"
+            >
+              {isAllFolded ? (
+                <>
+                  <ChevronDown className="w-3.5 h-3.5 text-[#ff6b35]" />
+                  <span>Buka Semua Panel</span>
+                </>
+              ) : (
+                <>
+                  <ChevronUp className="w-3.5 h-3.5 text-[#ff6b35]" />
+                  <span>Lipat Semua Panel</span>
+                </>
+              )}
+            </button>
           </div>
 
-          {/* A. Reference Image Dropzone (Active in Reference Mode) */}
-          {mode === 'reference_to_prompt' && (
-            <div className="bg-[#fffdf9] border-2 border-[#2c1810] rounded-2xl p-4 shadow-[4px_4px_0_#2c1810] space-y-3">
-              <div className="flex items-center justify-between">
-                <Label className="text-xs font-black uppercase text-[#2c1810] flex items-center gap-1.5">
-                  <Camera className="w-3.5 h-3.5 text-[#ff6b35]" />
-                  <span>Gambar Referensi Visual (Anchor)</span>
-                </Label>
-                {refImageDataUrl && (
-                  <button
-                    type="button"
-                    onClick={handleClearImage}
-                    className="text-[11px] font-bold text-red-600 hover:text-red-700 flex items-center gap-1 cursor-pointer"
-                  >
-                    <Trash2 className="w-3.5 h-3.5" />
-                    Hapus
-                  </button>
+          {/* CARD 1: Input Konsep & Acuan (Foldable) */}
+          <div className="bg-[#fffdf9] border-2 border-[#2c1810] rounded-2xl shadow-[4px_4px_0_#2c1810] overflow-hidden">
+            <button
+              type="button"
+              onClick={() => toggleFold('input')}
+              className="w-full p-4 flex items-center justify-between hover:bg-[#fff5e6]/50 transition-colors cursor-pointer text-left"
+            >
+              <div className="flex items-center gap-2.5">
+                {mode === 'reference_to_prompt' ? (
+                  <Camera className="w-4 h-4 text-[#ff6b35]" />
+                ) : (
+                  <Lightbulb className="w-4 h-4 text-amber-500" />
+                )}
+                <div>
+                  <span className="text-xs font-black uppercase text-[#2c1810] block">
+                    {mode === 'reference_to_prompt' ? '1. Gambar Referensi & Brief' : '1. Arahan Ide & Brief'}
+                  </span>
+                  <span className="text-[10px] text-[#6b5344] font-medium block">
+                    {mode === 'reference_to_prompt'
+                      ? refImageFile ? `${refImageFile.name.slice(0, 24)}...` : 'Unggah foto acuan visual'
+                      : brief ? `${brief.slice(0, 30)}...` : 'Tuliskan ide konsep'}
+                  </span>
+                </div>
+              </div>
+              <div className="flex items-center gap-2">
+                <span className="text-[10px] font-black px-2 py-0.5 rounded-full border border-[#2c1810] bg-[#fff5e6] text-[#2c1810]">
+                  {mode === 'reference_to_prompt' ? 'Mode 1' : 'Mode 2'}
+                </span>
+                {foldedSections.input ? (
+                  <ChevronDown className="w-4 h-4 text-[#2c1810]" />
+                ) : (
+                  <ChevronUp className="w-4 h-4 text-[#2c1810]" />
                 )}
               </div>
+            </button>
 
-              {refImageDataUrl ? (
-                <div className="relative rounded-xl border-2 border-[#2c1810] overflow-hidden bg-stone-100 p-2 flex items-center gap-3">
-                  {/* eslint-disable-next-line @next/next/no-img-element */}
-                  <img
-                    src={refImageDataUrl}
-                    alt="Reference preview"
-                    className="w-20 h-20 object-cover rounded-lg border border-[#2c1810] shrink-0"
+            {!foldedSections.input && (
+              <div className="p-4 pt-0 space-y-3.5 border-t border-stone-200/80 mt-1">
+                {/* Mode 1: Reference dropzone */}
+                {mode === 'reference_to_prompt' && (
+                  <div className="space-y-2 pt-3">
+                    <div className="flex items-center justify-between">
+                      <Label className="text-xs font-black uppercase text-[#2c1810] flex items-center gap-1.5">
+                        <Camera className="w-3.5 h-3.5 text-[#ff6b35]" />
+                        <span>Gambar Referensi Visual (Anchor)</span>
+                      </Label>
+                      {refImageDataUrl && (
+                        <button
+                          type="button"
+                          onClick={handleClearImage}
+                          className="text-[11px] font-bold text-red-600 hover:text-red-700 flex items-center gap-1 cursor-pointer"
+                        >
+                          <Trash2 className="w-3.5 h-3.5" />
+                          Hapus
+                        </button>
+                      )}
+                    </div>
+
+                    {refImageDataUrl ? (
+                      <div className="relative rounded-xl border-2 border-[#2c1810] overflow-hidden bg-stone-100 p-2 flex items-center gap-3">
+                        {/* eslint-disable-next-line @next/next/no-img-element */}
+                        <img
+                          src={refImageDataUrl}
+                          alt="Reference preview"
+                          className="w-20 h-20 object-cover rounded-lg border border-[#2c1810] shrink-0"
+                        />
+                        <div className="text-xs text-[#2c1810] space-y-1 min-w-0 flex-1">
+                          <p className="font-bold truncate">{refImageFile?.name || 'Reference Image'}</p>
+                          <p className="text-[11px] text-[#6b5344]">
+                            {refImageFile ? `${(refImageFile.size / 1024).toFixed(0)} KB` : 'Siap dianalisis'}
+                          </p>
+                          <button
+                            type="button"
+                            onClick={() => fileInputRef.current?.click()}
+                            className="text-[11px] font-black text-[#ff6b35] hover:underline cursor-pointer block"
+                          >
+                            Ganti Gambar
+                          </button>
+                        </div>
+                      </div>
+                    ) : (
+                      <div
+                        onClick={() => fileInputRef.current?.click()}
+                        onDragOver={(e) => e.preventDefault()}
+                        onDrop={(e) => {
+                          e.preventDefault();
+                          const f = e.dataTransfer.files?.[0];
+                          if (f) void handleSelectImage(f);
+                        }}
+                        className="border-2 border-dashed border-[#2c1810] rounded-xl p-5 text-center bg-white hover:bg-[#fff5e6] transition-colors cursor-pointer group space-y-2"
+                      >
+                        <div className="w-9 h-9 rounded-full bg-[#fff5e6] border border-[#2c1810] mx-auto flex items-center justify-center group-hover:scale-105 transition-transform">
+                          <Upload className="w-4 h-4 text-[#ff6b35]" />
+                        </div>
+                        <div>
+                          <p className="text-xs font-black text-[#2c1810]">
+                            Seret gambar ke sini atau klik untuk memilih
+                          </p>
+                          <p className="text-[11px] text-[#6b5344] mt-0.5">
+                            JPG, PNG, WEBP (otomatis dioptimasi ke 1024px)
+                          </p>
+                        </div>
+                      </div>
+                    )}
+                    <input
+                      ref={fileInputRef}
+                      type="file"
+                      accept="image/*"
+                      className="hidden"
+                      onChange={(e) => {
+                        const f = e.target.files?.[0];
+                        if (f) void handleSelectImage(f);
+                      }}
+                    />
+                  </div>
+                )}
+
+                {/* Brief Textarea & Quick Inspirations */}
+                <div className={`space-y-2.5 ${mode === 'reference_to_prompt' ? 'pt-2' : 'pt-3'}`}>
+                  <Label className="text-xs font-black uppercase text-[#2c1810] flex items-center gap-1.5">
+                    <Lightbulb className="w-3.5 h-3.5 text-amber-600" />
+                    <span>
+                      {mode === 'reference_to_prompt'
+                        ? 'Instruksi Tambahan / Fokus Eksplorasi (Opsional)'
+                        : 'Brief Konsep Utama (Subjek, Setting, Aksi)'}
+                    </span>
+                  </Label>
+                  <Textarea
+                    rows={3}
+                    value={brief}
+                    onChange={(e) => setBrief(e.target.value)}
+                    placeholder={
+                      mode === 'reference_to_prompt'
+                        ? 'Contoh: Kembangkan konsep dengan pencahayaan golden hour, ubah sudut pandang ke low-angle hero shot, pertahankan nuansa kemewahan minimalis...'
+                        : 'Contoh: Pekerja konstruksi wanita muda memegang blueprint di atas gedung pencakar langit modern berlatar langit senja cerah...'
+                    }
+                    className="border-2 border-[#2c1810] font-medium text-xs bg-white resize-none shadow-[2px_2px_0_#2c1810]"
                   />
-                  <div className="text-xs text-[#2c1810] space-y-1 min-w-0 flex-1">
-                    <p className="font-bold truncate">{refImageFile?.name || 'Reference Image'}</p>
-                    <p className="text-[11px] text-[#6b5344]">
-                      {refImageFile ? `${(refImageFile.size / 1024).toFixed(0)} KB` : 'Siap dianalisis'}
-                    </p>
-                    <button
-                      type="button"
-                      onClick={() => fileInputRef.current?.click()}
-                      className="text-[11px] font-black text-[#ff6b35] hover:underline cursor-pointer block"
-                    >
-                      Ganti Gambar
-                    </button>
+
+                  {/* Quick Template Pills */}
+                  <div className="space-y-1.5 pt-0.5">
+                    <span className="text-[11px] font-bold text-[#6b5344] block">Inspirasi Cepat:</span>
+                    <div className="flex flex-wrap gap-1.5">
+                      {QUICK_INSPIRATION_TEMPLATES.map((tmpl) => (
+                        <button
+                          key={tmpl.title}
+                          type="button"
+                          onClick={() => {
+                            setBrief(tmpl.brief);
+                            toast.info(`Inspirasi "${tmpl.title}" diterapkan.`);
+                          }}
+                          className="px-2 py-0.5 rounded-md bg-white hover:bg-[#fff5e6] text-[#2c1810] border border-[#2c1810] text-[11px] font-bold shadow-[1px_1px_0_#2c1810] cursor-pointer transition-all"
+                        >
+                          ⚡ {tmpl.title}
+                        </button>
+                      ))}
+                    </div>
                   </div>
-                </div>
-              ) : (
-                <div
-                  onClick={() => fileInputRef.current?.click()}
-                  onDragOver={(e) => e.preventDefault()}
-                  onDrop={(e) => {
-                    e.preventDefault();
-                    const f = e.dataTransfer.files?.[0];
-                    if (f) void handleSelectImage(f);
-                  }}
-                  className="border-2 border-dashed border-[#2c1810] rounded-xl p-6 text-center bg-white hover:bg-[#fff5e6] transition-colors cursor-pointer group space-y-2"
-                >
-                  <div className="w-10 h-10 rounded-full bg-[#fff5e6] border border-[#2c1810] mx-auto flex items-center justify-center group-hover:scale-105 transition-transform">
-                    <Upload className="w-5 h-5 text-[#ff6b35]" />
-                  </div>
-                  <div>
-                    <p className="text-xs font-black text-[#2c1810]">
-                      Seret gambar ke sini atau klik untuk memilih
-                    </p>
-                    <p className="text-[11px] text-[#6b5344] mt-0.5">
-                      JPG, PNG, WEBP (otomatis dioptimasi ke 1024px)
-                    </p>
-                  </div>
-                </div>
-              )}
-              <input
-                ref={fileInputRef}
-                type="file"
-                accept="image/*"
-                className="hidden"
-                onChange={(e) => {
-                  const f = e.target.files?.[0];
-                  if (f) void handleSelectImage(f);
-                }}
-              />
-            </div>
-          )}
-
-          {/* B. Subject / Creative Brief Input */}
-          <div className="bg-[#fffdf9] border-2 border-[#2c1810] rounded-2xl p-4 shadow-[4px_4px_0_#2c1810] space-y-3">
-            <Label className="text-xs font-black uppercase text-[#2c1810] flex items-center gap-1.5">
-              <Lightbulb className="w-3.5 h-3.5 text-amber-600" />
-              <span>
-                {mode === 'reference_to_prompt'
-                  ? 'Instruksi Tambahan / Fokus Eksplorasi (Opsional)'
-                  : 'Brief Konsep Utama (Subjek, Setting, Aksi)'}
-              </span>
-            </Label>
-            <Textarea
-              rows={3}
-              value={brief}
-              onChange={(e) => setBrief(e.target.value)}
-              placeholder={
-                mode === 'reference_to_prompt'
-                  ? 'Contoh: Kembangkan konsep dengan pencahayaan golden hour, ubah sudut pandang ke low-angle hero shot, pertahankan nuansa kemewahan minimalis...'
-                  : 'Contoh: Pekerja konstruksi wanita muda memegang blueprint di atas gedung pencakar langit modern berlatar langit senja cerah...'
-              }
-              className="border-2 border-[#2c1810] font-medium text-xs bg-white resize-none shadow-[2px_2px_0_#2c1810]"
-            />
-
-            {/* Quick Template Pills */}
-            <div className="space-y-1.5 pt-1">
-              <span className="text-[11px] font-bold text-[#6b5344] block">Inspirasi Cepat:</span>
-              <div className="flex flex-wrap gap-1.5">
-                {QUICK_INSPIRATION_TEMPLATES.map((tmpl) => (
-                  <button
-                    key={tmpl.title}
-                    type="button"
-                    onClick={() => {
-                      setBrief(tmpl.brief);
-                      toast.info(`Inspirasi "${tmpl.title}" diterapkan.`);
-                    }}
-                    className="px-2 py-0.5 rounded-md bg-white hover:bg-[#fff5e6] text-[#2c1810] border border-[#2c1810] text-[11px] font-bold shadow-[1px_1px_0_#2c1810] cursor-pointer transition-all"
-                  >
-                    ⚡ {tmpl.title}
-                  </button>
-                ))}
-              </div>
-            </div>
-          </div>
-
-          {/* C. Generation Parameters Controls */}
-          <div className="bg-[#fffdf9] border-2 border-[#2c1810] rounded-2xl p-4 shadow-[4px_4px_0_#2c1810] space-y-4">
-            {/* Target Engine & Aspect Ratio */}
-            <div className="grid grid-cols-2 gap-3">
-              <div className="space-y-1.5">
-                <Label className="text-xs font-black text-[#2c1810]">Engine AI</Label>
-                <div className="flex flex-col gap-1">
-                  {(['midjourney', 'flux', 'sdxl'] as EngineType[]).map((eng) => (
-                    <button
-                      key={eng}
-                      type="button"
-                      onClick={() => handleEngineChange(eng)}
-                      className={`py-1.5 px-2 rounded-lg border-2 text-left text-xs font-black cursor-pointer transition-all ${
-                        settings.engine === eng
-                          ? 'bg-[#2c1810] text-white border-[#2c1810] shadow-[2px_2px_0_#ff6b35]'
-                          : 'bg-white text-[#2c1810] border-stone-200 hover:bg-[#fff5e6]'
-                      }`}
-                    >
-                      {eng === 'midjourney' ? 'Midjourney v6.1' : eng === 'flux' ? 'FLUX.1' : 'SDXL'}
-                    </button>
-                  ))}
-                </div>
-              </div>
-
-              <div className="space-y-1.5">
-                <Label className="text-xs font-black text-[#2c1810]">Proporsi (Ratio)</Label>
-                <div className="grid grid-cols-2 gap-1">
-                  {(['16:9', '3:2', '1:1', '4:3', '9:16'] as AspectRatio[]).map((ar) => (
-                    <button
-                      key={ar}
-                      type="button"
-                      onClick={() => handleAspectRatioChange(ar)}
-                      className={`py-1.5 rounded-lg border-2 text-center text-xs font-black cursor-pointer transition-all ${
-                        settings.aspectRatio === ar
-                          ? 'bg-[#ff6b35] text-white border-[#2c1810] shadow-[1px_1px_0_#2c1810]'
-                          : 'bg-white text-[#2c1810] border-stone-200 hover:bg-[#fff5e6]'
-                      }`}
-                    >
-                      {ar}
-                    </button>
-                  ))}
-                </div>
-              </div>
-            </div>
-
-            {/* Prompt Count Pills */}
-            <div className="space-y-1.5">
-              <div className="flex items-center justify-between">
-                <Label className="text-xs font-black text-[#2c1810]">Jumlah Prompt per Generasi</Label>
-                <span className="text-[11px] font-black text-[#ff6b35] bg-[#fff5e6] px-2 py-0.5 rounded border border-[#2c1810]">
-                  {settings.count} Prompt
-                </span>
-              </div>
-              <div className="grid grid-cols-4 gap-2">
-                {[1, 5, 10, 20].map((cnt) => (
-                  <button
-                    key={cnt}
-                    type="button"
-                    onClick={() => setSettings((s) => ({ ...s, count: cnt }))}
-                    className={`py-1.5 rounded-lg border-2 text-center text-xs font-black cursor-pointer transition-all ${
-                      settings.count === cnt
-                        ? 'bg-[#ff6b35] text-white border-[#2c1810] shadow-[2px_2px_0_#2c1810]'
-                        : 'bg-white text-[#2c1810] border-stone-200 hover:bg-[#fff5e6]'
-                    }`}
-                  >
-                    {cnt}
-                  </button>
-                ))}
-              </div>
-            </div>
-
-            {/* Similarity Slider (Visible in Reference Mode) */}
-            {mode === 'reference_to_prompt' && (
-              <div className="space-y-1.5 p-3 bg-stone-50 border-2 border-stone-200 rounded-xl">
-                <div className="flex items-center justify-between text-xs font-black text-[#2c1810]">
-                  <span>Tingkat Kemiripan (Similarity)</span>
-                  <span className="text-[#ff6b35]">{settings.similarity}%</span>
-                </div>
-                <input
-                  type="range"
-                  min={0}
-                  max={100}
-                  step={5}
-                  value={settings.similarity}
-                  onChange={(e) => setSettings((s) => ({ ...s, similarity: Number(e.target.value) }))}
-                  className="w-full accent-[#ff6b35] cursor-pointer"
-                />
-                <div className="flex justify-between text-[10px] text-[#6b5344] font-semibold">
-                  <span>0% (Eksplorasi Liar)</span>
-                  <span>50% (Seimbang)</span>
-                  <span>100% (Sangat Mirip)</span>
                 </div>
               </div>
             )}
-
-            {/* Visual Direction / Style */}
-            <div className="space-y-1.5">
-              <Label className="text-xs font-black text-[#2c1810]">Gaya Visual Utama</Label>
-              <div className="grid grid-cols-1 sm:grid-cols-2 gap-1.5">
-                {VISUAL_DIRECTION_OPTIONS.map((opt) => (
-                  <button
-                    key={opt.id}
-                    type="button"
-                    onClick={() => setSettings((s) => ({ ...s, visualDirection: opt.id }))}
-                    className={`p-2 rounded-lg border-2 text-left transition-all cursor-pointer ${
-                      settings.visualDirection === opt.id
-                        ? 'bg-[#fff5e6] border-[#2c1810] shadow-[2px_2px_0_#2c1810] font-black'
-                        : 'bg-white border-stone-200 hover:border-stone-400 font-semibold text-stone-700'
-                    }`}
-                  >
-                    <span className="text-xs text-[#2c1810] block">{opt.label}</span>
-                  </button>
-                ))}
-              </div>
-            </div>
-
-            {/* Creative Focus */}
-            <div className="space-y-1.5">
-              <Label className="text-xs font-black text-[#2c1810]">Sumbu Fokus Kreatif (Axis)</Label>
-              <div className="grid grid-cols-1 gap-1">
-                {(Object.keys(CREATIVE_FOCUS_LABELS) as CreativeFocus[]).map((fId) => (
-                  <button
-                    key={fId}
-                    type="button"
-                    onClick={() => setSettings((s) => ({ ...s, creativeFocus: fId }))}
-                    className={`py-1.5 px-2.5 rounded-lg border-2 text-left text-xs transition-all cursor-pointer ${
-                      settings.creativeFocus === fId
-                        ? 'bg-[#fff5e6] border-[#2c1810] shadow-[2px_2px_0_#2c1810] font-black text-[#2c1810]'
-                        : 'bg-white border-stone-200 hover:bg-stone-50 font-medium text-stone-700'
-                    }`}
-                  >
-                    {CREATIVE_FOCUS_LABELS[fId]}
-                  </button>
-                ))}
-              </div>
-            </div>
-
-            {/* Semantic Preservation Mode */}
-            <div className="space-y-1.5">
-              <Label className="text-xs font-black text-[#2c1810]">Mode Preservasi Semantik</Label>
-              <div className="grid grid-cols-3 gap-1.5">
-                {[
-                  { id: 'meaning_preservation', label: 'Makna / Tema', desc: 'Jaga pesan' },
-                  { id: 'visual_replication', label: 'Ciri Visual', desc: 'Jaga bentuk' },
-                  { id: 'free_ideation', label: 'Ideasi Bebas', desc: 'Eksplorasi total' },
-                ].map((sm) => (
-                  <button
-                    key={sm.id}
-                    type="button"
-                    onClick={() => setSettings((s) => ({ ...s, semanticMode: sm.id as SemanticMode }))}
-                    className={`p-1.5 rounded-lg border-2 text-center transition-all cursor-pointer ${
-                      settings.semanticMode === sm.id
-                        ? 'bg-[#2c1810] text-white border-[#2c1810] shadow-[1px_1px_0_#ff6b35] font-black'
-                        : 'bg-white text-stone-700 border-stone-200 hover:bg-[#fff5e6] font-semibold'
-                    }`}
-                  >
-                    <span className="text-[11px] block">{sm.label}</span>
-                  </button>
-                ))}
-              </div>
-            </div>
-
-            {/* Commercial Safety Guardrail */}
-            <div className="p-3 bg-emerald-50 border-2 border-emerald-400 rounded-xl flex items-center justify-between gap-2 text-xs">
-              <div className="flex items-center gap-2">
-                <ShieldCheck className="w-4 h-4 text-emerald-700 shrink-0" />
-                <span className="text-emerald-950 font-bold">
-                  🛡️ Microstock Commercial Guardrails (Copy Space & Bebas Trademark)
-                </span>
-              </div>
-              <input
-                type="checkbox"
-                checked={settings.commercialSafety}
-                onChange={(e) => setSettings((s) => ({ ...s, commercialSafety: e.target.checked }))}
-                className="w-4 h-4 accent-[#ff6b35] rounded cursor-pointer"
-              />
-            </div>
           </div>
 
-          {/* D. Primary Generate Action Button */}
+          {/* CARD 2: Engine AI & Parameter Sintaks (Foldable) */}
+          <div className="bg-[#fffdf9] border-2 border-[#2c1810] rounded-2xl shadow-[4px_4px_0_#2c1810] overflow-hidden">
+            <button
+              type="button"
+              onClick={() => toggleFold('engine')}
+              className="w-full p-4 flex items-center justify-between hover:bg-[#fff5e6]/50 transition-colors cursor-pointer text-left"
+            >
+              <div className="flex items-center gap-2.5">
+                <Sliders className="w-4 h-4 text-[#ff6b35]" />
+                <div>
+                  <span className="text-xs font-black uppercase text-[#2c1810] block">
+                    2. Engine AI & Parameter Sintaks
+                  </span>
+                  <span className="text-[10px] text-[#6b5344] font-medium block">
+                    {ENGINE_LABELS[settings.engine]} · {settings.aspectRatio === 'none' ? 'Bebas Rasio' : settings.aspectRatio} · {settings.count} Prompt
+                  </span>
+                </div>
+              </div>
+              <div className="flex items-center gap-2">
+                <span className="text-[10px] font-black px-2 py-0.5 rounded-full border border-[#2c1810] bg-[#fff5e6] text-[#2c1810]">
+                  {settings.count} Batch
+                </span>
+                {foldedSections.engine ? (
+                  <ChevronDown className="w-4 h-4 text-[#2c1810]" />
+                ) : (
+                  <ChevronUp className="w-4 h-4 text-[#2c1810]" />
+                )}
+              </div>
+            </button>
+
+            {!foldedSections.engine && (
+              <div className="p-4 pt-0 space-y-4 border-t border-stone-200/80 mt-1">
+                {/* Engine Selector */}
+                <div className="space-y-1.5 pt-3">
+                  <div className="flex items-center justify-between">
+                    <Label className="text-xs font-black text-[#2c1810]">Pilih Engine Target AI</Label>
+                    <span className="text-[10px] font-bold text-[#6b5344]">Sintaks Otomatis</span>
+                  </div>
+                  <div className="grid grid-cols-1 sm:grid-cols-2 gap-1.5">
+                    {ENGINE_ITEMS.map((eng) => (
+                      <button
+                        key={eng.id}
+                        type="button"
+                        onClick={() => handleEngineChange(eng.id)}
+                        className={`py-2 px-2.5 rounded-xl border-2 text-left text-xs font-black cursor-pointer transition-all flex items-center justify-between ${
+                          settings.engine === eng.id
+                            ? 'bg-[#2c1810] text-white border-[#2c1810] shadow-[2px_2px_0_#ff6b35]'
+                            : 'bg-white text-[#2c1810] border-stone-200 hover:bg-[#fff5e6]'
+                        }`}
+                      >
+                        <span className="truncate">{eng.label}</span>
+                        <span
+                          className={`text-[9px] px-1.5 py-0.2 rounded border font-semibold ml-1.5 shrink-0 ${
+                            settings.engine === eng.id
+                              ? 'bg-[#ff6b35] text-white border-white/40'
+                              : 'bg-stone-100 text-stone-600 border-stone-300'
+                          }`}
+                        >
+                          {eng.badge}
+                        </span>
+                      </button>
+                    ))}
+                  </div>
+                </div>
+
+                {/* Aspect Ratio Selector (With None / Free option) */}
+                <div className="space-y-1.5">
+                  <div className="flex items-center justify-between">
+                    <Label className="text-xs font-black text-[#2c1810]">Proporsi (Aspect Ratio)</Label>
+                    <span className="text-[10px] font-bold text-[#6b5344]">
+                      {settings.aspectRatio === 'none' ? 'Bebas (Tanpa Rasio)' : `Rasio ${settings.aspectRatio}`}
+                    </span>
+                  </div>
+                  <div className="grid grid-cols-3 sm:grid-cols-6 gap-1">
+                    {ASPECT_RATIO_ITEMS.map((arItem) => (
+                      <button
+                        key={arItem.id}
+                        type="button"
+                        onClick={() => handleAspectRatioChange(arItem.id)}
+                        title={arItem.desc}
+                        className={`py-1.5 rounded-lg border-2 text-center text-xs font-black cursor-pointer transition-all ${
+                          settings.aspectRatio === arItem.id
+                            ? 'bg-[#ff6b35] text-white border-[#2c1810] shadow-[1px_1px_0_#2c1810]'
+                            : 'bg-white text-[#2c1810] border-stone-200 hover:bg-[#fff5e6]'
+                        }`}
+                      >
+                        {arItem.label}
+                      </button>
+                    ))}
+                  </div>
+                </div>
+
+                {/* Prompt Count Pills */}
+                <div className="space-y-1.5">
+                  <div className="flex items-center justify-between">
+                    <Label className="text-xs font-black text-[#2c1810]">Jumlah Prompt per Generasi</Label>
+                    <span className="text-[11px] font-black text-[#ff6b35] bg-[#fff5e6] px-2 py-0.5 rounded border border-[#2c1810]">
+                      {settings.count} Prompt
+                    </span>
+                  </div>
+                  <div className="grid grid-cols-4 gap-2">
+                    {[1, 5, 10, 20].map((cnt) => (
+                      <button
+                        key={cnt}
+                        type="button"
+                        onClick={() => setSettings((s) => ({ ...s, count: cnt }))}
+                        className={`py-1.5 rounded-lg border-2 text-center text-xs font-black cursor-pointer transition-all ${
+                          settings.count === cnt
+                            ? 'bg-[#ff6b35] text-white border-[#2c1810] shadow-[2px_2px_0_#2c1810]'
+                            : 'bg-white text-[#2c1810] border-stone-200 hover:bg-[#fff5e6]'
+                        }`}
+                      >
+                        {cnt}
+                      </button>
+                    ))}
+                  </div>
+                </div>
+
+                {/* Similarity Slider (Visible in Reference Mode) */}
+                {mode === 'reference_to_prompt' && (
+                  <div className="space-y-1.5 p-3 bg-stone-50 border-2 border-stone-200 rounded-xl">
+                    <div className="flex items-center justify-between text-xs font-black text-[#2c1810]">
+                      <span>Tingkat Kemiripan (Similarity)</span>
+                      <span className="text-[#ff6b35]">{settings.similarity}%</span>
+                    </div>
+                    <input
+                      type="range"
+                      min={0}
+                      max={100}
+                      step={5}
+                      value={settings.similarity}
+                      onChange={(e) => setSettings((s) => ({ ...s, similarity: Number(e.target.value) }))}
+                      className="w-full accent-[#ff6b35] cursor-pointer"
+                    />
+                    <div className="flex justify-between text-[10px] text-[#6b5344] font-semibold">
+                      <span>0% (Eksplorasi Liar)</span>
+                      <span>50% (Seimbang)</span>
+                      <span>100% (Sangat Mirip)</span>
+                    </div>
+                  </div>
+                )}
+              </div>
+            )}
+          </div>
+
+          {/* CARD 3: Arah Visual & Sumbu Kreatif (Foldable) */}
+          <div className="bg-[#fffdf9] border-2 border-[#2c1810] rounded-2xl shadow-[4px_4px_0_#2c1810] overflow-hidden">
+            <button
+              type="button"
+              onClick={() => toggleFold('visual')}
+              className="w-full p-4 flex items-center justify-between hover:bg-[#fff5e6]/50 transition-colors cursor-pointer text-left"
+            >
+              <div className="flex items-center gap-2.5">
+                <Palette className="w-4 h-4 text-[#ff6b35]" />
+                <div>
+                  <span className="text-xs font-black uppercase text-[#2c1810] block">
+                    3. Gaya Visual & Sumbu Fokus
+                  </span>
+                  <span className="text-[10px] text-[#6b5344] font-medium block">
+                    {VISUAL_DIRECTION_OPTIONS.find((v) => v.id === settings.visualDirection)?.label || settings.visualDirection}
+                  </span>
+                </div>
+              </div>
+              <div className="flex items-center gap-2">
+                <span className="text-[10px] font-black px-2 py-0.5 rounded-full border border-[#2c1810] bg-[#fff5e6] text-[#2c1810]">
+                  {settings.visualDirection}
+                </span>
+                {foldedSections.visual ? (
+                  <ChevronDown className="w-4 h-4 text-[#2c1810]" />
+                ) : (
+                  <ChevronUp className="w-4 h-4 text-[#2c1810]" />
+                )}
+              </div>
+            </button>
+
+            {!foldedSections.visual && (
+              <div className="p-4 pt-0 space-y-4 border-t border-stone-200/80 mt-1">
+                {/* Visual Direction / Style */}
+                <div className="space-y-1.5 pt-3">
+                  <Label className="text-xs font-black text-[#2c1810]">Gaya Visual Utama</Label>
+                  <div className="grid grid-cols-1 sm:grid-cols-2 gap-1.5">
+                    {VISUAL_DIRECTION_OPTIONS.map((opt) => (
+                      <button
+                        key={opt.id}
+                        type="button"
+                        onClick={() => setSettings((s) => ({ ...s, visualDirection: opt.id }))}
+                        className={`p-2 rounded-lg border-2 text-left transition-all cursor-pointer ${
+                          settings.visualDirection === opt.id
+                            ? 'bg-[#fff5e6] border-[#2c1810] shadow-[2px_2px_0_#2c1810] font-black'
+                            : 'bg-white border-stone-200 hover:border-stone-400 font-semibold text-stone-700'
+                        }`}
+                      >
+                        <span className="text-xs text-[#2c1810] block">{opt.label}</span>
+                        <span className="text-[10px] text-stone-500 font-normal block truncate">{opt.desc}</span>
+                      </button>
+                    ))}
+                  </div>
+                </div>
+
+                {/* Creative Focus */}
+                <div className="space-y-1.5">
+                  <Label className="text-xs font-black text-[#2c1810]">Sumbu Fokus Kreatif (Axis)</Label>
+                  <div className="grid grid-cols-1 gap-1">
+                    {(Object.keys(CREATIVE_FOCUS_LABELS) as CreativeFocus[]).map((fId) => (
+                      <button
+                        key={fId}
+                        type="button"
+                        onClick={() => setSettings((s) => ({ ...s, creativeFocus: fId }))}
+                        className={`py-1.5 px-2.5 rounded-lg border-2 text-left text-xs transition-all cursor-pointer ${
+                          settings.creativeFocus === fId
+                            ? 'bg-[#fff5e6] border-[#2c1810] shadow-[2px_2px_0_#2c1810] font-black text-[#2c1810]'
+                            : 'bg-white border-stone-200 hover:bg-stone-50 font-medium text-stone-700'
+                        }`}
+                      >
+                        {CREATIVE_FOCUS_LABELS[fId]}
+                      </button>
+                    ))}
+                  </div>
+                </div>
+              </div>
+            )}
+          </div>
+
+          {/* CARD 4: Detail Kreatif & Keamanan (Foldable) */}
+          <div className="bg-[#fffdf9] border-2 border-[#2c1810] rounded-2xl shadow-[4px_4px_0_#2c1810] overflow-hidden">
+            <button
+              type="button"
+              onClick={() => toggleFold('safety')}
+              className="w-full p-4 flex items-center justify-between hover:bg-[#fff5e6]/50 transition-colors cursor-pointer text-left"
+            >
+              <div className="flex items-center gap-2.5">
+                <ShieldCheck className="w-4 h-4 text-emerald-600" />
+                <div>
+                  <span className="text-xs font-black uppercase text-[#2c1810] block">
+                    4. Preservasi Semantik & Safety
+                  </span>
+                  <span className="text-[10px] text-[#6b5344] font-medium block">
+                    {settings.commercialSafety ? '🛡️ Commercial Guardrails Aktif' : 'Standard'}
+                  </span>
+                </div>
+              </div>
+              <div className="flex items-center gap-2">
+                <span className="text-[10px] font-black px-2 py-0.5 rounded-full border border-[#2c1810] bg-[#fff5e6] text-[#2c1810]">
+                  {settings.semanticMode === 'meaning_preservation' ? 'Makna' : settings.semanticMode === 'visual_replication' ? 'Visual' : 'Bebas'}
+                </span>
+                {foldedSections.safety ? (
+                  <ChevronDown className="w-4 h-4 text-[#2c1810]" />
+                ) : (
+                  <ChevronUp className="w-4 h-4 text-[#2c1810]" />
+                )}
+              </div>
+            </button>
+
+            {!foldedSections.safety && (
+              <div className="p-4 pt-0 space-y-3.5 border-t border-stone-200/80 mt-1">
+                {/* Semantic Preservation Mode */}
+                <div className="space-y-1.5 pt-3">
+                  <Label className="text-xs font-black text-[#2c1810]">Mode Preservasi Semantik</Label>
+                  <div className="grid grid-cols-3 gap-1.5">
+                    {[
+                      { id: 'meaning_preservation', label: 'Makna / Tema', desc: 'Jaga pesan' },
+                      { id: 'visual_replication', label: 'Ciri Visual', desc: 'Jaga bentuk' },
+                      { id: 'free_ideation', label: 'Ideasi Bebas', desc: 'Eksplorasi total' },
+                    ].map((sm) => (
+                      <button
+                        key={sm.id}
+                        type="button"
+                        onClick={() => setSettings((s) => ({ ...s, semanticMode: sm.id as SemanticMode }))}
+                        className={`p-1.5 rounded-lg border-2 text-center transition-all cursor-pointer ${
+                          settings.semanticMode === sm.id
+                            ? 'bg-[#2c1810] text-white border-[#2c1810] shadow-[1px_1px_0_#ff6b35] font-black'
+                            : 'bg-white text-stone-700 border-stone-200 hover:bg-[#fff5e6] font-semibold'
+                        }`}
+                      >
+                        <span className="text-[11px] block">{sm.label}</span>
+                      </button>
+                    ))}
+                  </div>
+                </div>
+
+                {/* Commercial Safety Guardrail */}
+                <div className="p-3 bg-emerald-50 border-2 border-emerald-400 rounded-xl flex items-center justify-between gap-2 text-xs">
+                  <div className="flex items-center gap-2">
+                    <ShieldCheck className="w-4 h-4 text-emerald-700 shrink-0" />
+                    <span className="text-emerald-950 font-bold text-[11px] leading-tight">
+                      🛡️ Microstock Commercial Guardrails (Copy Space & Bebas Trademark)
+                    </span>
+                  </div>
+                  <input
+                    type="checkbox"
+                    checked={settings.commercialSafety}
+                    onChange={(e) => setSettings((s) => ({ ...s, commercialSafety: e.target.checked }))}
+                    className="w-4 h-4 accent-[#ff6b35] rounded cursor-pointer shrink-0"
+                  />
+                </div>
+              </div>
+            )}
+          </div>
+
+          {/* Primary Generate Action Button */}
           <Button
             type="button"
             disabled={busy}

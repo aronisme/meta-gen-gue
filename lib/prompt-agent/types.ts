@@ -1,5 +1,5 @@
-export type EngineType = 'midjourney' | 'flux' | 'sdxl';
-export type AspectRatio = '16:9' | '3:2' | '1:1' | '4:3' | '9:16';
+export type EngineType = 'midjourney' | 'flux' | 'sdxl' | 'imagen3' | 'nanobanana';
+export type AspectRatio = 'none' | '16:9' | '3:2' | '1:1' | '4:3' | '9:16';
 export type VisualDirection = 'photorealistic' | '3d_render' | 'vector' | 'cinematic' | 'editorial' | 'auto';
 export type CreativeFocus =
   | 'composition_lighting'
