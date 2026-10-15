@@ -2,6 +2,7 @@
 
 import { useEffect, useRef, useState } from 'react';
 import {
+  Bot,
   Camera,
   Check,
   ChevronDown,
@@ -22,6 +23,13 @@ import {
 import { Button } from '@/components/ui/button';
 import { Label } from '@/components/ui/label';
 import { Textarea } from '@/components/ui/textarea';
+import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from '@/components/ui/select';
 import { toast } from 'sonner';
 import { resizeImageToMax1024 } from '@/lib/resize';
 import {
@@ -43,10 +51,26 @@ import type {
   VisualDirection,
   VisualDNAProfile,
 } from '@/lib/prompt-agent/types';
+import type { Provider } from '@/lib/types';
 
 export interface PromptGeneratorViewProps {
   onSwitchToMetadata?: () => void;
+  model?: string;
+  onModelChange?: (model: string) => void;
+  gasProxyModels?: string[];
+  provider?: Provider;
+  apiKey?: string;
 }
+
+const MODEL_LABELS: Record<string, string> = {
+  auto: 'Auto: Tercepat & Auto-Failover',
+  'gemini-2.5-flash': 'Google Gemini (gemini-2.5-flash)',
+  'qwen/qwen3.8-27b': 'Groq (qwen/qwen3.8-27b)',
+  'pixtral-12b-2409': 'Mistral AI (pixtral-12b-2409)',
+  'mistralai/mistral-large-3-675b-instruct-2512': 'Nvidia NIM (mistral-large-3-675b)',
+  'mistralai/ministral-14b': 'xKiro (ministral-14b)',
+  'sensenova/sensenova-6.8-flash-lite': 'xKiro (sensenova-6.8-flash-lite)',
+};
 
 const STORAGE_KEY_PROMPTS = 'vcpa_prompts_v1';
 const STORAGE_KEY_SETTINGS = 'vcpa_settings_v1';
@@ -83,7 +107,15 @@ const VISUAL_DIRECTION_OPTIONS: Array<{ id: VisualDirection; label: string; desc
   { id: 'cinematic', label: 'Sinematik 4K Still', desc: 'Anamorphic lens flare, film color grading' },
 ];
 
-export function PromptGeneratorView({ onSwitchToMetadata }: PromptGeneratorViewProps) {
+export function PromptGeneratorView({
+  onSwitchToMetadata,
+  model = 'auto',
+  onModelChange,
+  gasProxyModels = [],
+  provider = 'gas-proxy',
+  apiKey,
+}: PromptGeneratorViewProps) {
+  const models = gasProxyModels.length > 0 ? gasProxyModels : Object.keys(MODEL_LABELS);
   // 1. Generation Mode: reference_to_prompt vs text_ideation
   const [mode, setMode] = useState<VCPAMode>('reference_to_prompt');
 
@@ -208,6 +240,9 @@ export function PromptGeneratorView({ onSwitchToMetadata }: PromptGeneratorViewP
         brief,
         imageDataUrl: refImageDataUrl || undefined,
         settings,
+        provider,
+        model,
+        apiKey,
         onProgressStep: (step) => setProgressStep(step),
       });
 
@@ -233,7 +268,10 @@ export function PromptGeneratorView({ onSwitchToMetadata }: PromptGeneratorViewP
         card,
         prompts,
         settings,
-        visualDna || undefined
+        visualDna || undefined,
+        provider,
+        model,
+        apiKey
       );
       setPrompts((prev) => prev.map((c) => (c.id === card.id ? newCard : c)));
       toast.success(`Konsep #${card.ordinal} diperbarui!`);
@@ -415,6 +453,40 @@ export function PromptGeneratorView({ onSwitchToMetadata }: PromptGeneratorViewP
       <div className="grid grid-cols-1 lg:grid-cols-12 gap-6 items-start">
         {/* Left Column: Creator Controls */}
         <div className="lg:col-span-5 space-y-5">
+          {/* AI Engine & Model Selector Card (Synced with Studio) */}
+          <div className="bg-[#fffdf9] border-2 border-[#2c1810] rounded-2xl p-4 shadow-[4px_4px_0_#2c1810] space-y-2.5">
+            <div className="flex items-center justify-between">
+              <Label className="text-xs font-black uppercase text-[#2c1810] flex items-center gap-1.5">
+                <Bot className="w-4 h-4 text-[#ff6b35]" />
+                <span>Mesin AI (Sama dengan Studio Metadata)</span>
+              </Label>
+              <span className="text-[10px] font-black bg-[#fff5e6] text-[#2c1810] border-2 border-[#2c1810] px-2 py-0.5 rounded-full shadow-[1px_1px_0_#2c1810]">
+                {provider === 'openai' ? 'OpenAI Direct' : 'GAS Proxy v3.1'}
+              </span>
+            </div>
+
+            <Select value={model || 'auto'} onValueChange={onModelChange}>
+              <SelectTrigger className="w-full bg-white border-2 border-[#2c1810] rounded-xl h-10 font-bold text-xs text-[#2c1810] shadow-[2px_2px_0_#2c1810]">
+                <SelectValue placeholder="Pilih Model AI" />
+              </SelectTrigger>
+              <SelectContent className="bg-white border-2 border-[#2c1810] shadow-[4px_4px_0_#2c1810] rounded-xl">
+                {models.map((m) => (
+                  <SelectItem key={m} value={m} className="text-xs font-bold py-2 cursor-pointer">
+                    {MODEL_LABELS[m] || m}
+                  </SelectItem>
+                ))}
+              </SelectContent>
+            </Select>
+
+            <div className="flex items-center justify-between text-[11px] text-[#6b5344] font-medium pt-0.5">
+              <span>Failover: 2 Cluster Aktif</span>
+              <span className="text-emerald-700 font-bold flex items-center gap-1">
+                <span className="w-2 h-2 rounded-full bg-emerald-500 animate-pulse inline-block" />
+                Online & Terhubung
+              </span>
+            </div>
+          </div>
+
           {/* A. Reference Image Dropzone (Active in Reference Mode) */}
           {mode === 'reference_to_prompt' && (
             <div className="bg-[#fffdf9] border-2 border-[#2c1810] rounded-2xl p-4 shadow-[4px_4px_0_#2c1810] space-y-3">

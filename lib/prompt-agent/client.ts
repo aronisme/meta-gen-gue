@@ -22,14 +22,28 @@ export interface GeneratePromptsParams {
   settings: VCPASettings;
   provider?: Provider;
   model?: string;
+  apiKey?: string;
   onProgressStep?: (step: string) => void;
+}
+
+async function withRetry<T>(fn: () => Promise<T>, tries = 3, backoffMs = 600): Promise<T> {
+  let last: unknown;
+  for (let t = 0; t < tries; t++) {
+    try {
+      return await fn();
+    } catch (e: unknown) {
+      last = e;
+      if (t < tries - 1) await new Promise((r) => setTimeout(r, backoffMs * (t + 1)));
+    }
+  }
+  throw last;
 }
 
 export async function executeVCPAGeneration(
   params: GeneratePromptsParams
 ): Promise<VCPAResult> {
   const { mode, brief, imageDataUrl, settings, provider = 'gas-proxy', model = 'auto', onProgressStep } = params;
-  const apiKey = getApiKey(provider);
+  const apiKey = params.apiKey || getApiKey(provider);
 
   onProgressStep?.(
     mode === 'reference_to_prompt'
@@ -43,56 +57,67 @@ export async function executeVCPAGeneration(
     settings,
   });
 
-  // Call /api/generate/prompt-agent with fallback to proxy
   let responseData: { visualDna?: VisualDNAProfile; prompts?: Array<Record<string, unknown>> } | null = null;
 
   try {
-    const res = await fetch('/api/generate/prompt-agent', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({
-        mode,
-        brief,
-        imageDataUrl,
-        settings,
-        apiKey,
-        provider,
-        model,
-        instruction,
-      }),
-    });
+    onProgressStep?.(`Menghubungi AI Engine (${model === 'auto' ? 'Auto-Failover' : model})...`);
+    const res = await withRetry(
+      () =>
+        fetch('/api/generate/prompt-agent', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            mode,
+            brief,
+            imageDataUrl,
+            settings,
+            apiKey: apiKey || undefined,
+            provider,
+            model,
+            instruction,
+          }),
+        }).then(async (r) => {
+          if (!r.ok) {
+            const errText = await r.text();
+            throw new Error(`HTTP ${r.status}: ${errText.slice(0, 200)}`);
+          }
+          return r;
+        }),
+      3,
+      800
+    );
 
-    if (res.ok) {
-      responseData = await res.json();
-    } else {
-      throw new Error(`Endpoint returned HTTP ${res.status}`);
-    }
+    responseData = await res.json();
   } catch {
-    // Fallback: If custom endpoint route fails or is offline, try direct call via standard proxy
-    onProgressStep?.('Menghubungkan ke GAS AI Proxy (Direct Fallback)...');
-    
-    const proxyPayload: Record<string, unknown> = {
-      model: model === 'auto' ? 'gemini-2.5-flash' : model,
-      instruction,
-    };
-    if (imageDataUrl) {
-      proxyPayload.imageDataUrl = imageDataUrl;
-    }
+    // Fallback: If dedicated route encounters issues, call unified proxy directly
+    onProgressStep?.('Menghubungkan via Fallback AI Proxy...');
 
-    // Call standard proxy
-    const proxyRes = await fetch('/api/generate/proxy', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify(proxyPayload),
-    });
+    const fallbackUrl = provider === 'openai' ? '/api/generate/openai' : '/api/generate/proxy';
+    const fallbackRes = await withRetry(
+      () =>
+        fetch(fallbackUrl, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            apiKey: apiKey || undefined,
+            model: model || 'auto',
+            instruction,
+            imageDataUrl,
+          }),
+        }).then(async (r) => {
+          if (!r.ok) {
+            const errBody = await r.text();
+            throw new Error(`Fallback HTTP ${r.status}: ${errBody.slice(0, 150)}`);
+          }
+          return r;
+        }),
+      2,
+      1000
+    );
 
-    if (!proxyRes.ok) {
-      throw new Error('Gagal menghubungi AI Provider. Periksa koneksi atau kuota API.');
-    }
-
-    const proxyData: Record<string, unknown> = await proxyRes.json();
-    // Some proxies return { output: string } or { result: string } or raw json
-    const rawText = (typeof proxyData.output === 'string' && proxyData.output) ||
+    const proxyData: Record<string, unknown> = await fallbackRes.json();
+    const rawText =
+      (typeof proxyData.output === 'string' && proxyData.output) ||
       (typeof proxyData.result === 'string' && proxyData.result) ||
       JSON.stringify(proxyData);
     responseData = extractJsonFromText(rawText) as {
@@ -102,7 +127,7 @@ export async function executeVCPAGeneration(
   }
 
   if (!responseData || (!Array.isArray(responseData.prompts) && typeof responseData !== 'object')) {
-    throw new Error('Format output AI tidak valid.');
+    throw new Error('Format output AI tidak valid atau respons kosong.');
   }
 
   onProgressStep?.('Memformat sintaks prompt untuk ' + settings.engine.toUpperCase() + '...');
@@ -127,9 +152,10 @@ export async function regenerateSinglePromptCard(
   settings: VCPASettings,
   visualDna?: VisualDNAProfile,
   provider: Provider = 'gas-proxy',
-  model = 'auto'
+  model = 'auto',
+  customApiKey?: string
 ): Promise<PromptCardItem> {
-  const apiKey = getApiKey(provider);
+  const apiKey = customApiKey || getApiKey(provider);
 
   const existingTitles = existingCards
     .filter((c) => c.id !== cardToReplace.id)
@@ -149,27 +175,34 @@ Output ONLY a JSON object:
   "title": "Fresh Title",
   "creativeStrategy": "Concept Expansion",
   "rawBasePrompt": "Full detailed base prompt in English...",
-  "rationale": "Why this alternative was created...",
+  "rationale": "One concise sentence explaining visual thesis",
   "tags": ["fresh", "alternative"]
 }`;
 
-  const res = await fetch('/api/generate/prompt-agent', {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({
-      mode: 'text_ideation',
-      brief: `Alternative for ${cardToReplace.title}`,
-      settings: { ...settings, count: 1 },
-      apiKey,
-      provider,
-      model,
-      instruction,
-    }),
-  });
-
-  if (!res.ok) {
-    throw new Error('Gagal meregenerasi kartu.');
-  }
+  const res = await withRetry(
+    () =>
+      fetch('/api/generate/prompt-agent', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          mode: 'text_ideation',
+          brief: `Alternative for ${cardToReplace.title}`,
+          settings: { ...settings, count: 1 },
+          apiKey: apiKey || undefined,
+          provider,
+          model,
+          instruction,
+        }),
+      }).then(async (r) => {
+        if (!r.ok) {
+          const errText = await r.text();
+          throw new Error(`HTTP ${r.status}: ${errText.slice(0, 150)}`);
+        }
+        return r;
+      }),
+    2,
+    600
+  );
 
   const data = (await res.json()) as { prompts?: Array<Record<string, unknown>> } & Record<string, unknown>;
   const rawItem = Array.isArray(data.prompts) && data.prompts[0] ? data.prompts[0] : data;

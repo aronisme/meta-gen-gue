@@ -51,6 +51,15 @@ describe('VCPA Engine Utilities', () => {
     expect(parsed).toHaveProperty('title', 'Quiet Confidence');
   });
 
+  it('recovers complete prompt items from truncated LLM response', () => {
+    const truncatedOutput = `{"visualDna": {"observed": ["coffee"]}, "prompts": [{"ordinal": 1, "title": "First", "prompt": "Prompt 1"}, {"ordinal": 2, "title": "Cutoff", "rationale": "Incom`;
+    const parsed = extractJsonFromText(truncatedOutput);
+    expect(parsed).toHaveProperty('prompts');
+    const prompts = parsed.prompts as Array<{ ordinal: number; title: string }>;
+    expect(prompts).toHaveLength(1);
+    expect(prompts[0].title).toBe('First');
+  });
+
   it('parses raw results into interactive PromptCardItems', () => {
     const rawItems = [
       {

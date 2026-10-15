@@ -83,8 +83,8 @@ export async function onRequestPost(context: { request: Request; env: Record<str
       ? imageDataUrls
       : (imageDataUrl ? [imageDataUrl] : []);
 
-    if (images.length === 0) {
-      return new Response('Missing imageDataUrl or imageDataUrls', { status: 400 });
+    if (images.length === 0 && !instruction) {
+      return new Response('Missing imageDataUrl, imageDataUrls, or instruction', { status: 400 });
     }
 
     const isVideoClip = images.length > 1;
@@ -94,7 +94,11 @@ export async function onRequestPost(context: { request: Request; env: Record<str
 
     let contentParts: Array<{ type: string; text?: string; image_url?: { url: string } }> = [];
 
-    if (isVideoClip) {
+    if (images.length === 0) {
+      contentParts = [
+        { type: 'text', text: instruction || 'Analyze and respond in JSON.' }
+      ];
+    } else if (isVideoClip) {
       const frameCount = images.length;
       const baseInstruction = instruction || 'Generate microstock metadata for this stock video clip.';
 

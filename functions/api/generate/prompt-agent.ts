@@ -20,7 +20,41 @@ function extractJson(text: string): Record<string, unknown> {
       return JSON.parse(slice) as Record<string, unknown>;
     } catch {
       const repaired = slice.replace(/,\s*([\]\}])/g, '$1').replace(/[\u0000-\u001F]+/g, ' ');
-      return JSON.parse(repaired) as Record<string, unknown>;
+      try {
+        return JSON.parse(repaired) as Record<string, unknown>;
+      } catch {
+        // continue to truncation recovery
+      }
+    }
+  }
+
+  // Robust truncation recovery: if tokens cut off mid-array, close to the last valid object
+  const lastObjEnd = cleaned.lastIndexOf('}');
+  if (lastObjEnd > 0) {
+    const fromIdx = start >= 0 ? start : 0;
+    const candidate = cleaned.slice(fromIdx, lastObjEnd + 1) + '\n  ]\n}';
+    try {
+      const recovered = JSON.parse(candidate);
+      if (recovered && typeof recovered === 'object') return recovered as Record<string, unknown>;
+    } catch {
+      // try regex below
+    }
+  }
+
+  // Regex fallback to extract individual completed prompt items
+  const promptRegex = /\{\s*"ordinal"[\s\S]*?\}(?=\s*[,\]])/g;
+  const matches = cleaned.match(promptRegex);
+  if (matches && matches.length > 0) {
+    const parsedPrompts: Array<Record<string, unknown>> = [];
+    for (const m of matches) {
+      try {
+        parsedPrompts.push(JSON.parse(m));
+      } catch {
+        // skip malformed item
+      }
+    }
+    if (parsedPrompts.length > 0) {
+      return { prompts: parsedPrompts };
     }
   }
 
@@ -72,10 +106,12 @@ export async function onRequestPost(context: { request: Request; env: Record<str
 
   try {
     const body = await context.request.json();
-    const { model, instruction, imageDataUrl } = body as {
+    const { model, instruction, imageDataUrl, provider, apiKey } = body as {
       model?: string;
       instruction?: string;
       imageDataUrl?: string;
+      provider?: string;
+      apiKey?: string;
     };
 
     if (!instruction) {
@@ -104,7 +140,36 @@ export async function onRequestPost(context: { request: Request; env: Record<str
         },
       ],
       temperature: 0.7,
+      max_tokens: 4096,
     };
+
+    // If direct OpenAI provider is selected and key is provided
+    if (provider === 'openai' && apiKey) {
+      const openAiRes = await fetch('https://api.openai.com/v1/chat/completions', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          Authorization: `Bearer ${apiKey}`,
+        },
+        body: JSON.stringify(payload),
+      });
+
+      if (!openAiRes.ok) {
+        throw new Error(`OpenAI HTTP ${openAiRes.status}: ${(await openAiRes.text()).slice(0, 200)}`);
+      }
+
+      const openAiData = (await openAiRes.json()) as ProxyChatResponse;
+      const rawContent = openAiData.choices?.[0]?.message?.content || '';
+      const parsed = extractJson(rawContent);
+      return new Response(JSON.stringify(parsed), {
+        status: 200,
+        headers: {
+          'Content-Type': 'application/json',
+          'X-Provider': 'openai',
+          'X-Target-Model': targetModel,
+        },
+      });
+    }
 
     let lastError: Error | null = null;
     const startIndex = roundRobinIndex % PROXY_CLUSTERS.length;
@@ -116,7 +181,7 @@ export async function onRequestPost(context: { request: Request; env: Record<str
 
       try {
         const controller = new AbortController();
-        const timeoutId = setTimeout(() => controller.abort(), 45000);
+        const timeoutId = setTimeout(() => controller.abort(), 55000);
 
         const res = await fetch(cluster.url, {
           method: 'POST',

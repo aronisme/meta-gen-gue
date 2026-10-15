@@ -946,7 +946,14 @@ export default function App() {
 
         {/* Module 2: AI Stock Prompt Generator */}
         <div className={activeModule === 'prompt-gen' ? 'block' : 'hidden'}>
-          <PromptGeneratorView onSwitchToMetadata={() => setActiveModule('metadata')} />
+          <PromptGeneratorView
+            onSwitchToMetadata={() => setActiveModule('metadata')}
+            model={model}
+            onModelChange={setModel}
+            gasProxyModels={GAS_PROXY_MODELS}
+            provider={provider}
+            apiKey={apiKey}
+          />
         </div>
 
         {/* Module 3: Microstock Keyword Research */}

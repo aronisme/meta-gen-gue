@@ -118,6 +118,7 @@ STRICT DIVERSITY & QUALITY RULES:
 2. VISUAL SPECIFICITY: Every prompt must specify tangible physical subjects, distinct camera framing (e.g. overhead flatlay, dramatic low-angle, extreme macro, wide environmental hero), lighting (e.g. golden hour rim light, soft diffused studio softbox, atmospheric chiaroscuro), materials/textures, and clean copy space for designers.
 3. COMMERCIALLY SAFE & USABLE: Strictly NO copyrighted brand names, recognizable trademarks, or celebrity likenesses. Include natural negative space suitable for advertising copy.
 4. PROMPT LANGUAGE: The 'rawBasePrompt' field MUST be in English for optimal image generation performance. Titles and rationales should be in ${settings.promptLanguage === 'id' ? 'Bahasa Indonesia' : 'English'}.
+5. KEEP IT COMPACT: Keep 'rationale' strictly to 1 concise sentence (maximum 20 words) to prevent token truncation.
 
 CRITICAL OUTPUT FORMAT:
 You MUST return ONLY a valid, single, parseable JSON object matching this schema exactly. Do NOT include markdown code blocks, do not include backticks, do not include commentary before or after:
@@ -141,7 +142,7 @@ You MUST return ONLY a valid, single, parseable JSON object matching this schema
       "title": "Short evocative title (max 5 words)",
       "creativeStrategy": "One of: Controlled Variation | Concept Expansion | Symbolic Exploration | Editorial Hero | Macro Texture",
       "rawBasePrompt": "Full detailed base prompt with subject, camera, lighting, textures, and composition",
-      "rationale": "1-2 sentences explaining the visual thesis and what was varied vs anchored",
+      "rationale": "1 short sentence explaining visual thesis",
       "tags": ["composition", "lighting", "subject"]
     }
   ]
@@ -168,7 +169,41 @@ export function extractJsonFromText(text: string): Record<string, unknown> {
       return JSON.parse(slice) as Record<string, unknown>;
     } catch {
       const repaired = slice.replace(/,\s*([\]\}])/g, '$1').replace(/[\u0000-\u001F]+/g, ' ');
-      return JSON.parse(repaired) as Record<string, unknown>;
+      try {
+        return JSON.parse(repaired) as Record<string, unknown>;
+      } catch {
+        // continue to truncation recovery
+      }
+    }
+  }
+
+  // Robust truncation recovery: if tokens cut off mid-array, close to the last valid object
+  const lastObjEnd = cleaned.lastIndexOf('}');
+  if (lastObjEnd > 0) {
+    const fromIdx = start >= 0 ? start : 0;
+    const candidate = cleaned.slice(fromIdx, lastObjEnd + 1) + '\n  ]\n}';
+    try {
+      const recovered = JSON.parse(candidate);
+      if (recovered && typeof recovered === 'object') return recovered as Record<string, unknown>;
+    } catch {
+      // try regex below
+    }
+  }
+
+  // Regex fallback to extract individual completed prompt items
+  const promptRegex = /\{\s*"ordinal"[\s\S]*?\}(?=\s*[,\]])/g;
+  const matches = cleaned.match(promptRegex);
+  if (matches && matches.length > 0) {
+    const parsedPrompts: Array<Record<string, unknown>> = [];
+    for (const m of matches) {
+      try {
+        parsedPrompts.push(JSON.parse(m));
+      } catch {
+        // skip malformed single item
+      }
+    }
+    if (parsedPrompts.length > 0) {
+      return { prompts: parsedPrompts };
     }
   }
 
