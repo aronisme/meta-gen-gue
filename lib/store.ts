@@ -115,7 +115,7 @@ export function loadSettings(): SavedSettings | null {
       updated = true;
     }
     // Auto-migrate legacy 70 char title limit to 120 (Universal Best-Seller metadata standard)
-    if (parsed.titleLength === 70) {
+    if (!parsed.titleLength || parsed.titleLength === 70 || isNaN(parsed.titleLength)) {
       parsed.titleLength = 120;
       updated = true;
     }
