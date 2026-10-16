@@ -176,3 +176,28 @@
      - *Controlled Concurrency*: Mengizinkan 2–3 stream upload paralel terkontrol pada antrean UI.
      - *Pipelining*: Menyematkan metadata secara asinkron mendahului antrean upload file berikutnya.
 - **Rationale**: Memaksimalkan fleksibilitas AI multimodal dan memangkas waktu tunggu upload FTP massal hingga 60–70% tanpa melanggar batasan rate-limit agensi microstock.
+
+## [2026-10-16] Dynamic Best-Seller Title Prompt Architecture & Comma-Free Compliance
+- **Context**: Judul yang dihasilkan generator sebelumnya selalu terkunci pada formula repetitif yang diakhiri frasa kaku `"Concept for [X] and [Y]."`. Di samping itu, Adobe Stock CSV secara ketat melarang tanda koma pada kolom judul (koma dapat merusak parsing CSV atau memicu penolakan).
+- **Decision**:
+  1. Merombak `defaultInstruction` di `app/page.tsx` untuk melarang pengulangan frasa `"Concept for..."` pada setiap aset.
+  2. Memberikan kebebasan komposisi kalimat alami (1–2 kalimat) yang dipisahkan secara eksklusif oleh tanda titik (`.`) tanpa koma.
+  3. Memperkenalkan 4 variasi penutup judul:
+     - *Representasi & Metafora*: `"Representing..."`, `"A representation of..."`, `"Symbolizing..."`.
+     - *Kebutuhan Komersial / Utility*: `"Ideal for website banner / editorial..."`, `"Designed for marketing campaign..."`.
+     - *Tata Letak / Spatial*: `"...with copy space for advertising text."`, `"...isolated on white background with clipping path."`.
+     - *Deskriptif Organik Murni*: Tanpa embel-embel konsep paksaan untuk subjek visual yang sudah jelas (makanan, satwa, lanskap, potret).
+- **Rationale**: Menghasilkan judul yang kaya variasi, terdengar alami seperti ditulis kurator profesional, memaksimalkan SEO mesin pencari Adobe Stock, dan 100% aman diekspor ke CSV tanpa merusak struktur kolom.
+
+## [2026-10-16] Google Identity Services (GIS) & Google Sheets Whitelist Authentication Architecture
+- **Context**: Dibutuhkan sistem login berbasis Gmail / Google Account untuk mengontrol akses pengguna, mengelola kuota, dan mencegah penyalahgunaan resource AI tanpa menambah biaya infrastruktur server baru pada aplikasi static export di Cloudflare Pages.
+- **Decision**:
+  1. Memanfaatkan **Google Identity Services (GIS / OAuth 2.0 Web SDK)** di sisi frontend (React / Next.js) dengan tombol resmi "Sign in with Google" dan dukungan One-Tap.
+  2. Menggunakan backend **Google Apps Script (GAS) Proxy** yang sudah ada untuk memverifikasi ID Token Google resmi via endpoint `https://oauth2.googleapis.com/tokeninfo?id_token=...`.
+  3. Menjadikan Google Sheets sebagai basis data identitas pengguna dengan menambahkan tab **`Users`** (kolom: Email, Name, Role, Status, DailyQuota, UsageCount, LastLogin).
+  4. Menyediakan mode kontrol akses fleksibel: **Whitelist Ketat (Private/Tim)** dan **Auto-Register (Freemium/Kuota Harian)**.
+- **Rationale**:
+  - Nol biaya operasional server (0 USD / bulan).
+  - Keamanan standar industri dengan enkripsi dan tanda tangan kriptografis dari Google.
+  - Kompatibel 100% dengan hosting static di Cloudflare Pages dan database Google Sheets yang sudah aktif digunakan oleh proyek.
+
