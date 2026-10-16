@@ -36,7 +36,11 @@ try {
 } finally {
   if (apiMoved && fs.existsSync(tempApiDir)) {
     console.log('[build-pages] Restoring app/api for local development...');
-    fs.cpSync(tempApiDir, appApiDir, { recursive: true });
-    fs.rmSync(tempApiDir, { recursive: true, force: true });
+    try {
+      fs.cpSync(tempApiDir, appApiDir, { recursive: true, force: true });
+      fs.rmSync(tempApiDir, { recursive: true, force: true, maxRetries: 5, retryDelay: 300 });
+    } catch (e) {
+      console.warn('[build-pages] Note on restoring app/api:', e?.message || e);
+    }
   }
 }

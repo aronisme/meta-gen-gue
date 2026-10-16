@@ -170,6 +170,17 @@ function MetadataItemComponent({
                     Error
                   </Badge>
                 )}
+                {item.error && onRegenerate && (
+                  <button
+                    className="px-2 py-1 rounded-lg bg-white hover:bg-[#fff5e6] text-[#2c1810] border-2 border-[#2c1810] shadow-[1.5px_1.5px_0_#2c1810] hover:shadow-none hover:translate-x-[0.5px] hover:translate-y-[0.5px] transition-all cursor-pointer flex items-center gap-1.5 text-xs font-extrabold shrink-0"
+                    onClick={() => onRegenerate(item.id)}
+                    aria-label="Coba lagi"
+                    title="Coba hasilkan ulang metadata untuk file ini (Retry)"
+                  >
+                    <RotateCw className="w-3.5 h-3.5 text-[#ff6b35]" />
+                    <span>Coba Lagi</span>
+                  </button>
+                )}
                 {onDelete && (
                   <button
                     className="p-1.5 rounded-lg bg-white hover:bg-[#fee2e2] text-[#2c1810] border-2 border-[#2c1810] shadow-[1px_1px_0_#2c1810] hover:shadow-none hover:translate-x-[1px] hover:translate-y-[1px] transition-all cursor-pointer"
@@ -281,9 +292,32 @@ function MetadataItemComponent({
       {/* Content */}
       <div className="p-4 space-y-3.5 text-[#2c1810]">
         {item.error ? (
-          <pre className="text-red-600 bg-red-50 p-3 rounded-lg border-2 border-red-300 text-xs whitespace-pre-wrap font-mono">
-            {item.error}
-          </pre>
+          <div className="space-y-3">
+            <div className="bg-[#fef2f2] border-2 border-[#fca5a5] p-3.5 rounded-xl shadow-[2px_2px_0_#ef4444] space-y-2.5">
+              <div className="flex items-start justify-between gap-3">
+                <div className="space-y-1 min-w-0 flex-1">
+                  <div className="font-extrabold text-xs uppercase tracking-wider text-[#991b1b] flex items-center gap-1.5">
+                    <span className="w-2 h-2 rounded-full bg-[#ef4444] animate-pulse" />
+                    Gagal Menghasilkan Metadata
+                  </div>
+                  <p className="text-xs text-[#b91c1c] font-semibold leading-relaxed font-mono whitespace-pre-wrap break-words">
+                    {item.error}
+                  </p>
+                </div>
+                {onRegenerate && (
+                  <button
+                    type="button"
+                    onClick={() => onRegenerate(item.id)}
+                    className="px-3 py-1.5 bg-white hover:bg-[#fff5e6] text-[#2c1810] border-2 border-[#2c1810] rounded-lg font-black text-xs shadow-[2px_2px_0_#2c1810] hover:shadow-none hover:translate-x-[1px] hover:translate-y-[1px] transition-all flex items-center gap-1.5 shrink-0 cursor-pointer"
+                    title="Coba hasilkan ulang metadata untuk file ini (Retry)"
+                  >
+                    <RotateCw className="w-3.5 h-3.5 text-[#ff6b35]" />
+                    <span>Coba Lagi (Retry)</span>
+                  </button>
+                )}
+              </div>
+            </div>
+          </div>
         ) : editable ? (
           <>
             {/* Title (editable) */}

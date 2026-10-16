@@ -7,7 +7,11 @@ function extractJson(text: string): Record<string, unknown> {
 
   try {
     const parsed = JSON.parse(cleaned);
-    if (parsed && typeof parsed === 'object') return parsed as Record<string, unknown>;
+    if (Array.isArray(parsed)) {
+      if (parsed[0] && typeof parsed[0] === 'object') return parsed[0] as Record<string, unknown>;
+    } else if (parsed && typeof parsed === 'object') {
+      return parsed as Record<string, unknown>;
+    }
   } catch {
     // continue
   }
@@ -19,8 +23,15 @@ function extractJson(text: string): Record<string, unknown> {
     try {
       return JSON.parse(slice) as Record<string, unknown>;
     } catch {
-      const repaired = slice.replace(/,\s*([\]\}])/g, '$1').replace(/[\u0000-\u001F]+/g, ' ');
-      return JSON.parse(repaired) as Record<string, unknown>;
+      try {
+        const repaired = slice
+          .replace(/,\s*([\]\}])/g, '$1')
+          .replace(/[\u0000-\u001F]+/g, (m) => (m === '\n' ? '\\n' : m === '\r' ? '\\r' : m === '\t' ? '\\t' : ' '));
+        return JSON.parse(repaired) as Record<string, unknown>;
+      } catch {
+        const loose = slice.replace(/,\s*([\]\}])/g, '$1').replace(/[\u0000-\u001F]+/g, ' ');
+        return JSON.parse(loose) as Record<string, unknown>;
+      }
     }
   }
 

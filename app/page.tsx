@@ -170,44 +170,133 @@ async function withRetry<T>(fn: () => Promise<T>, tries = 3, backoffMs = 600): P
 }
 
 function normalizeMeta(raw: unknown): MetaOutput | null {
-  if (!raw || typeof raw !== 'object') return null;
+  if (!raw) return null;
 
-  let obj = raw as Record<string, unknown>;
-  // Unwrap nested objects if model wrapped output in a data/metadata container
-  if (obj.data && typeof obj.data === 'object') obj = obj.data as Record<string, unknown>;
-  else if (obj.metadata && typeof obj.metadata === 'object') obj = obj.metadata as Record<string, unknown>;
-  else if (obj.result && typeof obj.result === 'object') obj = obj.result as Record<string, unknown>;
+  let obj: Record<string, unknown> | null = null;
 
-  // Case-insensitive key lookup helper
+  // 1. If string, parse or extract JSON substring
+  if (typeof raw === 'string') {
+    const trimmed = raw.trim();
+    try {
+      obj = JSON.parse(trimmed) as Record<string, unknown>;
+    } catch {
+      const s = trimmed.indexOf('{');
+      const e = trimmed.lastIndexOf('}');
+      if (s >= 0 && e > s) {
+        try {
+          const slice = trimmed.slice(s, e + 1);
+          obj = JSON.parse(slice) as Record<string, unknown>;
+        } catch {
+          try {
+            const repaired = trimmed
+              .slice(s, e + 1)
+              .replace(/,\s*([\]\}])/g, '$1')
+              .replace(/[\u0000-\u001F]+/g, ' ');
+            obj = JSON.parse(repaired) as Record<string, unknown>;
+          } catch {}
+        }
+      }
+    }
+  } else if (Array.isArray(raw)) {
+    const firstObj = raw.find((x) => x && typeof x === 'object');
+    if (firstObj) obj = firstObj as Record<string, unknown>;
+  } else if (typeof raw === 'object' && raw !== null) {
+    obj = raw as Record<string, unknown>;
+  }
+
+  if (!obj) return null;
+
+  // 2. Unwrap nested container wrappers if present
+  const unwrappers = ['data', 'metadata', 'result', 'response', 'output', 'content', 'item', 'asset', 'choices'];
+  for (const k of unwrappers) {
+    if (obj[k] && typeof obj[k] === 'object' && !Array.isArray(obj[k])) {
+      obj = obj[k] as Record<string, unknown>;
+    } else if (Array.isArray(obj[k]) && (obj[k] as unknown[]).length > 0) {
+      const first = (obj[k] as unknown[])[0];
+      if (first && typeof first === 'object') {
+        const choiceMsg = (first as Record<string, unknown>).message;
+        if (choiceMsg && typeof choiceMsg === 'object' && (choiceMsg as Record<string, unknown>).content) {
+          const contentStr = String((choiceMsg as Record<string, unknown>).content);
+          try {
+            const parsedContent = JSON.parse(contentStr);
+            if (parsedContent && typeof parsedContent === 'object') {
+              obj = parsedContent as Record<string, unknown>;
+            }
+          } catch {}
+        } else {
+          obj = first as Record<string, unknown>;
+        }
+      }
+    }
+  }
+
+  // 3. Case-insensitive key lookup helper
   const getField = (keys: string[]): unknown => {
+    if (!obj) return undefined;
     for (const k of keys) {
-      if (obj[k] !== undefined && obj[k] !== null) return obj[k];
+      if (obj[k] !== undefined && obj[k] !== null && obj[k] !== '') return obj[k];
       const foundKey = Object.keys(obj).find((x) => x.toLowerCase() === k.toLowerCase());
-      if (foundKey && obj[foundKey] !== undefined && obj[foundKey] !== null) return obj[foundKey];
+      if (foundKey && obj[foundKey] !== undefined && obj[foundKey] !== null && obj[foundKey] !== '') {
+        return obj[foundKey];
+      }
     }
     return undefined;
   };
 
-  const rawTitle = getField(['title', 'name', 'headline']);
-  const rawDesc = getField(['description', 'desc', 'caption', 'summary']);
-  const rawKeywords = getField(['keywords', 'tags', 'keyword_list', 'tag_list']);
+  const rawTitle = getField(['title', 'name', 'headline', 'image_title', 'caption', 'title_en', 'photo_title', 'subject']);
+  const rawDesc = getField(['description', 'desc', 'caption', 'summary', 'details', 'about', 'text']);
+  const rawKeywords = getField(['keywords', 'tags', 'keyword_list', 'tag_list', 'labels', 'key_words', 'keyword', 'tag']);
 
-  const title = typeof rawTitle === 'string' ? rawTitle.trim() : '';
-  let description = typeof rawDesc === 'string' ? rawDesc.trim() : '';
-  if (!description && title) description = title;
+  let title = '';
+  if (typeof rawTitle === 'string') {
+    title = rawTitle.trim();
+  } else if (typeof rawTitle === 'object' && rawTitle !== null) {
+    const rec = rawTitle as Record<string, unknown>;
+    title = String(rec.text || rec.value || rec.title || '').trim();
+  }
+
+  let description = '';
+  if (typeof rawDesc === 'string') {
+    description = rawDesc.trim();
+  } else if (typeof rawDesc === 'object' && rawDesc !== null) {
+    const rec = rawDesc as Record<string, unknown>;
+    description = String(rec.text || rec.value || rec.desc || '').trim();
+  }
 
   let keywords = '';
   if (Array.isArray(rawKeywords)) {
-    keywords = rawKeywords.map((k) => String(k).trim()).filter(Boolean).join(', ');
+    keywords = rawKeywords
+      .map((k) => {
+        if (typeof k === 'string') return k.trim();
+        if (typeof k === 'object' && k !== null) {
+          const rec = k as Record<string, unknown>;
+          return String(rec.keyword || rec.tag || rec.name || rec.value || '').trim();
+        }
+        return String(k).trim();
+      })
+      .filter(Boolean)
+      .join(', ');
   } else if (typeof rawKeywords === 'string') {
     keywords = rawKeywords.trim();
   }
 
-  // Minimum requirement: title and keywords
+  // 4. Intelligent resilient fallbacks:
+  if (!title && description) {
+    title = description.split(/[.\n]/)[0].trim().slice(0, 150);
+  }
+  if (!description && title) {
+    description = title;
+  }
+  if (!keywords && (title || description)) {
+    const combined = `${title} ${description}`.toLowerCase();
+    const words = combined.match(/[a-zA-Z]{3,}/g) || [];
+    keywords = Array.from(new Set(words)).slice(0, 25).join(', ');
+  }
+
   if (!title || !keywords) return null;
 
-  const rawCat = getField(['category', 'category_id', 'adobeCategory']);
-  const rawShutterCat = getField(['shutterstockCategory', 'shutterstock_category']);
+  const rawCat = getField(['category', 'category_id', 'adobeCategory', 'adobe_category']);
+  const rawShutterCat = getField(['shutterstockCategory', 'shutterstock_category', 'shutterCategory']);
   const rawIllus = getField(['illustration', 'is_illustration', 'vector']);
   const rawModel = getField(['aiModel', 'model']);
 
@@ -484,12 +573,11 @@ export default function App() {
 
     const genOne = async (file: File): Promise<ItemMetaBox> => {
       const isVideo = isVideoFile(file);
+      let capturedDataUrl: string | undefined;
+      let capturedDuration: number | undefined;
+      let capturedKeyframes: string[] | undefined;
 
       try {
-        let dataUrl: string;
-        let videoDuration: number | undefined;
-        let videoKeyframes: string[] | undefined;
-
         if (isVideo) {
           setStatusText(`Mengekstrak frame video: ${file.name}...`);
           // Ekstrak 5 frame kunci dari video untuk vision multimodal (maks 640px)
@@ -503,15 +591,15 @@ export default function App() {
               setProgress((prev) => Math.max(prev, Math.round((curr / tot) * 45)));
             }
           );
-          dataUrl = extracted.thumbDataUrl;
-          videoDuration = extracted.duration;
-          videoKeyframes = extracted.frames;
+          capturedDataUrl = extracted.thumbDataUrl;
+          capturedDuration = extracted.duration;
+          capturedKeyframes = extracted.frames;
           setStatusText(`Menganalisis video dengan AI (${file.name})...`);
           setProgress((prev) => Math.max(prev, 55));
         } else {
           setStatusText(`Mengoptimasi gambar: ${file.name}...`);
           const resized = await resizeImageToMax1024(file);
-          dataUrl = resized.dataUrl;
+          capturedDataUrl = resized.dataUrl;
           setStatusText(`Menganalisis gambar dengan AI (${file.name})...`);
           setProgress((prev) => Math.max(prev, 40));
         }
@@ -526,8 +614,8 @@ export default function App() {
           model,
           instruction: effectiveInstr,
           instructionHash: effectiveHash,
-          imageDataUrl: dataUrl,
-          imageDataUrls: videoKeyframes
+          imageDataUrl: capturedDataUrl,
+          imageDataUrls: capturedKeyframes
         };
         const url = provider === 'openai'
           ? '/api/generate/openai'
@@ -581,14 +669,26 @@ export default function App() {
           assetType: isVideo ? 'video' : 'image',
           status: 'success',
           createdAt: Date.now(),
-          thumbDataUrl: dataUrl,
-          videoDuration,
-          videoKeyframes: isVideo ? videoKeyframes : undefined,
+          thumbDataUrl: capturedDataUrl,
+          videoDuration: capturedDuration,
+          videoKeyframes: isVideo ? capturedKeyframes : undefined,
           meta: fixed,
         };
         await saveHistoryItem(box);
         return box;
       } catch (err: unknown) {
+        // Fallback: If image thumbnail wasn't captured, try reading file directly as DataURL
+        if (!capturedDataUrl && !isVideo) {
+          try {
+            capturedDataUrl = await new Promise<string>((resolve) => {
+              const reader = new FileReader();
+              reader.onload = () => resolve(reader.result as string);
+              reader.onerror = () => resolve('');
+              reader.readAsDataURL(file);
+            });
+          } catch {}
+        }
+
         const msg = err instanceof Error ? err.message : String(err);
         const box: ItemMetaBox = {
           id: nanoid(),
@@ -598,6 +698,9 @@ export default function App() {
           assetType: isVideo ? 'video' : 'image',
           status: 'error',
           createdAt: Date.now(),
+          thumbDataUrl: capturedDataUrl,
+          videoDuration: capturedDuration,
+          videoKeyframes: isVideo ? capturedKeyframes : undefined,
           error: msg,
         };
         await saveHistoryItem(box);
@@ -675,8 +778,39 @@ export default function App() {
 
   async function regenerate(id: string) {
     const it = items.find((x) => x.id === id);
-    if (!it?.thumbDataUrl && !it?.videoDataUrl) return;
+    if (!it) return;
+
+    let dataUrl = it.thumbDataUrl || it.videoDataUrl;
+    // Fallback: search files or sessionFiles if thumbnail was missing
+    if (!dataUrl) {
+      const matchFile = files.find((f) => f.name === it.filename) || sessionFiles.find((f) => f.name === it.filename);
+      if (matchFile) {
+        if (isVideoFile(matchFile)) {
+          const extracted = await extractVideoKeyframes(matchFile, 5, 640);
+          dataUrl = extracted.thumbDataUrl;
+          it.thumbDataUrl = extracted.thumbDataUrl;
+          it.videoDuration = extracted.duration;
+          it.videoKeyframes = extracted.frames;
+        } else {
+          const resized = await resizeImageToMax1024(matchFile);
+          dataUrl = resized.dataUrl;
+          it.thumbDataUrl = resized.dataUrl;
+        }
+      }
+    }
+
+    if (!dataUrl) {
+      toast.error(`File '${it.filename}' tidak memiliki data visual untuk diproses ulang. Silakan pilih kembali file ini di panel upload.`);
+      return;
+    }
+
     setBusy(true);
+    setStatusText(`Memproses ulang metadata: ${it.filename}...`);
+    // Clear error & set status to generating
+    setItems((prev) =>
+      prev.map((i) => (i.id === id ? { ...i, error: undefined, status: 'generating' } : i))
+    );
+
     try {
       const isVideo = it.assetType === 'video';
       const instr = defaultInstruction({
@@ -688,7 +822,6 @@ export default function App() {
         isVideo,
       });
       const instructionHash = await sha256(instr);
-      const dataUrl = it.thumbDataUrl || it.videoDataUrl!;
 
       const body = {
         apiKey,
@@ -719,24 +852,39 @@ export default function App() {
       const parsed: unknown = await res.json();
       const normalized = normalizeMeta(parsed);
       if (!normalized) throw new Error('Model returned invalid JSON shape.');
+
+      const detectedIllustration =
+        typeof normalized.illustration === 'boolean'
+          ? normalized.illustration
+          : it.fileType === 'illustration' || it.fileType === 'vector';
+
       const fixed: MetaOutput = {
         title: normalized.title,
         description: normalized.description,
         keywords: cleanKeywords(normalized.keywords, keywordsCount),
         category: normalized.category ?? it.meta?.category,
         shutterstockCategory: normalized.shutterstockCategory ?? it.meta?.shutterstockCategory,
-        illustration: normalized.illustration ?? it.meta?.illustration,
+        illustration: detectedIllustration,
         aiGenerated: true,
-        aiModel: normalized.aiModel || it.meta?.aiModel,
+        aiModel: normalized.aiModel || (model === 'auto' ? 'Auto (GAS Proxy)' : model),
       };
-      const updated: ItemMetaBox = { ...it, meta: fixed, error: undefined, status: 'success' };
+      const updated: ItemMetaBox = {
+        ...it,
+        thumbDataUrl: dataUrl,
+        meta: fixed,
+        error: undefined,
+        status: 'success'
+      };
       setItems((prev) => prev.map((i) => (i.id === id ? updated : i)));
       await saveHistoryItem(updated);
+      toast.success(`Metadata untuk ${it.filename} berhasil digenerate!`);
     } catch (e: unknown) {
       const msg = e instanceof Error ? e.message : String(e);
-      setItems((prev) => prev.map((i) => (i.id === id ? { ...i, error: msg } : i)));
+      setItems((prev) => prev.map((i) => (i.id === id ? { ...i, error: msg, status: 'error' } : i)));
+      toast.error(`Gagal memproses ulang ${it.filename}: ${msg}`);
     } finally {
       setBusy(false);
+      setStatusText('');
     }
   }
 
@@ -924,6 +1072,7 @@ export default function App() {
               editable
               onPatchMeta={patchItemMeta}
               onSave={saveEdits}
+              onRegenerate={regenerate}
               onChipDrop={onChipDrop}
               sessions={sessions}
               onLoadSession={handleLoadSession}

@@ -20,6 +20,7 @@ interface HistoryCardProps {
   onBulkDelete: (ids: string[]) => void;
   onPatchMeta?: (id: string, patch: Partial<MetaOutput>) => void;
   onSave?: (id: string) => void;
+  onRegenerate?: (id: string) => void;
   onChipDrop?: (itemId: string, from: number, to: number) => void;
   editable?: boolean;
   sessions?: GenerationSession[];
@@ -48,6 +49,7 @@ function HistoryCardComponent({
   onBulkDelete,
   onPatchMeta,
   onSave,
+  onRegenerate,
   onChipDrop,
   editable = false,
   sessions = [],
@@ -313,6 +315,7 @@ function HistoryCardComponent({
                   onDelete={onDelete}
                   onPatchMeta={onPatchMeta}
                   onSave={onSave}
+                  onRegenerate={onRegenerate}
                   onChipDrop={onChipDrop}
                 />
               ))}
