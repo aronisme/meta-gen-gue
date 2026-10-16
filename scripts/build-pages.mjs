@@ -10,9 +10,13 @@ let apiMoved = false;
 
 try {
   if (fs.existsSync(appApiDir)) {
-    console.log('[build-pages] Temporarily backing up app/api for clean static export...');
-    fs.cpSync(appApiDir, tempApiDir, { recursive: true });
-    fs.rmSync(appApiDir, { recursive: true, force: true });
+    console.log('[build-pages] Temporarily moving app/api for clean static export...');
+    try {
+      fs.renameSync(appApiDir, tempApiDir);
+    } catch {
+      fs.cpSync(appApiDir, tempApiDir, { recursive: true });
+      fs.rmSync(appApiDir, { recursive: true, force: true });
+    }
     apiMoved = true;
   }
 
@@ -37,10 +41,13 @@ try {
   if (apiMoved && fs.existsSync(tempApiDir)) {
     console.log('[build-pages] Restoring app/api for local development...');
     try {
+      if (fs.existsSync(appApiDir)) {
+        fs.rmSync(appApiDir, { recursive: true, force: true });
+      }
+      fs.renameSync(tempApiDir, appApiDir);
+    } catch {
       fs.cpSync(tempApiDir, appApiDir, { recursive: true, force: true });
-      fs.rmSync(tempApiDir, { recursive: true, force: true, maxRetries: 5, retryDelay: 300 });
-    } catch (e) {
-      console.warn('[build-pages] Note on restoring app/api:', e?.message || e);
+      fs.rmSync(tempApiDir, { recursive: true, force: true, maxRetries: 5, retryDelay: 200 });
     }
   }
 }
