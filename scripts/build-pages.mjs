@@ -40,14 +40,21 @@ try {
 } finally {
   if (apiMoved && fs.existsSync(tempApiDir)) {
     console.log('[build-pages] Restoring app/api for local development...');
-    try {
-      if (fs.existsSync(appApiDir)) {
-        fs.rmSync(appApiDir, { recursive: true, force: true });
+    // Brief delay to allow Windows file watchers to release directory locks
+    execSync('powershell -Command "Start-Sleep -Milliseconds 600"');
+    let restored = false;
+    for (let attempt = 1; attempt <= 5; attempt++) {
+      try {
+        fs.cpSync(tempApiDir, appApiDir, { recursive: true, force: true });
+        fs.rmSync(tempApiDir, { recursive: true, force: true, maxRetries: 5, retryDelay: 200 });
+        restored = true;
+        break;
+      } catch {
+        execSync('powershell -Command "Start-Sleep -Milliseconds 400"');
       }
-      fs.renameSync(tempApiDir, appApiDir);
-    } catch {
-      fs.cpSync(tempApiDir, appApiDir, { recursive: true, force: true });
-      fs.rmSync(tempApiDir, { recursive: true, force: true, maxRetries: 5, retryDelay: 200 });
+    }
+    if (!restored) {
+      console.warn('[build-pages] Note: verify app/api was restored successfully.');
     }
   }
 }
