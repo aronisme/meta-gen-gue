@@ -32,11 +32,22 @@ Object.defineProperty(globalThis, 'crypto', {
 });
 
 // Mock localStorage
+let storageStore = new Map<string, string>();
 const localStorageMock = {
-  getItem: vi.fn(),
-  setItem: vi.fn(),
-  removeItem: vi.fn(),
-  clear: vi.fn(),
+  getItem: vi.fn((key: string) => storageStore.get(key) ?? null),
+  setItem: vi.fn((key: string, value: string) => {
+    storageStore.set(key, String(value));
+  }),
+  removeItem: vi.fn((key: string) => {
+    storageStore.delete(key);
+  }),
+  clear: vi.fn(() => {
+    storageStore.clear();
+  }),
+  get length() {
+    return storageStore.size;
+  },
+  key: vi.fn((i: number) => Array.from(storageStore.keys())[i] ?? null),
 };
 Object.defineProperty(window, 'localStorage', { value: localStorageMock });
 

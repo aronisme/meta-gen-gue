@@ -12,7 +12,10 @@ import { FtpAccountsView } from '@/components/FtpAccountsView';
 import { AppSideRail, type AppModuleId } from '@/components/AppSideRail';
 import { PromptGeneratorView } from '@/components/PromptGeneratorView';
 import { KeywordResearchView } from '@/components/KeywordResearchView';
+import { GoogleAuthModal } from '@/components/GoogleAuthModal';
 import { loadFtpProfiles } from '@/lib/ftp/store';
+import type { AuthUser } from '@/lib/auth/types';
+import { getStoredUser, onAuthChange, refreshUserStatus } from '@/lib/auth/store';
 
 import { resizeImageToMax1024 } from '@/lib/resize';
 import { extractVideoKeyframes, isVideoFile } from '@/lib/video';
@@ -401,10 +404,30 @@ export default function App() {
     totalCount: 0,
   });
 
+  // Google Auth & User state
+  const [currentUser, setCurrentUser] = useState<AuthUser | null>(null);
+  const [showAuthModal, setShowAuthModal] = useState(false);
+
   // Sync count of FTP profiles
   useEffect(() => {
     void loadFtpProfiles().then((p) => setFtpProfilesCount(p.length));
   }, [tab]);
+
+  // Sync Google Auth session on mount and background refresh
+  useEffect(() => {
+    const initialUser = getStoredUser();
+    if (initialUser) setCurrentUser(initialUser);
+
+    const unsub = onAuthChange((user) => {
+      setCurrentUser(user);
+    });
+
+    void refreshUserStatus().then((updated) => {
+      if (updated) setCurrentUser(updated);
+    });
+
+    return () => unsub();
+  }, []);
 
   // Load saved settings on mount
   useEffect(() => {
@@ -533,6 +556,19 @@ export default function App() {
       return;
     }
 
+    if (currentUser?.status === 'blocked') {
+      toast.error('Akun Anda dinonaktifkan oleh administrator.');
+      return;
+    }
+    if (currentUser && currentUser.status !== 'active' && currentUser.role !== 'admin') {
+      toast.warning(`Akun ${currentUser.email} sedang menunggu persetujuan whitelist.`);
+    }
+    if (currentUser && currentUser.role !== 'admin' && currentUser.remainingQuota <= 0) {
+      toast.error('Kuota harian Anda telah habis (0 generasi tersisa). Kuota akan di-reset otomatis besok.');
+      setShowAuthModal(true);
+      return;
+    }
+
     setBusy(true);
     setProgress(0);
     setStatusText('Memulai proses...');
@@ -625,7 +661,9 @@ export default function App() {
           instruction: effectiveInstr,
           instructionHash: effectiveHash,
           imageDataUrl: capturedDataUrl,
-          imageDataUrls: capturedKeyframes
+          imageDataUrls: capturedKeyframes,
+          userEmail: currentUser?.email,
+          googleIdToken: currentUser?.idToken,
         };
         const url = provider === 'openai'
           ? '/api/generate/openai'
@@ -814,6 +852,16 @@ export default function App() {
       return;
     }
 
+    if (currentUser?.status === 'blocked') {
+      toast.error('Akun Anda dinonaktifkan oleh administrator.');
+      return;
+    }
+    if (currentUser && currentUser.role !== 'admin' && currentUser.remainingQuota <= 0) {
+      toast.error('Kuota harian Anda telah habis. Kuota akan di-reset besok.');
+      setShowAuthModal(true);
+      return;
+    }
+
     setBusy(true);
     setStatusText(`Memproses ulang metadata: ${it.filename}...`);
     // Clear error & set status to generating
@@ -839,7 +887,9 @@ export default function App() {
         instruction: instr,
         instructionHash,
         imageDataUrl: dataUrl,
-        imageDataUrls: it.videoKeyframes
+        imageDataUrls: it.videoKeyframes,
+        userEmail: currentUser?.email,
+        googleIdToken: currentUser?.idToken,
       };
       const url = provider === 'openai'
         ? '/api/generate/openai'
@@ -935,6 +985,8 @@ export default function App() {
         activeModule={activeModule}
         onModuleChange={setActiveModule}
         isUploadingInBackground={uploadProgressState.isUploading && activeModule !== 'metadata'}
+        currentUser={currentUser}
+        onOpenAuthModal={() => setShowAuthModal(true)}
       />
 
       {/* Main Content Area */}
@@ -1015,6 +1067,44 @@ export default function App() {
                   <span>Kelola Akun ({ftpProfilesCount})</span>
                 </button>
               </div>
+
+              {/* Google Auth Quick Status Button */}
+              <button
+                type="button"
+                onClick={() => setShowAuthModal(true)}
+                className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-xl border-2 border-[#2c1810] shadow-[2px_2px_0_#2c1810] bg-white hover:bg-[#fff5e6] text-xs font-bold transition-all cursor-pointer"
+                title={
+                  currentUser
+                    ? `${currentUser.name} (${currentUser.email}) - Sisa Kuota: ${currentUser.remainingQuota}`
+                    : 'Masuk dengan Akun Google (Whitelist & Kuota)'
+                }
+              >
+                {currentUser?.picture ? (
+                  <img
+                    src={currentUser.picture}
+                    alt={currentUser.name}
+                    className="w-4 h-4 rounded-full object-cover border border-[#2c1810]"
+                  />
+                ) : (
+                  <span className="w-2 h-2 rounded-full bg-[#f59e0b]" />
+                )}
+                <span className="hidden sm:inline text-[11px]">
+                  {currentUser
+                    ? `${currentUser.name.split(' ')[0]} (${currentUser.remainingQuota} AI)`
+                    : 'Sign in Google'}
+                </span>
+                {currentUser && (
+                  <span
+                    className={`w-2 h-2 rounded-full ${
+                      currentUser.status === 'active'
+                        ? 'bg-emerald-500'
+                        : currentUser.status === 'pending'
+                        ? 'bg-amber-500'
+                        : 'bg-rose-500'
+                    }`}
+                  />
+                )}
+              </button>
             </div>
           </div>
 
@@ -1159,6 +1249,14 @@ export default function App() {
             </span>
           </div>
         )}
+
+        {/* Google Auth & Whitelist Modal */}
+        <GoogleAuthModal
+          isOpen={showAuthModal}
+          onClose={() => setShowAuthModal(false)}
+          currentUser={currentUser}
+          onUserChange={setCurrentUser}
+        />
       </main>
     </div>
   );

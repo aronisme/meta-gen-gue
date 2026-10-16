@@ -1,50 +1,58 @@
 # Current Project State
 
 ## Last Updated
-2026-10-16 22:52
+2026-10-17 00:38
 
 ## Current Objective
-Peningkatan fitur AI Visual Concept Prompt Agent (VCPA) di tab Prompt Generator (isolasi Mode 2, ideasi topik kustom 10+ ide) serta universal clipboard paste (Ctrl+V) pada seluruh dropzone aset.
+Implementasi sistem Autentikasi Google (OAuth 2.0 Web Client) & Database Whitelist Pengguna di backend GAS dan antarmuka Next.js.
 
 ## Completed Recently
-- **Mode 2 Isolation & Schema Optimization**:
-  - Mengisolasi Mode 2 (`text_ideation`) dari `visualDna` JSON schema di `lib/prompt-agent/engine.ts`, memangkas 400+ token dan mengeliminasi error timeout pada batch prompt.
-  - Sanitasi ketat `imageDataUrl` dan `visualDna` ke `undefined` saat beralih dan generate di Mode 2.
-- **Custom Topic Ideation & Expanded Inspirations**:
-  - Menambahkan drawer topik kustom interaktif pada tombol `+ Ide AI Baru` di `components/PromptGeneratorView.tsx` dengan selector kuantitas ide (5, 10, 15, 20 ide; default 10).
-  - Memperluas katalog inspirasi kurasi `CURATED_INSPIRATION_POOL` di `lib/prompt-agent/inspirations.ts` menjadi 36+ tema komersial microstock.
-- **Universal Clipboard Image Paste (Ctrl+V)**:
-  - Integrasi listener paste clipboard di `PromptGeneratorView.tsx` (auto-switch Mode 1 jika ada image paste), `StudioPanel.tsx`, dan `UploadCard.tsx` dengan penamaan otomatis ramah microstock (`Pasted_Ref_...png`).
-- **Route & Production Build Hardening**:
-  - Penyelarasan token `sk_live_...` dan timeout 75s di `app/api/generate/prompt-agent/route.ts` dan `functions/api/generate/prompt-agent.ts`.
-  - 78/78 unit tests lolos hijau (`pnpm test:run`), validasi TypeScript bersih (`npx tsc --noEmit`), dan static export Cloudflare Pages sukses (`out/`).
+- **Google OAuth 2.0 Backend & Database Whitelist (`gas/Code.gs`)**:
+  - Inisialisasi tab `Users` di `setupDatabase()` dengan skema lengkap (`Email`, `Name`, `Role`, `Status`, `DailyQuota`, `UsageCount`, `LastLogin`, `CreatedAt`).
+  - Fungsi `verifyGoogleIdToken(idToken)` via Google tokeninfo endpoint dengan validasi `aud` (Client ID) dan `email_verified`.
+  - Fungsi `syncGoogleUser(idToken)` dengan reset otomatis kuota harian saat pergantian hari dan pembuatan otomatis user baru/pending.
+  - Middleware `checkAndDeductQuota()` di `doPost` untuk memvalidasi status whitelist (`active`/`pending`/`blocked`) dan membatasi pemakaian kuota harian.
+  - Menu Google Sheets `🤖 AI Proxy Manager > 👥 Kelola Whitelist Pengguna` untuk akses cepat admin.
+- **Dedicated Auth API Endpoints**:
+  - `app/api/auth/google/route.ts` & `functions/api/auth/google.ts` (Cloudflare Pages Functions): Endpoint verifikasi dan sinkronisasi status pengguna lintas cluster proxy.
+  - Meneruskan `userEmail` dan `googleIdToken` pada endpoint generasi AI (`/api/generate/proxy` dan `/api/generate/prompt-agent`).
+- **Frontend Auth Layer & User Interface**:
+  - State management otentikasi di `lib/auth/store.ts` dan tipe di `lib/auth/types.ts`.
+  - Komponen modal Google Auth (`components/GoogleAuthModal.tsx`): Integrasi Google Identity Services (GSI) SDK resmi, kartu profil pengguna, pelacak sisa kuota harian interaktif, tombol refresh status, dan tombol logout.
+  - Avatar dinamis di `components/AppSideRail.tsx` (desktop & mobile) dan tombol status ringkas di header Studio `app/page.tsx`.
+  - Feature Guard di Studio dan Prompt Generator untuk memblokir akun yang dinonaktifkan atau kehabisan kuota harian.
+- **Quality Assurance & Verification**:
+  - Penambahan unit test `lib/__tests__/auth.test.ts` (84/84 unit tests passing di Vitest).
+  - Validasi TypeScript bersih (`npx tsc --noEmit` exit code 0).
+  - Static export Cloudflare Pages sukses (`node scripts/build-pages.mjs` -> `out/`).
 
 ## Currently Working On
-- Penyelesaian deployment rilis ke GitHub `origin/main` dan live Cloudflare Pages.
+- Verifikasi operasional live dan commit repositori.
 
 ## Remaining Tasks
-- [ ] **Backend GAS (Google Auth & Database Users)**:
-  - Tambahkan inisialisasi tab `Users` di `setupDatabase()` pada [`gas/Code.gs`](file:///c:/App%20Tools/meta-gen-gue/gas/Code.gs).
-  - Buat fungsi `verifyGoogleToken(idToken)` dan verifikasi via Google tokeninfo endpoint.
-  - Tambahkan middleware pengecekan status whitelist dan kuota pengguna.
-- [ ] **Google Cloud Console Setup**:
-  - Pembuatan OAuth 2.0 Web Client ID untuk origin Cloudflare Pages dan localhost.
-- [ ] **Frontend Integration (`meta-gen-gue`)**:
-  - Integrasikan Google Identity Services SDK di Next.js dengan tombol Sign-in resmi dan Feature Guard.
+- [ ] **Modul Keyword Research**:
+  - Desain antarmuka eksplorasi tren mikrostock, interactive tag cloud, dan peredam kata kunci terlarang di `components/KeywordResearchView.tsx`.
+- [ ] **Peningkatan Local FTP Bridge**:
+  - Live progress byte per-file dan standalone local ExifTool embedder.
 
 ## Blockers / Errors
-- None. Build statis lolos, 78/78 unit tests passing, dev server lokal berjalan normal.
+- None. 84/84 tests passing, TypeScript bersih, build Pages berhasil.
 
 ## Files Recently Changed
-- `components/PromptGeneratorView.tsx`
-- `components/StudioPanel.tsx`
-- `components/UploadCard.tsx`
+- `.env.local`
+- `gas/Code.gs`
+- `app/api/auth/google/route.ts`
+- `functions/api/auth/google.ts`
+- `app/api/generate/proxy/route.ts`
+- `functions/api/generate/proxy.ts`
+- `lib/auth/types.ts`
+- `lib/auth/store.ts`
+- `lib/__tests__/auth.test.ts`
+- `components/GoogleAuthModal.tsx`
+- `components/AppSideRail.tsx`
+- `app/page.tsx`
 - `lib/prompt-agent/client.ts`
-- `lib/prompt-agent/engine.ts`
-- `lib/prompt-agent/inspirations.ts`
-- `lib/__tests__/prompt-agent.test.ts`
-- `app/api/generate/prompt-agent/route.ts`
-- `functions/api/generate/prompt-agent.ts`
+- `vitest.setup.ts`
 
 ## Next Recommended Step
-Memulai implementasi backend Google Auth di [`gas/Code.gs`](file:///c:/App%20Tools/meta-gen-gue/gas/Code.gs): inisialisasi tab `Users` dan pembuatan fungsi `verifyGoogleToken`.
+Uji coba interaksi Sign-in Google di peramban, lalu buat commit perubahan ke git.

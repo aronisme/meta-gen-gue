@@ -221,3 +221,14 @@
   3. `components/UploadCard.tsx` (Komponen dropzone file card).
 - **Rationale**: Mempercepat alur kerja kreator (*zero friction*), otomatis menamai file tangkapan clipboard dengan nama yang bersih (`Pasted_Ref_...png`), dan tetap mempertahankan fungsi paste teks biasa di textarea/input tanpa konflik.
 
+## [2026-10-17] Google OAuth 2.0 Web Client & Spreadsheet Whitelist Implementation
+- **Context**: Mengimplementasikan kredensial Google Cloud Console OAuth 2.0 Web Client (`61908502532-85bvlf6i8safupsefop9n3hflbodrthe.apps.googleusercontent.com`) secara end-to-end pada backend Google Apps Script dan frontend Next.js.
+- **Decision**:
+  1. Menggunakan Google Identity Services (GSI) SDK di `components/GoogleAuthModal.tsx` dengan auto-render button resmi dan fallback yang tangguh.
+  2. Mengimplementasikan tab `Users` di `gas/Code.gs` dengan 8 kolom: `Email`, `Name`, `Role`, `Status`, `DailyQuota`, `UsageCount`, `LastLogin`, `CreatedAt`.
+  3. Menyematkan verifikasi ID token via `UrlFetchApp` ke endpoint Google `https://oauth2.googleapis.com/tokeninfo?id_token=...` serta pencocokan audience `aud` dengan Client ID.
+  4. Menerapkan reset otomatis kuota pemakaian saat pergantian hari (00:00) berbasis tanggal `LastLogin`.
+  5. Menghubungkan avatar dinamis di `components/AppSideRail.tsx` dengan badge status (Hijau = Aktif Whitelist, Kuning = Pending Approval, Merah = Diblokir) dan meter kuota sisa di header `app/page.tsx`.
+- **Rationale**: Memastikan akses AI terkontrol dengan kuota yang adil tanpa biaya database server terpusat.
+
+

@@ -84,11 +84,13 @@ let roundRobinIndex = 0;
 export async function POST(req: NextRequest) {
   try {
     const body = await req.json();
-    const { model, instruction, imageDataUrl, imageDataUrls } = body as {
+    const { model, instruction, imageDataUrl, imageDataUrls, userEmail, googleIdToken } = body as {
       model?: string;
       instruction?: string;
       imageDataUrl?: string;
       imageDataUrls?: string[];
+      userEmail?: string;
+      googleIdToken?: string;
     };
 
     const images: string[] = Array.isArray(imageDataUrls) && imageDataUrls.length > 0
@@ -152,7 +154,9 @@ export async function POST(req: NextRequest) {
           content: contentParts
         }
       ],
-      temperature: 0.2
+      temperature: 0.2,
+      userEmail: userEmail || undefined,
+      googleIdToken: googleIdToken || undefined
     };
 
     // Ambil urutan rotasi untuk request ini (Round-robin + Failover)

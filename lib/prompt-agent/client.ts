@@ -13,6 +13,7 @@ import type {
   VisualDNAProfile,
 } from './types';
 import { getApiKey } from '@/lib/store';
+import { getStoredUser } from '@/lib/auth/store';
 import type { Provider } from '@/lib/types';
 import { getRandomCuratedIdeas, type InspirationIdea } from './inspirations';
 
@@ -82,6 +83,8 @@ export async function executeVCPAGeneration(
             provider,
             model,
             instruction,
+            userEmail: getStoredUser()?.email,
+            googleIdToken: getStoredUser()?.idToken,
           }),
         }).then(async (r) => {
           if (!r.ok) {
@@ -110,6 +113,8 @@ export async function executeVCPAGeneration(
             model: model || 'auto',
             instruction,
             imageDataUrl: effectiveImageDataUrl,
+            userEmail: getStoredUser()?.email,
+            googleIdToken: getStoredUser()?.idToken,
           }),
         }).then(async (r) => {
           if (!r.ok) {

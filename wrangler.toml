@@ -2,3 +2,9 @@ name = "meta-gen-gue"
 pages_build_output_dir = "out"
 compatibility_date = "2026-10-14"
 compatibility_flags = ["nodejs_compat"]
+
+[[d1_databases]]
+binding = "DB"
+database_name = "metagen-db"
+database_id = "74b95d03-c4f2-4dd2-a371-9647455d4fd9"
+

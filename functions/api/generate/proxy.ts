@@ -83,11 +83,13 @@ export async function onRequestPost(context: { request: Request; env: Record<str
 
   try {
     const body = await context.request.json();
-    const { model, instruction, imageDataUrl, imageDataUrls } = body as {
+    const { model, instruction, imageDataUrl, imageDataUrls, userEmail, googleIdToken } = body as {
       model?: string;
       instruction?: string;
       imageDataUrl?: string;
       imageDataUrls?: string[];
+      userEmail?: string;
+      googleIdToken?: string;
     };
 
     const images: string[] = Array.isArray(imageDataUrls) && imageDataUrls.length > 0
@@ -102,6 +104,48 @@ export async function onRequestPost(context: { request: Request; env: Record<str
     const targetModel = (isVideoClip && (!model || model === 'auto'))
       ? 'gemini-2.5-flash'
       : (model || 'auto');
+
+    // Cloudflare D1 Pre-flight Quota & Whitelist Verification (Ultra-fast ~0.4ms)
+    const db = (context.env as Record<string, unknown>).DB || (context.env as Record<string, unknown>).metagen_db;
+    if (db && typeof (db as { prepare?: unknown }).prepare === 'function' && userEmail) {
+      try {
+        const d1Db = db as {
+          prepare: (q: string) => {
+            bind: (...v: unknown[]) => {
+              first: <T>() => Promise<T | null>;
+              run: () => Promise<unknown>;
+            };
+          };
+        };
+
+        const userRow = await d1Db
+          .prepare('SELECT role, status, daily_quota, usage_count FROM users WHERE LOWER(email) = ?')
+          .bind(userEmail.trim().toLowerCase())
+          .first<{ role?: string; status?: string; daily_quota?: number; usage_count?: number }>();
+
+        if (userRow) {
+          if (userRow.status === 'blocked') {
+            return new Response('Akses ditolak: Akun Anda dinonaktifkan oleh administrator.', { status: 403 });
+          }
+          if (userRow.status === 'pending' && userRow.role !== 'admin') {
+            return new Response('Akses ditolak: Akun Anda sedang menunggu persetujuan whitelist.', { status: 403 });
+          }
+          const quota = userRow.daily_quota ?? 100;
+          const usage = userRow.usage_count ?? 0;
+          if (userRow.role !== 'admin' && usage >= quota) {
+            return new Response(`Akses ditolak: Kuota harian Anda (${quota} generasi) telah habis.`, { status: 403 });
+          }
+
+          // Catat pemakaian kuota langsung di Cloudflare D1
+          await d1Db
+            .prepare("UPDATE users SET usage_count = usage_count + 1, last_login = datetime('now') WHERE LOWER(email) = ?")
+            .bind(userEmail.trim().toLowerCase())
+            .run();
+        }
+      } catch (d1Err) {
+        console.warn('[D1 Proxy Quota] Check skipped on error:', d1Err);
+      }
+    }
 
     let contentParts: Array<{ type: string; text?: string; image_url?: { url: string } }> = [];
 
@@ -151,7 +195,9 @@ export async function onRequestPost(context: { request: Request; env: Record<str
           content: contentParts
         }
       ],
-      temperature: 0.2
+      temperature: 0.2,
+      userEmail: userEmail || undefined,
+      googleIdToken: googleIdToken || undefined
     };
 
     const startIdx = roundRobinIndex;

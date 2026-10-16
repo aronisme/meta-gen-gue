@@ -10,12 +10,16 @@ import {
   Zap,
 } from 'lucide-react';
 
+import type { AuthUser } from '@/lib/auth/types';
+
 export type AppModuleId = 'metadata' | 'prompt-gen' | 'keyword-research';
 
 export interface AppSideRailProps {
   activeModule: AppModuleId;
   onModuleChange: (mod: AppModuleId) => void;
   isUploadingInBackground?: boolean;
+  currentUser?: AuthUser | null;
+  onOpenAuthModal?: () => void;
 }
 
 interface NavItem {
@@ -53,6 +57,8 @@ export function AppSideRail({
   activeModule,
   onModuleChange,
   isUploadingInBackground,
+  currentUser,
+  onOpenAuthModal,
 }: AppSideRailProps) {
   const [hoveredItem, setHoveredItem] = useState<AppModuleId | null>(null);
   const [showHelpModal, setShowHelpModal] = useState(false);
@@ -149,13 +155,47 @@ export function AppSideRail({
             <HelpCircle className="w-5 h-5" />
           </button>
 
-          {/* Yellow User Avatar Circle (seperti di screenshot) */}
-          <div
-            className="w-10 h-10 rounded-full bg-[#f59e0b] border-2 border-[#2c1810] shadow-[2px_2px_0_#2c1810] flex items-center justify-center text-[#2c1810] cursor-pointer hover:scale-105 transition-transform"
-            title="Profil Pengguna / Local Contributor Workspace"
+          {/* User Profile / Google Sign-in Avatar */}
+          <button
+            type="button"
+            onClick={onOpenAuthModal}
+            className="w-10 h-10 rounded-full border-2 border-[#2c1810] shadow-[2px_2px_0_#2c1810] flex items-center justify-center cursor-pointer hover:scale-105 active:scale-95 transition-all relative group bg-[#f59e0b] overflow-visible"
+            title={
+              currentUser
+                ? `${currentUser.name} (${currentUser.email}) - Sisa Kuota: ${currentUser.remainingQuota}`
+                : 'Masuk dengan Google (Whitelist & Kuota AI)'
+            }
+            aria-label="Profil dan Status Pengguna"
           >
-            <User className="w-5 h-5 fill-current" />
-          </div>
+            {currentUser?.picture ? (
+              <img
+                src={currentUser.picture}
+                alt={currentUser.name}
+                className="w-full h-full rounded-full object-cover"
+              />
+            ) : (
+              <User className="w-5 h-5 fill-current text-[#2c1810]" />
+            )}
+
+            {/* Status indicator dot */}
+            {currentUser ? (
+              <span
+                className={`absolute -bottom-0.5 -right-0.5 w-3 h-3 rounded-full border-2 border-white ${
+                  currentUser.status === 'active'
+                    ? 'bg-emerald-500'
+                    : currentUser.status === 'pending'
+                    ? 'bg-amber-500'
+                    : 'bg-rose-500'
+                }`}
+                title={currentUser.status === 'active' ? 'Status: Aktif' : 'Status: Menunggu Whitelist'}
+              />
+            ) : (
+              <span
+                className="absolute -top-1 -right-1 w-2.5 h-2.5 rounded-full bg-[#ff6b35] border border-white"
+                title="Belum Masuk"
+              />
+            )}
+          </button>
         </div>
       </aside>
 
@@ -192,9 +232,30 @@ export function AppSideRail({
           })}
         </div>
 
-        <div className="w-7 h-7 rounded-full bg-[#f59e0b] border-2 border-[#2c1810] flex items-center justify-center text-[#2c1810]">
-          <User className="w-3.5 h-3.5 fill-current" />
-        </div>
+        <button
+          type="button"
+          onClick={onOpenAuthModal}
+          className="w-8 h-8 rounded-full border-2 border-[#2c1810] flex items-center justify-center text-[#2c1810] bg-[#f59e0b] relative cursor-pointer"
+          title={currentUser ? currentUser.name : 'Masuk dengan Google'}
+          aria-label="Profil dan Status Pengguna"
+        >
+          {currentUser?.picture ? (
+            <img
+              src={currentUser.picture}
+              alt={currentUser.name}
+              className="w-full h-full rounded-full object-cover"
+            />
+          ) : (
+            <User className="w-4 h-4 fill-current text-[#2c1810]" />
+          )}
+          {currentUser && (
+            <span
+              className={`absolute -bottom-0.5 -right-0.5 w-2.5 h-2.5 rounded-full border border-white ${
+                currentUser.status === 'active' ? 'bg-emerald-500' : 'bg-amber-500'
+              }`}
+            />
+          )}
+        </button>
       </div>
 
       {/* Help & Info Modal */}
