@@ -23,3 +23,71 @@ VALUES (
   datetime('now'),
   datetime('now')
 );
+
+-- 1. Riwayat Metadata Item
+CREATE TABLE IF NOT EXISTS metadata_history (
+  id TEXT PRIMARY KEY,
+  user_email TEXT NOT NULL,
+  session_id TEXT,
+  filename TEXT NOT NULL,
+  title TEXT NOT NULL,
+  description TEXT,
+  keywords TEXT NOT NULL,
+  category TEXT,
+  shutterstock_category TEXT,
+  is_illustration INTEGER DEFAULT 0,
+  ai_model TEXT,
+  created_at TEXT NOT NULL
+);
+CREATE INDEX IF NOT EXISTS idx_metadata_user ON metadata_history(user_email, created_at DESC);
+
+-- 2. Sesi Batch Tugas
+CREATE TABLE IF NOT EXISTS generation_sessions (
+  id TEXT PRIMARY KEY,
+  user_email TEXT NOT NULL,
+  name TEXT NOT NULL,
+  file_count INTEGER DEFAULT 0,
+  created_at TEXT NOT NULL
+);
+CREATE INDEX IF NOT EXISTS idx_sessions_user ON generation_sessions(user_email, created_at DESC);
+
+-- 3. Akun FTP/SFTP Agensi Microstock
+CREATE TABLE IF NOT EXISTS ftp_accounts (
+  id TEXT PRIMARY KEY,
+  user_email TEXT NOT NULL,
+  agency_id TEXT NOT NULL,
+  account_name TEXT NOT NULL,
+  host TEXT NOT NULL,
+  port INTEGER DEFAULT 22,
+  protocol TEXT DEFAULT 'sftp',
+  username TEXT NOT NULL,
+  password TEXT,
+  is_active INTEGER DEFAULT 1,
+  created_at TEXT NOT NULL
+);
+CREATE INDEX IF NOT EXISTS idx_ftp_accounts_user ON ftp_accounts(user_email);
+
+-- 4. Buku Besar Riwayat Unggah (Upload Ledger Anti-Duplicate)
+CREATE TABLE IF NOT EXISTS upload_ledger (
+  id TEXT PRIMARY KEY,
+  user_email TEXT NOT NULL,
+  file_hash TEXT NOT NULL,
+  filename TEXT NOT NULL,
+  agency_id TEXT NOT NULL,
+  status TEXT DEFAULT 'success',
+  uploaded_at TEXT NOT NULL
+);
+CREATE INDEX IF NOT EXISTS idx_ledger_hash ON upload_ledger(user_email, file_hash, agency_id);
+
+-- 5. Preferensi Pengaturan Pengguna
+CREATE TABLE IF NOT EXISTS user_settings (
+  user_email TEXT PRIMARY KEY,
+  provider TEXT DEFAULT 'gas-proxy',
+  model TEXT DEFAULT 'gemini-2.5-flash',
+  file_type TEXT DEFAULT 'auto',
+  title_length INTEGER DEFAULT 120,
+  description_length INTEGER DEFAULT 60,
+  keywords_count INTEGER DEFAULT 35,
+  extra_instructions TEXT,
+  updated_at TEXT NOT NULL
+);

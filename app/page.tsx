@@ -17,6 +17,7 @@ import { GoogleAuthModal } from '@/components/GoogleAuthModal';
 import { loadFtpProfiles } from '@/lib/ftp/store';
 import type { AuthUser } from '@/lib/auth/types';
 import { clearStoredUser, getStoredUser, onAuthChange, refreshUserStatus } from '@/lib/auth/store';
+import { runInitialSilentSync, syncDeleteHistoryItems, SYNC_COMPLETED_EVENT } from '@/lib/sync/engine';
 
 import { resizeImageToMax1024 } from '@/lib/resize';
 import { extractVideoKeyframes, isVideoFile } from '@/lib/video';
@@ -422,13 +423,14 @@ export default function App() {
     void loadFtpProfiles().then((p) => setFtpProfilesCount(p.length));
   }, [tab]);
 
-  // Sync Google Auth session on mount and background refresh
+  // Sync Google Auth session on mount and background refresh + Cloud Auto-Sync
   useEffect(() => {
     const initialUser = getStoredUser();
     if (initialUser) {
       setCurrentUser(initialUser);
       // Pengguna yang sudah login langsung diarahkan ke Studio
       setActiveModule('metadata');
+      void runInitialSilentSync(initialUser.email);
     } else {
       // Pengguna baru/tamu disambut oleh Halaman Beranda
       setActiveModule('beranda');
@@ -437,19 +439,34 @@ export default function App() {
     const unsub = onAuthChange((user) => {
       setCurrentUser(user);
       if (user) {
-        // Setelah login berhasil, langsung masuk ke Studio
+        // Setelah login berhasil, langsung masuk ke Studio & jalankan silent sync
         setActiveModule('metadata');
+        void runInitialSilentSync(user.email);
       } else {
         // Saat logout, kembali ke Beranda
         setActiveModule('beranda');
       }
     });
 
+    // Reaktif saat cloud data selesai disinkronkan ke IndexedDB
+    const handleSyncComplete = () => {
+      void refreshHistory();
+      void loadSessions().then(setSessions);
+      void loadFtpProfiles().then((p) => setFtpProfilesCount(p.length));
+    };
+    window.addEventListener(SYNC_COMPLETED_EVENT, handleSyncComplete);
+
     void refreshUserStatus().then((updated) => {
-      if (updated) setCurrentUser(updated);
+      if (updated) {
+        setCurrentUser(updated);
+        void runInitialSilentSync(updated.email);
+      }
     });
 
-    return () => unsub();
+    return () => {
+      unsub();
+      window.removeEventListener(SYNC_COMPLETED_EVENT, handleSyncComplete);
+    };
   }, []);
 
   // Load saved settings on mount
@@ -993,11 +1010,13 @@ export default function App() {
 
   async function handleDeleteHistoryItem(id: string) {
     await deleteHistoryItem(id);
+    void syncDeleteHistoryItems([id]);
     await refreshHistory();
   }
 
   async function handleBulkDelete(ids: string[]) {
     await deleteHistoryItems(ids);
+    void syncDeleteHistoryItems(ids);
     await refreshHistory();
   }
 

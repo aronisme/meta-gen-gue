@@ -1,5 +1,6 @@
 import { get, set, del, keys } from 'idb-keyval';
 import type { ItemMetaBox, FileType, Provider, GenerationSession } from './types';
+import { queueBackgroundSync } from '@/lib/sync/engine';
 
 const HISTORE = 'history-v1';
 const SESSION_STORE = 'sessions-v1';
@@ -24,6 +25,7 @@ export interface SavedSettings {
 export async function saveHistoryItem(it: ItemMetaBox) {
   const id = `${HISTORE}:${it.id}`;
   await set(id, it);
+  queueBackgroundSync();
 }
 
 export async function deleteHistoryItem(id: string) {
@@ -53,6 +55,7 @@ export async function getHistoryItem(id: string): Promise<ItemMetaBox | undefine
 export async function saveSession(session: GenerationSession): Promise<void> {
   const key = `${SESSION_STORE}:${session.id}`;
   await set(key, session);
+  queueBackgroundSync();
 }
 
 export async function getSession(id: string): Promise<GenerationSession | undefined> {
@@ -100,6 +103,7 @@ export function getApiKey(provider: Provider) {
 
 export function saveSettings(settings: SavedSettings) {
   localStorage.setItem(SETTINGS_KEY, JSON.stringify(settings));
+  queueBackgroundSync();
 }
 
 export function loadSettings(): SavedSettings | null {

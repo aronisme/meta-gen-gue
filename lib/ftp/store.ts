@@ -1,6 +1,6 @@
-// lib/ftp/store.ts
 import { get, set } from 'idb-keyval';
 import { nanoid } from 'nanoid';
+import { queueBackgroundSync } from '@/lib/sync/engine';
 import type {
   FtpAccountProfile,
   FtpProtocol,
@@ -196,6 +196,7 @@ export async function saveFtpProfile(
 
   await set(STORAGE_KEYS.ACCOUNTS, nextList);
   syncWithBridge(nextList).catch(() => {});
+  queueBackgroundSync();
   return updatedProfile;
 }
 
@@ -204,6 +205,7 @@ export async function deleteFtpProfile(id: string): Promise<void> {
   const nextList = current.filter((p) => p.id !== id);
   await set(STORAGE_KEYS.ACCOUNTS, nextList);
   syncWithBridge(nextList).catch(() => {});
+  queueBackgroundSync();
 
   const activeId = await getActiveFtpProfileId();
   if (activeId === id) {
@@ -256,6 +258,7 @@ export async function recordSuccessfulUpload(
   // Simpan record baru di awal (terbaru)
   const nextList = [newRecord, ...current.slice(0, 9999)]; // Simpan hingga 10.000 riwayat
   await set(STORAGE_KEYS.LEDGER, nextList);
+  queueBackgroundSync();
   return newRecord;
 }
 
