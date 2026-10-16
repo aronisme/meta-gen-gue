@@ -5,6 +5,7 @@ import {
   parseAndFormatPromptCards,
   exportPromptsToText,
   exportPromptsToJson,
+  buildVCPAPromptInstruction,
 } from '../prompt-agent/engine';
 import type { VCPASettings } from '../prompt-agent/types';
 
@@ -141,6 +142,34 @@ describe('VCPA Engine Utilities', () => {
     // At least some should be distinct when pool is large
     const overlap = nextIdeas.filter((n) => excludedIds.includes(n.id));
     expect(overlap.length).toBeLessThan(5);
+
+    // Default count is now 10
+    const defaultBatch = getRandomCuratedIdeas();
+    expect(defaultBatch).toHaveLength(10);
+    expect(CURATED_INSPIRATION_POOL.length).toBeGreaterThanOrEqual(30);
+  });
+
+  it('generates clean Mode 2 instructions without demanding visualDna', () => {
+    const mode2Instruction = buildVCPAPromptInstruction({
+      mode: 'text_ideation',
+      brief: 'Kuliner tradisional rendang daging sapi',
+      settings: baseSettings,
+    });
+
+    expect(mode2Instruction).toContain('=== CREATIVE BRIEF (TEXT-ONLY IDEATION) ===');
+    expect(mode2Instruction).toContain('User Brief: "Kuliner tradisional rendang daging sapi"');
+    // Mode 2 must NOT force visualDna object in schema
+    expect(mode2Instruction).not.toContain('"visualDna": {');
+    expect(mode2Instruction).toContain('"prompts": [');
+
+    const mode1Instruction = buildVCPAPromptInstruction({
+      mode: 'reference_to_prompt',
+      brief: 'Explore lighting',
+      settings: baseSettings,
+    });
+    // Mode 1 initial step must require visualDna
+    expect(mode1Instruction).toContain('"visualDna": {');
+    expect(mode1Instruction).toContain('"prompts": [');
   });
 });
 

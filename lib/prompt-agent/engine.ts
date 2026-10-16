@@ -186,7 +186,9 @@ STRICT DIVERSITY & QUALITY RULES:
 CRITICAL OUTPUT FORMAT:
 You MUST return ONLY a valid, single, parseable JSON object matching this schema exactly. Do NOT include markdown code blocks, do not include backticks, do not include commentary before or after:
 
-{
+${
+  mode === 'reference_to_prompt' && !visualDna
+    ? `{
   "visualDna": {
     "subject": { "type": "...", "attributes": ["..."] },
     "observed": ["..."],
@@ -209,6 +211,19 @@ You MUST return ONLY a valid, single, parseable JSON object matching this schema
       "tags": ["composition", "lighting", "subject"]
     }
   ]
+}`
+    : `{
+  "prompts": [
+    {
+      "ordinal": 1,
+      "title": "Short evocative title (max 5 words)",
+      "creativeStrategy": "One of: Controlled Variation | Concept Expansion | Symbolic Exploration | Editorial Hero | Macro Texture",
+      "rawBasePrompt": "Full detailed base prompt with subject, camera, lighting, textures, and composition",
+      "rationale": "1 short sentence explaining visual thesis",
+      "tags": ["composition", "lighting", "subject"]
+    }
+  ]
+}`
 }`;
 }
 

@@ -1,6 +1,6 @@
 'use client';
 
-import { memo, useId } from 'react';
+import { memo, useCallback, useEffect, useId } from 'react';
 import { Button } from '@/components/ui/button';
 import { AlertTriangle, FolderOpen, Upload, Zap } from 'lucide-react';
 import type { Provider } from '@/lib/types';
@@ -59,48 +59,83 @@ function UploadCardComponent({
   onGenerate,
   existingItemFilenames,
 }: UploadCardProps) {
-  const addFiles = async (newFiles: File[]) => {
-    const validMedia = newFiles.filter(isMediaFile);
-    if (!validMedia.length) return;
+  const addFiles = useCallback(
+    async (newFiles: File[]) => {
+      const validMedia = newFiles.filter(isMediaFile);
+      if (!validMedia.length) return;
 
-    const { acceptedFiles, rejectedDuplicates } = await filterDuplicateFiles(validMedia, {
-      existingFiles: files,
-      existingItemFilenames,
-    });
+      const { acceptedFiles, rejectedDuplicates } = await filterDuplicateFiles(validMedia, {
+        existingFiles: files,
+        existingItemFilenames,
+      });
 
-    if (rejectedDuplicates.length > 0) {
-      if (rejectedDuplicates.length === 1) {
-        toast.warning(
-          `File duplikat diabaikan: "${rejectedDuplicates[0].file.name}" (${rejectedDuplicates[0].description})`
-        );
-      } else {
-        toast.warning(
-          `${rejectedDuplicates.length} file duplikat diabaikan agar tidak terunggah ganda.`
-        );
+      if (rejectedDuplicates.length > 0) {
+        if (rejectedDuplicates.length === 1) {
+          toast.warning(
+            `File duplikat diabaikan: "${rejectedDuplicates[0].file.name}" (${rejectedDuplicates[0].description})`
+          );
+        } else {
+          toast.warning(
+            `${rejectedDuplicates.length} file duplikat diabaikan agar tidak terunggah ganda.`
+          );
+        }
       }
-    }
 
-    if (!acceptedFiles.length) return;
+      if (!acceptedFiles.length) return;
 
-    onFilesChange([...files, ...acceptedFiles]);
+      onFilesChange([...files, ...acceptedFiles]);
 
-    for (const f of acceptedFiles) {
-      if (isVideoFile(f)) {
-        void validateVideoFile(f, MAX_VIDEO_DURATION_SECONDS).then((check) => {
-          if (!check.valid && check.duration > MAX_VIDEO_DURATION_SECONDS) {
-            toast.info(
-              `Video "${f.name}" (${check.duration.toFixed(1)}s): Klip > 30s. Analisis frame dibatasi pada 30 detik pertama.`
-            );
-          }
-        });
+      for (const f of acceptedFiles) {
+        if (isVideoFile(f)) {
+          void validateVideoFile(f, MAX_VIDEO_DURATION_SECONDS).then((check) => {
+            if (!check.valid && check.duration > MAX_VIDEO_DURATION_SECONDS) {
+              toast.info(
+                `Video "${f.name}" (${check.duration.toFixed(1)}s): Klip > 30s. Analisis frame dibatasi pada 30 detik pertama.`
+              );
+            }
+          });
+        }
       }
-    }
-  };
+    },
+    [files, existingItemFilenames, onFilesChange]
+  );
 
   const onDrop = (e: React.DragEvent) => {
     e.preventDefault();
     void addFiles(Array.from(e.dataTransfer.files || []));
   };
+
+  // Clipboard Paste (Ctrl+V) listener
+  useEffect(() => {
+    const handlePaste = (e: ClipboardEvent) => {
+      const items = e.clipboardData?.items;
+      if (!items) return;
+
+      const pastedFiles: File[] = [];
+      for (let i = 0; i < items.length; i++) {
+        const item = items[i];
+        if (item.kind === 'file' && (item.type.startsWith('image/') || item.type.startsWith('video/'))) {
+          const f = item.getAsFile();
+          if (f) {
+            const cleanName =
+              f.name === 'image.png' || f.name === 'blob' || !f.name
+                ? new File([f], `Pasted_${Date.now().toString().slice(-6)}.png`, { type: f.type || 'image/png' })
+                : f;
+            pastedFiles.push(cleanName);
+          }
+        }
+      }
+
+      if (pastedFiles.length > 0) {
+        e.preventDefault();
+        void addFiles(pastedFiles);
+        toast.success(`${pastedFiles.length} file dari clipboard (paste) berhasil ditambahkan!`);
+      }
+    };
+
+    window.addEventListener('paste', handlePaste);
+    return () => window.removeEventListener('paste', handlePaste);
+  }, [addFiles]);
 
   const showVideoWarning = hasVideoFiles && provider !== 'gemini';
 
@@ -127,12 +162,31 @@ function UploadCardComponent({
 
       <div className="p-4 space-y-4">
         {/* Dropzone */}
-        <div className="border-2 border-dashed border-[#2c1810] rounded-xl p-6 text-center bg-[#fff5e6]/60 transition-all hover:bg-[#fff5e6]">
+        <div
+          tabIndex={0}
+          onPaste={(e) => {
+            const items = e.clipboardData?.items;
+            if (items) {
+              const pasted: File[] = [];
+              for (let i = 0; i < items.length; i++) {
+                if (items[i].kind === 'file' && (items[i].type.startsWith('image/') || items[i].type.startsWith('video/'))) {
+                  const f = items[i].getAsFile();
+                  if (f) pasted.push(f);
+                }
+              }
+              if (pasted.length > 0) {
+                e.preventDefault();
+                void addFiles(pasted);
+              }
+            }
+          }}
+          className="border-2 border-dashed border-[#2c1810] rounded-xl p-6 text-center bg-[#fff5e6]/60 transition-all hover:bg-[#fff5e6] focus:bg-[#fff5e6] focus:outline-none focus:ring-2 focus:ring-[#ff6b35]"
+        >
           <div className="w-10 h-10 mx-auto mb-2 rounded-full bg-white border-2 border-[#2c1810] shadow-[2px_2px_0_#2c1810] flex items-center justify-center text-[#ff6b35]">
             <Upload className="w-5 h-5" />
           </div>
-          <p className="font-bold text-[#2c1810] text-sm">Drag & drop gambar atau video ke sini</p>
-          <p className="text-xs text-[#6b5344] mt-1 mb-3">Format didukung: JPG, PNG, WEBP, MP4/MOV (Maks. 30 detik)</p>
+          <p className="font-bold text-[#2c1810] text-sm">Drag & drop gambar atau video ke sini, atau Paste (Ctrl+V)</p>
+          <p className="text-xs text-[#6b5344] mt-1 mb-3">Format didukung: JPG, PNG, WEBP, MP4/MOV, screenshot clipboard</p>
           <FilePicker onPick={addFiles} />
         </div>
 

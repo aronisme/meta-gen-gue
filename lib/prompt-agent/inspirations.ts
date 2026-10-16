@@ -162,9 +162,61 @@ export const CURATED_INSPIRATION_POOL: InspirationIdea[] = [
     title: 'Edukasi Robotika Anak',
     brief: 'Curious young elementary school students assembling colorful mini robotics circuits in modern interactive classroom, bright inspiring light',
   },
+
+  // 7. Nusantara & Kuliner Tradisional
+  {
+    id: 'nusantara-satay-1',
+    category: 'Kuliner Nusantara',
+    title: 'Sate & Asap Arang Tradisional',
+    brief: 'Traditional Indonesian street satay master fanning glowing red coconut charcoal grill, fragrant appetizing smoke rising, rich peanut glaze and shallot garnish',
+  },
+  {
+    id: 'nusantara-coffee-2',
+    category: 'Kuliner Nusantara',
+    title: 'Petani Kopi Dataran Tinggi',
+    brief: 'Indonesian coffee farmer proudly holding ripe red Arabica coffee cherries in hands, lush green volcanic mountain plantation backdrop at morning fog',
+  },
+  {
+    id: 'nusantara-batik-3',
+    category: 'Seni & Budaya',
+    title: 'Membatik dengan Canting',
+    brief: 'Close-up hands of elderly Javanese woman holding hot brass canting drawing intricate wax batik patterns on white cotton fabric, authentic heritage craft',
+  },
+  {
+    id: 'nusantara-market-4',
+    category: 'Wisata & Budaya',
+    title: 'Pasar Terapung Tradisional',
+    brief: 'Vibrant floating market boats loaded with colorful tropical fruits and vegetables at misty river sunrise, dynamic reflection and lively local trade',
+  },
+
+  // 8. Masa Depan, Smart City & Edukasi Modern
+  {
+    id: 'future-smartcity-1',
+    category: 'Teknologi & Kota',
+    title: 'Smart City & Mobilitas Otonom',
+    brief: 'Futuristic eco-friendly metropolis with autonomous electric transit pods and elevated vertical garden skyscrapers, clean dusk sky, high-tech infrastructure',
+  },
+  {
+    id: 'future-remote-2',
+    category: 'Gaya Hidup Digital',
+    title: 'Work from Anywhere Tropis',
+    brief: 'Digital nomad working on sleek laptop under open bamboo gazebo overlooking lush tropical palm valley, coconut drink beside, relaxed modern productivity',
+  },
+  {
+    id: 'future-cyber-3',
+    category: 'Teknologi & Kota',
+    title: 'Cybersecurity Data Shield',
+    brief: 'Cybersecurity engineer monitoring multi-screen holographic security network defense grid in darkened command center, neon cyan reflections',
+  },
+  {
+    id: 'future-vr-4',
+    category: 'Gaya Hidup Digital',
+    title: 'Kolaborasi Virtual Reality',
+    brief: 'Architects wearing sleek lightweight mixed-reality glasses manipulating 3D building hologram together in sunlit studio, cutting-edge creative innovation',
+  },
 ];
 
-export function getRandomCuratedIdeas(count = 5, excludeIds: string[] = []): InspirationIdea[] {
+export function getRandomCuratedIdeas(count = 10, excludeIds: string[] = []): InspirationIdea[] {
   const available = CURATED_INSPIRATION_POOL.filter((item) => !excludeIds.includes(item.id));
   const pool = available.length >= count ? available : CURATED_INSPIRATION_POOL;
 

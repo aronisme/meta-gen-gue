@@ -185,7 +185,7 @@ export async function onRequestPost(context: { request: Request; env: Record<str
 
       try {
         const controller = new AbortController();
-        const timeoutId = setTimeout(() => controller.abort(), 55000);
+        const timeoutId = setTimeout(() => controller.abort(), 75000);
 
         const res = await fetch(cluster.url, {
           method: 'POST',
@@ -194,6 +194,7 @@ export async function onRequestPost(context: { request: Request; env: Record<str
             Authorization: `Bearer ${cluster.token}`,
           },
           body: JSON.stringify(payload),
+          redirect: 'follow',
           signal: controller.signal,
         });
 

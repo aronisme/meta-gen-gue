@@ -23,8 +23,10 @@ import {
   Trash2,
   Upload,
   Wand2,
+  X,
 } from 'lucide-react';
 import { Button } from '@/components/ui/button';
+import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import { Textarea } from '@/components/ui/textarea';
 import { toast } from 'sonner';
@@ -139,29 +141,37 @@ export function PromptGeneratorView({ onSwitchToMetadata }: PromptGeneratorViewP
   const [copiedAll, setCopiedAll] = useState<boolean>(false);
 
   // 5. Inspirasi Ide Komersial (Shuffle & AI Brainstorm)
-  const [inspirations, setInspirations] = useState<InspirationIdea[]>(() => getRandomCuratedIdeas(5));
+  const [inspirations, setInspirations] = useState<InspirationIdea[]>(() => getRandomCuratedIdeas(10));
   const [isBrainstorming, setIsBrainstorming] = useState<boolean>(false);
+  const [isBrainstormOpen, setIsBrainstormOpen] = useState<boolean>(false);
+  const [brainstormTopic, setBrainstormTopic] = useState<string>('');
+  const [brainstormCount, setBrainstormCount] = useState<number>(10);
 
   const handleShuffleInspirations = () => {
     const currentIds = inspirations.map((i) => i.id);
-    const nextIdeas = getRandomCuratedIdeas(5, currentIds);
+    const nextIdeas = getRandomCuratedIdeas(brainstormCount, currentIds);
     setInspirations(nextIdeas);
-    toast.info('5 ide baru dimuat dari katalog inspirasi.');
+    toast.info(`${nextIdeas.length} ide baru dimuat dari katalog inspirasi.`);
   };
 
-  const handleBrainstormIdeas = async () => {
+  const handleBrainstormIdeas = async (customTopic?: string, targetCount = brainstormCount) => {
     setIsBrainstorming(true);
+    const activeTopic = (customTopic !== undefined ? customTopic : brainstormTopic).trim() || brief.trim();
+    const countToGenerate = targetCount || 10;
+
     const toastId = toast.loading(
-      brief.trim()
-        ? `Merancang ide AI sesuai topik "${brief.slice(0, 20)}..."`
-        : 'Merancang 5 ide microstock tren baru via AI...'
+      activeTopic
+        ? `Merancang ${countToGenerate} ide AI sesuai topik "${activeTopic.slice(0, 24)}..."`
+        : `Merancang ${countToGenerate} ide microstock tren baru via AI...`
     );
 
     try {
-      const newIdeas = await brainstormBriefIdeas(brief || undefined, 'gas-proxy', 'auto');
+      const newIdeas = await brainstormBriefIdeas(activeTopic || undefined, countToGenerate, 'gas-proxy', 'auto');
       setInspirations(newIdeas);
       toast.success(
-        brief.trim() ? 'Ide AI baru berhasil dirancang!' : '5 ide segar dari AI siap digunakan!',
+        activeTopic
+          ? `${newIdeas.length} ide AI bertema "${activeTopic.slice(0, 20)}..." siap digunakan!`
+          : `${newIdeas.length} ide segar dari AI siap digunakan!`,
         { id: toastId }
       );
     } catch (err: unknown) {
@@ -221,22 +231,58 @@ export function PromptGeneratorView({ onSwitchToMetadata }: PromptGeneratorViewP
     }
   }, [visualDna]);
 
-  // Handle Image Selection
+  // Handle Image Selection (File Picker, Drag & Drop, or Clipboard Paste)
   const handleSelectImage = async (file: File) => {
     if (!file.type.startsWith('image/')) {
       toast.error('File yang dipilih bukan gambar.');
       return;
     }
     try {
-      setRefImageFile(file);
+      const effectiveFile =
+        file.name === 'image.png' || file.name === 'blob' || !file.name
+          ? new File([file], `Pasted_Ref_${Date.now().toString().slice(-6)}.png`, {
+              type: file.type || 'image/png',
+            })
+          : file;
+
+      setRefImageFile(effectiveFile);
       setVisualDna(null);
-      const resized = await resizeImageToMax1024(file);
+      const resized = await resizeImageToMax1024(effectiveFile);
       setRefImageDataUrl(resized.dataUrl);
-      toast.success(`Gambar referensi dimuat: ${file.name}`);
+      toast.success(`Gambar referensi dimuat: ${effectiveFile.name}`);
     } catch {
       toast.error('Gagal memproses gambar referensi.');
     }
   };
+
+  // Global Clipboard Paste Listener (Ctrl+V) for Image References
+  useEffect(() => {
+    const handlePaste = (e: ClipboardEvent) => {
+      const items = e.clipboardData?.items;
+      if (!items) return;
+
+      let imageFile: File | null = null;
+      for (let i = 0; i < items.length; i++) {
+        const item = items[i];
+        if (item.kind === 'file' && item.type.startsWith('image/')) {
+          imageFile = item.getAsFile();
+          break;
+        }
+      }
+
+      if (imageFile) {
+        e.preventDefault();
+        if (mode !== 'reference_to_prompt') {
+          setMode('reference_to_prompt');
+          toast.info('Beralih ke Mode 1 (Dengan Image Reference)');
+        }
+        void handleSelectImage(imageFile);
+      }
+    };
+
+    window.addEventListener('paste', handlePaste);
+    return () => window.removeEventListener('paste', handlePaste);
+  }, [mode]);
 
   const handleClearImage = () => {
     setRefImageFile(null);
@@ -263,8 +309,8 @@ export function PromptGeneratorView({ onSwitchToMetadata }: PromptGeneratorViewP
       const result = await executeVCPAGeneration({
         mode,
         brief,
-        imageDataUrl: refImageDataUrl || undefined,
-        visualDna: visualDna || undefined,
+        imageDataUrl: mode === 'reference_to_prompt' ? (refImageDataUrl || undefined) : undefined,
+        visualDna: mode === 'reference_to_prompt' ? (visualDna || undefined) : undefined,
         settings,
         provider: 'gas-proxy',
         model: 'auto',
@@ -272,8 +318,10 @@ export function PromptGeneratorView({ onSwitchToMetadata }: PromptGeneratorViewP
       });
 
       setPrompts(result.prompts);
-      if (result.visualDna) {
+      if (mode === 'reference_to_prompt' && result.visualDna) {
         setVisualDna(result.visualDna);
+      } else if (mode === 'text_ideation') {
+        setVisualDna(null);
       }
       toast.success(`Berhasil menghasilkan ${result.completedCount} konsep prompt!`);
     } catch (err: unknown) {
@@ -461,7 +509,10 @@ export function PromptGeneratorView({ onSwitchToMetadata }: PromptGeneratorViewP
 
         <button
           type="button"
-          onClick={() => setMode('text_ideation')}
+          onClick={() => {
+            setMode('text_ideation');
+            setVisualDna(null);
+          }}
           className={`flex-1 py-2 px-3 rounded-lg text-xs font-black flex items-center justify-center gap-2 transition-all cursor-pointer ${
             mode === 'text_ideation'
               ? 'bg-[#2c1810] text-white shadow-[2px_2px_0_#ff6b35]'
@@ -566,6 +617,7 @@ export function PromptGeneratorView({ onSwitchToMetadata }: PromptGeneratorViewP
                       </div>
                     ) : (
                       <div
+                        tabIndex={0}
                         onClick={() => fileInputRef.current?.click()}
                         onDragOver={(e) => e.preventDefault()}
                         onDrop={(e) => {
@@ -573,17 +625,32 @@ export function PromptGeneratorView({ onSwitchToMetadata }: PromptGeneratorViewP
                           const f = e.dataTransfer.files?.[0];
                           if (f) void handleSelectImage(f);
                         }}
-                        className="border-2 border-dashed border-[#2c1810] rounded-xl p-5 text-center bg-white hover:bg-[#fff5e6] transition-colors cursor-pointer group space-y-2"
+                        onPaste={(e) => {
+                          const items = e.clipboardData?.items;
+                          if (items) {
+                            for (let i = 0; i < items.length; i++) {
+                              if (items[i].kind === 'file' && items[i].type.startsWith('image/')) {
+                                const f = items[i].getAsFile();
+                                if (f) {
+                                  e.preventDefault();
+                                  void handleSelectImage(f);
+                                  return;
+                                }
+                              }
+                            }
+                          }
+                        }}
+                        className="border-2 border-dashed border-[#2c1810] rounded-xl p-5 text-center bg-white hover:bg-[#fff5e6] focus:bg-[#fff5e6] focus:outline-none focus:ring-2 focus:ring-[#ff6b35] transition-colors cursor-pointer group space-y-2"
                       >
                         <div className="w-9 h-9 rounded-full bg-[#fff5e6] border border-[#2c1810] mx-auto flex items-center justify-center group-hover:scale-105 transition-transform">
                           <Upload className="w-4 h-4 text-[#ff6b35]" />
                         </div>
                         <div>
                           <p className="text-xs font-black text-[#2c1810]">
-                            Seret gambar ke sini atau klik untuk memilih
+                            Seret gambar ke sini, klik, atau Paste (Ctrl+V)
                           </p>
                           <p className="text-[11px] text-[#6b5344] mt-0.5">
-                            JPG, PNG, WEBP (otomatis dioptimasi ke 1024px)
+                            JPG, PNG, WEBP, atau screenshot clipboard (otomatis dioptimasi ke 1024px)
                           </p>
                         </div>
                       </div>
@@ -625,11 +692,11 @@ export function PromptGeneratorView({ onSwitchToMetadata }: PromptGeneratorViewP
 
                   {/* Quick Inspirations & Dynamic Brainstorming (Mode 2 Only) */}
                   {mode === 'text_ideation' && (
-                    <div className="space-y-2 pt-0.5">
+                    <div className="space-y-2.5 pt-1">
                       <div className="flex items-center justify-between gap-1 flex-wrap">
                         <span className="text-[11px] font-black uppercase tracking-wider text-[#6b5344] flex items-center gap-1.5">
                           <Sparkles className="w-3.5 h-3.5 text-[#ff6b35]" />
-                          <span>Inspirasi Ide Komersial</span>
+                          <span>Bank Ide & Inspirasi ({inspirations.length})</span>
                         </span>
 
                         <div className="flex items-center gap-1.5">
@@ -637,29 +704,36 @@ export function PromptGeneratorView({ onSwitchToMetadata }: PromptGeneratorViewP
                           <button
                             type="button"
                             onClick={handleShuffleInspirations}
-                            title="Acak 5 ide baru dari bank inspirasi komersial"
+                            title={`Acak ${brainstormCount} ide baru dari bank inspirasi komersial`}
                             className="text-[11px] font-bold text-[#2c1810] bg-white hover:bg-[#fff5e6] px-2.5 py-1 rounded-lg border border-[#2c1810] shadow-[1px_1px_0_#2c1810] flex items-center gap-1 cursor-pointer transition-all active:translate-y-0.5"
                           >
                             <Shuffle className="w-3 h-3 text-[#ff6b35]" />
                             <span>Acak Ide</span>
                           </button>
 
-                          {/* 2. Brainstorm AI to generate fresh ideas on the fly */}
+                          {/* 2. Toggle Brainstorm AI Box */}
                           <button
                             type="button"
-                            disabled={isBrainstorming}
-                            onClick={handleBrainstormIdeas}
-                            title={
-                              brief.trim()
-                                ? `Rancang ide AI baru berdasarkan topik "${brief.slice(0, 24)}..."`
-                                : 'Rancang 5 ide microstock tren baru via AI'
-                            }
-                            className="text-[11px] font-black text-white bg-[#2c1810] hover:bg-[#ff6b35] disabled:opacity-60 px-2.5 py-1 rounded-lg border border-[#2c1810] shadow-[1px_1px_0_#2c1810] flex items-center gap-1 cursor-pointer transition-all active:translate-y-0.5"
+                            onClick={() => {
+                              setIsBrainstormOpen((prev) => {
+                                const next = !prev;
+                                if (next && !brainstormTopic && brief.trim()) {
+                                  setBrainstormTopic(brief.trim());
+                                }
+                                return next;
+                              });
+                            }}
+                            title="Buka opsi input ide untuk merancang ide baru via AI"
+                            className={`text-[11px] font-black px-2.5 py-1 rounded-lg border border-[#2c1810] shadow-[1px_1px_0_#2c1810] flex items-center gap-1 cursor-pointer transition-all active:translate-y-0.5 ${
+                              isBrainstormOpen
+                                ? 'bg-[#2c1810] text-[#fff5e6] border-[#2c1810]'
+                                : 'bg-[#2c1810] text-white hover:bg-[#ff6b35]'
+                            }`}
                           >
-                            {isBrainstorming ? (
+                            {isBrainstormOpen ? (
                               <>
-                                <Loader2 className="w-3 h-3 animate-spin text-[#ff6b35]" />
-                                <span>Merancang...</span>
+                                <X className="w-3 h-3 text-[#ff6b35]" />
+                                <span>Tutup Opsi</span>
                               </>
                             ) : (
                               <>
@@ -670,6 +744,81 @@ export function PromptGeneratorView({ onSwitchToMetadata }: PromptGeneratorViewP
                           </button>
                         </div>
                       </div>
+
+                      {/* Brainstorming Input & Count Panel (Pop-down) */}
+                      {isBrainstormOpen && (
+                        <div className="p-3 bg-gradient-to-br from-[#fffdf9] to-[#fff5e6] border-2 border-[#2c1810] rounded-xl shadow-[2px_2px_0_#2c1810] space-y-2.5 animate-in fade-in duration-150">
+                          <div className="flex items-center justify-between">
+                            <span className="text-[11px] font-black text-[#2c1810] flex items-center gap-1">
+                              <Lightbulb className="w-3.5 h-3.5 text-amber-600" />
+                              <span>Arahan Topik untuk AI Brainstorm</span>
+                            </span>
+                            <button
+                              type="button"
+                              onClick={() => setIsBrainstormOpen(false)}
+                              className="text-stone-500 hover:text-[#2c1810] p-0.5 cursor-pointer"
+                              title="Tutup panel ide"
+                            >
+                              <X className="w-3.5 h-3.5" />
+                            </button>
+                          </div>
+
+                          <div className="flex items-center gap-2">
+                            <Input
+                              value={brainstormTopic}
+                              onChange={(e) => setBrainstormTopic(e.target.value)}
+                              onKeyDown={(e) => {
+                                if (e.key === 'Enter' && !isBrainstorming) {
+                                  e.preventDefault();
+                                  void handleBrainstormIdeas(brainstormTopic, brainstormCount);
+                                }
+                              }}
+                              placeholder="Ketik topik spesifik (misal: Kuliner Nusantara, Smart City IoT, Ramadhan)... kosongkan untuk tren global"
+                              className="h-8.5 text-xs font-medium bg-white border-2 border-[#2c1810] shadow-[1px_1px_0_#2c1810] flex-1"
+                            />
+                          </div>
+
+                          <div className="flex items-center justify-between gap-2 flex-wrap pt-0.5">
+                            <div className="flex items-center gap-1.5">
+                              <span className="text-[10px] font-bold text-[#6b5344]">Jumlah Ide:</span>
+                              {[5, 10, 15, 20].map((cnt) => (
+                                <button
+                                  key={cnt}
+                                  type="button"
+                                  onClick={() => setBrainstormCount(cnt)}
+                                  className={`px-2 py-0.5 text-[10px] font-black rounded border cursor-pointer transition-all ${
+                                    brainstormCount === cnt
+                                      ? 'bg-[#2c1810] text-white border-[#2c1810] shadow-[1px_1px_0_#2c1810]'
+                                      : 'bg-white text-[#2c1810] border-stone-300 hover:bg-[#fff5e6]'
+                                  }`}
+                                >
+                                  {cnt}
+                                </button>
+                              ))}
+                            </div>
+
+                            <Button
+                              type="button"
+                              size="sm"
+                              disabled={isBrainstorming}
+                              onClick={() => handleBrainstormIdeas(brainstormTopic, brainstormCount)}
+                              className="h-7.5 px-3 text-[11px] font-black bg-[#ff6b35] hover:bg-[#e55a2b] text-white border-2 border-[#2c1810] shadow-[1px_1px_0_#2c1810] cursor-pointer"
+                            >
+                              {isBrainstorming ? (
+                                <>
+                                  <Loader2 className="w-3 h-3 animate-spin mr-1" />
+                                  <span>Merancang {brainstormCount} Ide...</span>
+                                </>
+                              ) : (
+                                <>
+                                  <Wand2 className="w-3 h-3 mr-1" />
+                                  <span>Rancang {brainstormCount} Ide via AI</span>
+                                </>
+                              )}
+                            </Button>
+                          </div>
+                        </div>
+                      )}
 
                       {/* Pills List */}
                       <div className="flex flex-wrap gap-1.5">
@@ -983,10 +1132,12 @@ export function PromptGeneratorView({ onSwitchToMetadata }: PromptGeneratorViewP
                 {/* Semantic Preservation Mode */}
                 <div className="space-y-1.5 pt-3">
                   <Label className="text-xs font-black text-[#2c1810]">Mode Preservasi Semantik</Label>
-                  <div className="grid grid-cols-3 gap-1.5">
+                  <div className={`grid gap-1.5 ${mode === 'reference_to_prompt' ? 'grid-cols-3' : 'grid-cols-2'}`}>
                     {[
                       { id: 'meaning_preservation', label: 'Makna / Tema', desc: 'Jaga pesan' },
-                      { id: 'visual_replication', label: 'Ciri Visual', desc: 'Jaga bentuk' },
+                      ...(mode === 'reference_to_prompt'
+                        ? [{ id: 'visual_replication', label: 'Ciri Visual', desc: 'Jaga bentuk' }]
+                        : []),
                       { id: 'free_ideation', label: 'Ideasi Bebas', desc: 'Eksplorasi total' },
                     ].map((sm) => (
                       <button
@@ -1049,8 +1200,8 @@ export function PromptGeneratorView({ onSwitchToMetadata }: PromptGeneratorViewP
 
         {/* Right Column: Output & Visual DNA Feed (7 cols) */}
         <div className="lg:col-span-7 space-y-5">
-          {/* A. Visual DNA Profile Inspector (When available) */}
-          {visualDna && (
+          {/* A. Visual DNA Profile Inspector (Only in Mode 1 with active image) */}
+          {mode === 'reference_to_prompt' && visualDna && (
             <div className="bg-[#fffdf9] border-2 border-[#2c1810] rounded-2xl shadow-[4px_4px_0_#2c1810] overflow-hidden">
               <button
                 type="button"

@@ -1,6 +1,6 @@
 import { NextRequest } from 'next/server';
 
-export const runtime = 'edge';
+// Node.js runtime for Windows dev stability (decision [2026-10-11])
 
 function extractJson(text: string): Record<string, unknown> {
   let cleaned = text.trim();
@@ -185,7 +185,7 @@ export async function POST(req: NextRequest) {
 
       try {
         const controller = new AbortController();
-        const timeoutId = setTimeout(() => controller.abort(), 55000);
+        const timeoutId = setTimeout(() => controller.abort(), 75000);
 
         const res = await fetch(cluster.url, {
           method: 'POST',
@@ -194,6 +194,7 @@ export async function POST(req: NextRequest) {
             Authorization: `Bearer ${cluster.token}`,
           },
           body: JSON.stringify(payload),
+          redirect: 'follow',
           signal: controller.signal,
         });
 

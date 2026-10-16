@@ -1,6 +1,6 @@
 'use client';
 
-import { memo, useId, useState } from 'react';
+import { memo, useCallback, useEffect, useId, useState } from 'react';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
@@ -75,50 +75,85 @@ function StudioPanelComponent({
 
   const models = gasProxyModels.length > 0 ? gasProxyModels : Object.keys(MODEL_LABELS);
 
-  const addFiles = async (newFiles: File[]) => {
-    const validMedia = newFiles.filter(isMediaFile);
-    if (!validMedia.length) return;
+  const addFiles = useCallback(
+    async (newFiles: File[]) => {
+      const validMedia = newFiles.filter(isMediaFile);
+      if (!validMedia.length) return;
 
-    // Jalankan filter anti-duplikat komprehensif (intra-batch, existing queue, dan item sesi aktif)
-    const { acceptedFiles, rejectedDuplicates } = await filterDuplicateFiles(validMedia, {
-      existingFiles: files,
-      existingItemFilenames,
-    });
+      // Jalankan filter anti-duplikat komprehensif (intra-batch, existing queue, dan item sesi aktif)
+      const { acceptedFiles, rejectedDuplicates } = await filterDuplicateFiles(validMedia, {
+        existingFiles: files,
+        existingItemFilenames,
+      });
 
-    if (rejectedDuplicates.length > 0) {
-      if (rejectedDuplicates.length === 1) {
-        toast.warning(
-          `File duplikat diabaikan: "${rejectedDuplicates[0].file.name}" (${rejectedDuplicates[0].description})`
-        );
-      } else {
-        toast.warning(
-          `${rejectedDuplicates.length} file duplikat diabaikan dari sesi ini agar tidak terunggah ganda.`
-        );
+      if (rejectedDuplicates.length > 0) {
+        if (rejectedDuplicates.length === 1) {
+          toast.warning(
+            `File duplikat diabaikan: "${rejectedDuplicates[0].file.name}" (${rejectedDuplicates[0].description})`
+          );
+        } else {
+          toast.warning(
+            `${rejectedDuplicates.length} file duplikat diabaikan dari sesi ini agar tidak terunggah ganda.`
+          );
+        }
       }
-    }
 
-    if (!acceptedFiles.length) return;
+      if (!acceptedFiles.length) return;
 
-    onFilesChange([...files, ...acceptedFiles]);
+      onFilesChange([...files, ...acceptedFiles]);
 
-    // Berikan info ramah jika video berdurasi lebih dari 30 detik
-    for (const f of acceptedFiles) {
-      if (isVideoFile(f)) {
-        void validateVideoFile(f, MAX_VIDEO_DURATION_SECONDS).then((check) => {
-          if (!check.valid && check.duration > MAX_VIDEO_DURATION_SECONDS) {
-            toast.info(
-              `Video "${f.name}" (${check.duration.toFixed(1)}s): Klip stok melebihi 30s. Analisis visual dibatasi pada 30 detik pertama.`
-            );
-          }
-        });
+      // Berikan info ramah jika video berdurasi lebih dari 30 detik
+      for (const f of acceptedFiles) {
+        if (isVideoFile(f)) {
+          void validateVideoFile(f, MAX_VIDEO_DURATION_SECONDS).then((check) => {
+            if (!check.valid && check.duration > MAX_VIDEO_DURATION_SECONDS) {
+              toast.info(
+                `Video "${f.name}" (${check.duration.toFixed(1)}s): Klip stok melebihi 30s. Analisis visual dibatasi pada 30 detik pertama.`
+              );
+            }
+          });
+        }
       }
-    }
-  };
+    },
+    [files, existingItemFilenames, onFilesChange]
+  );
 
   const onDrop = (e: React.DragEvent) => {
     e.preventDefault();
     void addFiles(Array.from(e.dataTransfer.files || []));
   };
+
+  // Clipboard Paste (Ctrl+V) listener for Studio assets
+  useEffect(() => {
+    const handlePaste = (e: ClipboardEvent) => {
+      const items = e.clipboardData?.items;
+      if (!items) return;
+
+      const pastedFiles: File[] = [];
+      for (let i = 0; i < items.length; i++) {
+        const item = items[i];
+        if (item.kind === 'file' && (item.type.startsWith('image/') || item.type.startsWith('video/'))) {
+          const f = item.getAsFile();
+          if (f) {
+            const cleanName =
+              f.name === 'image.png' || f.name === 'blob' || !f.name
+                ? new File([f], `Pasted_${Date.now().toString().slice(-6)}.png`, { type: f.type || 'image/png' })
+                : f;
+            pastedFiles.push(cleanName);
+          }
+        }
+      }
+
+      if (pastedFiles.length > 0) {
+        e.preventDefault();
+        void addFiles(pastedFiles);
+        toast.success(`${pastedFiles.length} file dari clipboard (paste) berhasil ditambahkan!`);
+      }
+    };
+
+    window.addEventListener('paste', handlePaste);
+    return () => window.removeEventListener('paste', handlePaste);
+  }, [addFiles]);
 
   const hasFiles = files.length > 0;
 
@@ -128,9 +163,26 @@ function StudioPanelComponent({
       <div className="flex-1 min-h-0 overflow-y-auto pr-1 space-y-3.5 scrollbar-thin">
         {/* 1. Upload Dropzone */}
         <div
+          tabIndex={0}
           onDrop={onDrop}
           onDragOver={(e) => e.preventDefault()}
-          className={`border-2 border-dashed border-[#2c1810] rounded-xl text-center bg-[#fff5e6]/60 transition-all hover:bg-[#fff5e6] flex flex-col items-center justify-center cursor-pointer ${
+          onPaste={(e) => {
+            const items = e.clipboardData?.items;
+            if (items) {
+              const pasted: File[] = [];
+              for (let i = 0; i < items.length; i++) {
+                if (items[i].kind === 'file' && (items[i].type.startsWith('image/') || items[i].type.startsWith('video/'))) {
+                  const f = items[i].getAsFile();
+                  if (f) pasted.push(f);
+                }
+              }
+              if (pasted.length > 0) {
+                e.preventDefault();
+                void addFiles(pasted);
+              }
+            }
+          }}
+          className={`border-2 border-dashed border-[#2c1810] rounded-xl text-center bg-[#fff5e6]/60 transition-all hover:bg-[#fff5e6] focus:bg-[#fff5e6] focus:outline-none focus:ring-2 focus:ring-[#ff6b35] flex flex-col items-center justify-center cursor-pointer ${
             hasFiles ? 'p-3.5' : 'p-6'
           }`}
           onClick={() => document.getElementById(fileInputId)?.click()}
@@ -154,10 +206,10 @@ function StudioPanelComponent({
             <Upload className={hasFiles ? 'w-4 h-4' : 'w-5 h-5'} />
           </div>
           <p className="font-bold text-[#2c1810] text-sm">
-            {hasFiles ? '+ Tambah Gambar / Video' : 'Drag & Drop Gambar / Video'}
+            {hasFiles ? '+ Tambah Gambar / Video (atau Paste)' : 'Drag & Drop Gambar / Video, atau Paste (Ctrl+V)'}
           </p>
           <p className="text-xs text-[#6b5344] mt-0.5 font-medium">
-            JPG, PNG, WEBP, MP4/MOV (Maks. 30 detik)
+            JPG, PNG, WEBP, MP4/MOV, atau screenshot clipboard
           </p>
           <span className="inline-flex items-center gap-1 text-[10px] text-emerald-800 bg-emerald-50 border border-emerald-300 font-bold px-2 py-0.5 rounded-full mt-2">
             🛡️ Proteksi Anti-Duplikat Sesi Aktif

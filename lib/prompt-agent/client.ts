@@ -47,6 +47,10 @@ export async function executeVCPAGeneration(
   const { mode, brief, imageDataUrl, visualDna, settings, provider = 'gas-proxy', model = 'auto', onProgressStep } = params;
   const apiKey = params.apiKey || getApiKey(provider);
 
+  // In Mode 2 (text_ideation), strictly clear image reference & visual DNA
+  const effectiveImageDataUrl = mode === 'reference_to_prompt' ? imageDataUrl : undefined;
+  const effectiveVisualDna = mode === 'reference_to_prompt' ? visualDna : undefined;
+
   onProgressStep?.(
     mode === 'reference_to_prompt'
       ? 'Menganalisis Visual DNA & Fitur Citra Referensi...'
@@ -56,7 +60,7 @@ export async function executeVCPAGeneration(
   const instruction = buildVCPAPromptInstruction({
     mode,
     brief,
-    visualDna,
+    visualDna: effectiveVisualDna,
     settings,
   });
 
@@ -72,7 +76,7 @@ export async function executeVCPAGeneration(
           body: JSON.stringify({
             mode,
             brief,
-            imageDataUrl,
+            imageDataUrl: effectiveImageDataUrl,
             settings,
             apiKey: apiKey || undefined,
             provider,
@@ -105,7 +109,7 @@ export async function executeVCPAGeneration(
             apiKey: apiKey || undefined,
             model: model || 'auto',
             instruction,
-            imageDataUrl,
+            imageDataUrl: effectiveImageDataUrl,
           }),
         }).then(async (r) => {
           if (!r.ok) {
@@ -232,20 +236,22 @@ Output ONLY a JSON object:
 
 export async function brainstormBriefIdeas(
   seedTopic?: string,
+  count = 10,
   provider: Provider = 'gas-proxy',
   model = 'auto',
   customApiKey?: string
 ): Promise<InspirationIdea[]> {
   const apiKey = customApiKey || getApiKey(provider);
   const topicQuery = seedTopic?.trim();
+  const safeCount = Math.max(3, Math.min(count, 30));
 
   const instruction = `You are a world-class creative director for commercial microstock photography.
-TASK: Brainstorm 5 fresh, high-demand, high-commercial-value stock photography concept briefs ${
+TASK: Brainstorm ${safeCount} fresh, high-demand, high-commercial-value stock photography concept briefs ${
     topicQuery ? `specifically expanding and exploring unique angles of the topic: "${topicQuery}"` : 'based on currently trending visual themes in global advertising'
   }.
 
 STRICT FORMAT REQUIREMENTS:
-Output ONLY a JSON object with an "ideas" array containing exactly 5 items:
+Output ONLY a JSON object with an "ideas" array containing exactly ${safeCount} items:
 {
   "ideas": [
     {
@@ -300,6 +306,6 @@ Do NOT include markdown backticks or explanations. Output pure JSON only.`;
   }
 
   // Graceful fallback to curated pool if AI call times out or errors
-  return getRandomCuratedIdeas(5).map((item) => ({ ...item, isAiGenerated: false }));
+  return getRandomCuratedIdeas(safeCount).map((item) => ({ ...item, isAiGenerated: false }));
 }
 

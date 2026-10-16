@@ -201,3 +201,23 @@
   - Keamanan standar industri dengan enkripsi dan tanda tangan kriptografis dari Google.
   - Kompatibel 100% dengan hosting static di Cloudflare Pages dan database Google Sheets yang sudah aktif digunakan oleh proyek.
 
+## [2026-10-16] Mode 2 Isolation, Schema Optimization & Expanded AI Brainstorm Ideation
+- **Context**: Mode 2 (Text-Only Ideation) pada tab Prompt Img Generator mengalami sejumlah galat:
+  1. State `imageDataUrl` dan `visualDna` yang tersisa dari Mode 1 tetap terkirim ke backend dan proxy AI sehingga diproses keliru sebagai request multimodal.
+  2. Instruksi schema JSON AI mewajibkan object `visualDna` padahal tidak ada gambar acuan, yang menghabiskan 400+ token sia-sia dan memicu galat timeout/truncation pada batch prompt.
+  3. Tombol `+ Ide AI Baru` tidak memiliki opsi input topik spesifik dan hanya menghasilkan 5 ide terbatas.
+- **Decision**:
+  1. Menjamin isolasi ketat Mode 2: `imageDataUrl` dan `visualDna` di-reset ke `null`/`undefined` saat beralih atau generate di Mode 2.
+  2. Mengondisikan schema JSON pada `buildVCPAPromptInstruction`: Mode 2 hanya meminta output array `prompts` murni (tanpa payload `visualDna`), memangkas latensi dan penggunaan token.
+  3. Mengintegrasikan panel pop-down interaktif pada `+ Ide AI Baru` dengan kolom input topik spesifik (misal: "Kuliner Nusantara", "Smart City") serta pilihan jumlah ide (5, 10, 15, 20 dengan default 10).
+  4. Memperluas katalog inspirasi kurasi `CURATED_INSPIRATION_POOL` menjadi 36+ tema dan menaikkan kuota default inspirasi menjadi 10 ide.
+- **Rationale**: Menghilangkan galat timeout pada Mode 2 dan memberikan kontrol eksplorasi ide yang jauh lebih kaya dan terarah bagi kreator.
+
+## [2026-10-16] Universal Clipboard Image Paste (Ctrl+V) Support
+- **Context**: Pengguna sering mengambil tangkapan layar (screenshot via Snipping Tool/PrintScreen) atau menyalin gambar dari peramban/editor dan ingin langsung memasukkannya ke dropzone tanpa harus menyimpan file ke disk lokal terlebih dahulu.
+- **Decision**: Mengintegrasikan penangkap clipboard `paste` (Ctrl+V) secara global dan pada elemen dropzone di:
+  1. `components/PromptGeneratorView.tsx` (Dropzone Image Reference Mode 1, dengan auto-switch jika sedang di Mode 2).
+  2. `components/StudioPanel.tsx` (Dropzone aset utama Studio).
+  3. `components/UploadCard.tsx` (Komponen dropzone file card).
+- **Rationale**: Mempercepat alur kerja kreator (*zero friction*), otomatis menamai file tangkapan clipboard dengan nama yang bersih (`Pasted_Ref_...png`), dan tetap mempertahankan fungsi paste teks biasa di textarea/input tanpa konflik.
+
