@@ -1,7 +1,7 @@
 'use client';
 
 import { useCallback, useEffect, useMemo, useState } from 'react';
-import { History as HistoryIcon, Key, RefreshCw, Sparkles, UploadCloud, Zap } from 'lucide-react';
+import { History as HistoryIcon, Home, Key, LogOut, RefreshCw, Sparkles, UploadCloud, Zap } from 'lucide-react';
 import { nanoid } from 'nanoid/non-secure';
 
 import { StudioPanel } from '@/components/StudioPanel';
@@ -12,10 +12,11 @@ import { FtpAccountsView } from '@/components/FtpAccountsView';
 import { AppSideRail, type AppModuleId } from '@/components/AppSideRail';
 import { PromptGeneratorView } from '@/components/PromptGeneratorView';
 import { KeywordResearchView } from '@/components/KeywordResearchView';
+import { LandingBerandaView } from '@/components/LandingBerandaView';
 import { GoogleAuthModal } from '@/components/GoogleAuthModal';
 import { loadFtpProfiles } from '@/lib/ftp/store';
 import type { AuthUser } from '@/lib/auth/types';
-import { getStoredUser, onAuthChange, refreshUserStatus } from '@/lib/auth/store';
+import { clearStoredUser, getStoredUser, onAuthChange, refreshUserStatus } from '@/lib/auth/store';
 
 import { resizeImageToMax1024 } from '@/lib/resize';
 import { extractVideoKeyframes, isVideoFile } from '@/lib/video';
@@ -381,7 +382,7 @@ export default function App() {
   const [currentSession, setCurrentSession] = useState<GenerationSession | null>(null);
 
   // Top-level App Module state (Side Rail)
-  const [activeModule, setActiveModule] = useState<AppModuleId>('metadata');
+  const [activeModule, setActiveModule] = useState<AppModuleId>('beranda');
 
   // Tab & history state
   const [tab, setTab] = useState<'generate' | 'history' | 'upload' | 'accounts'>('generate');
@@ -408,6 +409,14 @@ export default function App() {
   const [currentUser, setCurrentUser] = useState<AuthUser | null>(null);
   const [showAuthModal, setShowAuthModal] = useState(false);
 
+  // Logout handler with toast feedback
+  const handleLogout = useCallback(() => {
+    clearStoredUser();
+    setCurrentUser(null);
+    setActiveModule('beranda');
+    toast.success('Anda telah berhasil keluar dari akun Google.');
+  }, []);
+
   // Sync count of FTP profiles
   useEffect(() => {
     void loadFtpProfiles().then((p) => setFtpProfilesCount(p.length));
@@ -416,10 +425,24 @@ export default function App() {
   // Sync Google Auth session on mount and background refresh
   useEffect(() => {
     const initialUser = getStoredUser();
-    if (initialUser) setCurrentUser(initialUser);
+    if (initialUser) {
+      setCurrentUser(initialUser);
+      // Pengguna yang sudah login langsung diarahkan ke Studio
+      setActiveModule('metadata');
+    } else {
+      // Pengguna baru/tamu disambut oleh Halaman Beranda
+      setActiveModule('beranda');
+    }
 
     const unsub = onAuthChange((user) => {
       setCurrentUser(user);
+      if (user) {
+        // Setelah login berhasil, langsung masuk ke Studio
+        setActiveModule('metadata');
+      } else {
+        // Saat logout, kembali ke Beranda
+        setActiveModule('beranda');
+      }
     });
 
     void refreshUserStatus().then((updated) => {
@@ -987,22 +1010,50 @@ export default function App() {
         isUploadingInBackground={uploadProgressState.isUploading && activeModule !== 'metadata'}
         currentUser={currentUser}
         onOpenAuthModal={() => setShowAuthModal(true)}
+        onLogout={handleLogout}
       />
 
       {/* Main Content Area */}
       <main className="flex-1 min-w-0 max-w-[1536px] mx-auto p-4 md:p-6 lg:p-8 space-y-6 w-full">
+        {/* Module 0: Beranda & Pengenalan Platform */}
+        <div className={activeModule === 'beranda' ? 'block' : 'hidden'}>
+          <LandingBerandaView
+            currentUser={currentUser}
+            onOpenAuthModal={() => setShowAuthModal(true)}
+            onNavigateToStudio={() => setActiveModule('metadata')}
+            onNavigateToPromptGen={() => setActiveModule('prompt-gen')}
+            onNavigateToKeywords={() => setActiveModule('keyword-research')}
+          />
+        </div>
+
         {/* Module 1: Metadata Generator & Multi-FTP Suite */}
         <div className={activeModule === 'metadata' ? 'space-y-6' : 'hidden'}>
           {/* Sleek Editorial Header Bar */}
           <div className="bg-white border-2 border-[#2c1810] shadow-[5px_5px_0_#2c1810] rounded-2xl px-5 py-3.5 flex flex-col md:flex-row md:items-center justify-between gap-4">
             <div className="flex items-center gap-3">
-              <div className="w-10 h-10 rounded-xl bg-[#ff6b35] border-2 border-[#2c1810] shadow-[2px_2px_0_#2c1810] flex items-center justify-center text-white">
+              <button
+                type="button"
+                onClick={() => setActiveModule('beranda')}
+                className="w-10 h-10 rounded-xl bg-[#ff6b35] border-2 border-[#2c1810] shadow-[2px_2px_0_#2c1810] flex items-center justify-center text-white transition-all hover:translate-x-[1px] hover:translate-y-[1px] active:translate-x-[2px] active:translate-y-[2px] active:shadow-none cursor-pointer"
+                title="Ke Halaman Beranda"
+              >
                 <Zap className="w-5 h-5 fill-current" />
-              </div>
+              </button>
               <div>
-                <h1 className="text-xl md:text-2xl font-black tracking-tight text-[#2c1810]">
-                  MetaGen Studio
-                </h1>
+                <div className="flex items-center gap-2">
+                  <h1 className="text-xl md:text-2xl font-black tracking-tight text-[#2c1810]">
+                    MetaGen Studio
+                  </h1>
+                  <button
+                    type="button"
+                    onClick={() => setActiveModule('beranda')}
+                    className="inline-flex items-center gap-1 text-[11px] font-bold text-[#6b5344] hover:text-[#2c1810] px-2 py-0.5 rounded-md hover:bg-[#fff5e6] transition-colors cursor-pointer"
+                    title="Buka Halaman Beranda"
+                  >
+                    <Home className="w-3.5 h-3.5" />
+                    <span className="hidden sm:inline">Beranda</span>
+                  </button>
+                </div>
               </div>
             </div>
 
@@ -1105,6 +1156,19 @@ export default function App() {
                   />
                 )}
               </button>
+
+              {/* Dedicated Logout Button when logged in */}
+              {currentUser && (
+                <button
+                  type="button"
+                  onClick={handleLogout}
+                  className="inline-flex items-center gap-1 px-2.5 py-1.5 rounded-xl border-2 border-[#2c1810] shadow-[2px_2px_0_#2c1810] bg-[#fff5e6] hover:bg-[#ffe5e0] text-rose-800 hover:text-rose-900 text-xs font-bold transition-all cursor-pointer"
+                  title="Keluar dari Akun Google"
+                >
+                  <LogOut className="w-3.5 h-3.5" />
+                  <span className="hidden sm:inline text-[11px]">Keluar</span>
+                </button>
+              )}
             </div>
           </div>
 

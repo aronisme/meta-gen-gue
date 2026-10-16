@@ -3,6 +3,8 @@
 import { useState } from 'react';
 import {
   HelpCircle,
+  Home,
+  LogOut,
   Search,
   Sparkles,
   User,
@@ -12,7 +14,7 @@ import {
 
 import type { AuthUser } from '@/lib/auth/types';
 
-export type AppModuleId = 'metadata' | 'prompt-gen' | 'keyword-research';
+export type AppModuleId = 'beranda' | 'metadata' | 'prompt-gen' | 'keyword-research';
 
 export interface AppSideRailProps {
   activeModule: AppModuleId;
@@ -20,6 +22,7 @@ export interface AppSideRailProps {
   isUploadingInBackground?: boolean;
   currentUser?: AuthUser | null;
   onOpenAuthModal?: () => void;
+  onLogout?: () => void;
 }
 
 interface NavItem {
@@ -31,6 +34,12 @@ interface NavItem {
 }
 
 const NAV_ITEMS: NavItem[] = [
+  {
+    id: 'beranda',
+    label: 'Beranda',
+    tagline: 'Ringkasan Platform & Panduan',
+    icon: Home,
+  },
   {
     id: 'metadata',
     label: 'Metadata Generator',
@@ -59,6 +68,7 @@ export function AppSideRail({
   isUploadingInBackground,
   currentUser,
   onOpenAuthModal,
+  onLogout,
 }: AppSideRailProps) {
   const [hoveredItem, setHoveredItem] = useState<AppModuleId | null>(null);
   const [showHelpModal, setShowHelpModal] = useState(false);
@@ -196,6 +206,19 @@ export function AppSideRail({
               />
             )}
           </button>
+
+          {/* Quick Logout Button on Desktop */}
+          {currentUser && onLogout && (
+            <button
+              type="button"
+              onClick={onLogout}
+              className="w-10 h-10 rounded-xl text-stone-400 hover:text-rose-600 hover:bg-rose-50 flex items-center justify-center transition-colors cursor-pointer"
+              title="Keluar dari Akun (Logout)"
+              aria-label="Keluar dari Akun"
+            >
+              <LogOut className="w-4 h-4" />
+            </button>
+          )}
         </div>
       </aside>
 
@@ -232,30 +255,44 @@ export function AppSideRail({
           })}
         </div>
 
-        <button
-          type="button"
-          onClick={onOpenAuthModal}
-          className="w-8 h-8 rounded-full border-2 border-[#2c1810] flex items-center justify-center text-[#2c1810] bg-[#f59e0b] relative cursor-pointer"
-          title={currentUser ? currentUser.name : 'Masuk dengan Google'}
-          aria-label="Profil dan Status Pengguna"
-        >
-          {currentUser?.picture ? (
-            <img
-              src={currentUser.picture}
-              alt={currentUser.name}
-              className="w-full h-full rounded-full object-cover"
-            />
-          ) : (
-            <User className="w-4 h-4 fill-current text-[#2c1810]" />
+        <div className="flex items-center gap-1.5">
+          <button
+            type="button"
+            onClick={onOpenAuthModal}
+            className="w-8 h-8 rounded-full border-2 border-[#2c1810] flex items-center justify-center text-[#2c1810] bg-[#f59e0b] relative cursor-pointer"
+            title={currentUser ? currentUser.name : 'Masuk dengan Google'}
+            aria-label="Profil dan Status Pengguna"
+          >
+            {currentUser?.picture ? (
+              <img
+                src={currentUser.picture}
+                alt={currentUser.name}
+                className="w-full h-full rounded-full object-cover"
+              />
+            ) : (
+              <User className="w-4 h-4 fill-current text-[#2c1810]" />
+            )}
+            {currentUser && (
+              <span
+                className={`absolute -bottom-0.5 -right-0.5 w-2.5 h-2.5 rounded-full border border-white ${
+                  currentUser.status === 'active' ? 'bg-emerald-500' : 'bg-amber-500'
+                }`}
+              />
+            )}
+          </button>
+
+          {currentUser && onLogout && (
+            <button
+              type="button"
+              onClick={onLogout}
+              className="w-8 h-8 rounded-lg border border-stone-200 text-stone-500 hover:text-rose-600 hover:bg-rose-50 flex items-center justify-center cursor-pointer"
+              title="Keluar dari Akun"
+              aria-label="Keluar dari Akun"
+            >
+              <LogOut className="w-3.5 h-3.5" />
+            </button>
           )}
-          {currentUser && (
-            <span
-              className={`absolute -bottom-0.5 -right-0.5 w-2.5 h-2.5 rounded-full border border-white ${
-                currentUser.status === 'active' ? 'bg-emerald-500' : 'bg-amber-500'
-              }`}
-            />
-          )}
-        </button>
+        </div>
       </div>
 
       {/* Help & Info Modal */}
