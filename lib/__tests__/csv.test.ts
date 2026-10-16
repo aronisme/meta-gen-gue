@@ -89,7 +89,7 @@ describe('CSV Exporters (2026 Microstock Compliance)', () => {
       expect(csv).toContain('"5"');
     });
 
-    it('should truncate titles longer than 70 characters', () => {
+    it('should truncate titles longer than 160 characters', () => {
       const longTitleItem: ItemMetaBox[] = [
         {
           id: 'long',
@@ -99,7 +99,7 @@ describe('CSV Exporters (2026 Microstock Compliance)', () => {
           createdAt: Date.now(),
           meta: {
             title:
-              'This is a ridiculously long title that definitely exceeds the seventy character maximum limit allowed by Adobe Stock specifications',
+              'This is a ridiculously long title designed for testing metadata sanitization and truncation that definitely exceeds the one hundred and sixty character maximum limit allowed by Adobe Stock specifications in 2026',
             description: 'Long description',
             keywords: 'test',
           },
@@ -112,7 +112,7 @@ describe('CSV Exporters (2026 Microstock Compliance)', () => {
       // Row is: "test.jpg","<sanitized_title>","test","",""
       const columns = lines[1].split('","');
       const title = columns[1].replace(/"/g, '');
-      expect(title.length).toBeLessThanOrEqual(70);
+      expect(title.length).toBeLessThanOrEqual(160);
     });
   });
 

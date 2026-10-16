@@ -294,12 +294,12 @@ function MetadataItemComponent({
                   {item.meta?.title && (
                     <span
                       className={`text-[10px] font-bold px-1.5 py-0.5 rounded border border-[#2c1810] shadow-[1px_1px_0_#2c1810] shrink-0 ${
-                        item.meta.title.length > 70
+                        item.meta.title.length > 200
                           ? 'bg-[#feefc3] text-[#b06000]'
                           : 'bg-[#fff5e6] text-[#2c1810]'
                       }`}
                     >
-                      {item.meta.title.length}/70 chars
+                      {item.meta.title.length}/200 chars
                     </span>
                   )}
                 </div>

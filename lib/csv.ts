@@ -23,12 +23,12 @@ function toDelimited(headers: string[], rows: Record<string, string>[], delimite
 /**
  * Sanitizes title for Adobe Stock:
  * - Adobe CSV spec strictly forbids commas in title.
- * - Max length is 70 characters.
+ * - Max safe length is 160 characters (Adobe Stock portal hard limit is 200 characters).
  */
 function sanitizeAdobeTitle(title: string): string {
   const noComma = (title ?? '').replace(/,/g, ' ').replace(/\s+/g, ' ').trim();
-  if (noComma.length > 70) {
-    return noComma.slice(0, 70).trim();
+  if (noComma.length > 160) {
+    return noComma.slice(0, 160).trim();
   }
   return noComma;
 }

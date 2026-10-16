@@ -267,7 +267,7 @@ function StudioPanelComponent({
                     min={20}
                     max={200}
                     value={titleLength}
-                    onChange={(e) => onTitleLengthChange(parseInt(e.target.value || '70', 10))}
+                    onChange={(e) => onTitleLengthChange(parseInt(e.target.value || '120', 10))}
                     className="bg-white border-2 border-[#2c1810] text-[#2c1810] font-semibold h-9"
                   />
                 </div>

@@ -1,10 +1,10 @@
 # Current Project State
 
 ## Last Updated
-2026-10-16 17:22
+2026-10-16 18:36
 
 ## Current Objective
-Penyempurnaan performa batch upload FTP/SFTP dengan Keep-Alive Session Pool, Controlled Multi-Worker Concurrency, dan validasi operasional lintas agensi microstock.
+Penerapan Universal Best-Seller Metadata Architecture (Pilihan 1: Seamless Engine Upgrade) mengadopsi riset empiris top-seller Adobe Stock ke dalam mesin AI metadata generator tanpa mengubah UI atau merusak fitur yang sudah ada.
 
 ## Completed Recently
 - **Optimasi Batch Upload FTP/SFTP**:
@@ -19,23 +19,42 @@ Penyempurnaan performa batch upload FTP/SFTP dengan Keep-Alive Session Pool, Con
     - Pembatalan serentak melalui `activeAbortControllersRef` (Map per file) dan update badge aktif.
     - Pemangkasan inter-file pacing delay dari 800ms menjadi 50ms per worker.
     - Sinkronisasi tipe endpoint `disconnect-all` di `lib/ftp/bridge-client.ts`.
-  - Verifikasi: 77 unit tests lolos hijau (`pnpm test:run`), TypeScript check lolos (`tsc --noEmit`).
+  - Verifikasi: Pengujian riil ke Adobe Stock SFTP membuktikan `[SFTP-REUSE]` aktif pada slot #0 & #1 tanpa re-handshake.
+
+- **Universal Best-Seller Metadata Architecture (Pilihan 1 - Engine Upgrade)**:
+  - **Peningkatan Kapasitas & Batas Karakter Judul**:
+    - `lib/csv.ts`: Memperbarui fungsi sanitasi `sanitizeAdobeTitle` dari batas lama 70 karakter menjadi 160 karakter (sesuai best practice 12-27 kata; portal Adobe Stock mengizinkan hingga 200 karakter).
+    - `lib/__tests__/csv.test.ts`: Memperbarui unit test untuk memverifikasi pemotongan batas 160 karakter.
+    - `components/MetadataItem.tsx`: Mengubah threshold peringatan dan badge dari `/70 chars` menjadi `/200 chars` (hanya memberi warning jika `> 200`).
+    - `components/StudioPanel.tsx` & `components/SettingsCard.tsx`: Memperbarui nilai fallback default `titleLength` dari `'70'` ke `'120'`.
+    - `lib/store.ts`: Auto-migrasi pengaturan tersimpan di LocalStorage dari 70 karakter ke 120 karakter.
+  - **Instruksi Mesin AI (app/page.tsx)**:
+    - Default state `titleLength` diperbarui dari 70 menjadi 120 karakter.
+    - Menyusun arsitektur formula universal di `defaultInstruction` (berlaku untuk seluruh 21 kategori microstock tanpa terkotak pada 4 ceruk riset):
+      1. **Front-Loading**: Wajib menempatkan 3-4 kata kunci subjek utama di awal kalimat.
+      2. **Multi-Sentence Compound Structure with Period (`.`)**: Memisahkan 2-3 klausa lengkap menggunakan tanda titik (`.`), **STRICTLY NO COMMAS** demi kepatuhan CSV Adobe Stock.
+      3. **Natural Synonym Stacking**: Penambahan 1-2 sinonim kata kunci bernilai pencarian tinggi di kalimat kedua.
+      4. **Commercial Intent / Buyer Use-Case**: Penutup judul berorientasi kegunaan komersial (e.g. concept for website banner, copy space, advertising layout).
+      5. **Title-Keyword Convergence**: 10 keyword pertama (Top 10) wajib berkonvergensi penuh dengan seluruh kata kunci utama pada judul.
+  - Verifikasi: 77 unit tests lolos hijau (`pnpm test:run`), TypeScript check lolos tanpa error (`npx tsc --noEmit`).
 
 ## Currently Working On
-- Benchmarking & pengujian operasional upload riil ke akun microstock (Adobe Stock / Shutterstock).
+- Siap digunakan untuk pengujian generasi metadata pada aset riil di studio.
 
 ## Remaining Tasks
 - [x] **Persistent Session Pool di Bridge**: Selesai diimplementasikan di `ftp-bridge/server.mjs`.
 - [x] **Controlled Parallel Concurrency di UI**: Selesai diimplementasikan di `components/FtpQueueView.tsx`.
-- [ ] **Benchmarking Riil**: Uji kecepatan batch upload 10–20 file ke server agensi dengan perbandingan profil 1x vs 2x.
+- [x] **Pilihan 1 (Seamless Engine Upgrade)**: Selesai diimplementasikan pada prompt generator, sanitasi CSV, UI counter, dan auto-migrasi setting.
 
 ## Blockers / Errors
-- None. Seluruh test lolos, lint bersih, dan server bridge lokal v1.1.0 siap dijalankan.
+- None. Seluruh test lolos, lint bersih, server dev Next.js dan bridge lokal aktif.
 
 ## Files Recently Changed
+- `lib/csv.ts`
+- `lib/__tests__/csv.test.ts`
+- `app/page.tsx`
+- `components/MetadataItem.tsx`
+- `components/StudioPanel.tsx`
+- `components/SettingsCard.tsx`
+- `lib/store.ts`
 - `ftp-bridge/server.mjs`
-- `components/FtpQueueView.tsx`
-- `lib/ftp/bridge-client.ts`
-
-## Next Recommended Step
-Lakukan uji coba batch upload langsung ke server agensi atau uji coba simulasi menggunakan `start-ftp-bridge.bat` dan periksa log terminal bridge untuk melihat aktivasi `SFTP-REUSE` dan `Slot #0 / Slot #1`.

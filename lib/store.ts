@@ -108,9 +108,18 @@ export function loadSettings(): SavedSettings | null {
   try {
     const parsed = JSON.parse(stored) as SavedSettings;
     // Auto-migrate legacy providers ('gemini' or 'openai') to 'gas-proxy'
+    let updated = false;
     if (parsed.provider !== 'gas-proxy') {
       parsed.provider = 'gas-proxy';
       parsed.model = 'gemini-2.5-flash';
+      updated = true;
+    }
+    // Auto-migrate legacy 70 char title limit to 120 (Universal Best-Seller metadata standard)
+    if (parsed.titleLength === 70) {
+      parsed.titleLength = 120;
+      updated = true;
+    }
+    if (updated) {
       localStorage.setItem(SETTINGS_KEY, JSON.stringify(parsed));
     }
     return parsed;

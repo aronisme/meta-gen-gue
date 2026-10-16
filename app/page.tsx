@@ -64,10 +64,17 @@ Analyze the provided sequence of chronological keyframes captured across the dur
 **Asset Type:** Stock Video / Footage (${fileType === 'auto' ? 'Auto-detect action' : fileType}).
 
 **Instructions for Video Metadata:**
-1. **Title & Description Guidelines:**
-   - **Title:** Create a concise, commercially appealing video title around ${titleLength} characters (maximum 70 characters). Crucial: DO NOT use any commas in the title (Adobe Stock CSV strictly forbids commas in title). Synthesize the main subject, continuous action, and setting across the footage (e.g., 'Woman walking in sunny park while holding smartphone').
+1. **Title & Description Guidelines (Universal Best-Seller Architecture):**
+   - **Title:** Create a highly searchable, commercially appealing video title around ${titleLength} characters (target 80-150 characters, maximum 160 characters).
+     * STRUCTURE: Use a multi-sentence compound structure separated ONLY by periods (.) — DO NOT use any commas in the title (Adobe Stock CSV strictly forbids commas in title).
+     * FRONT-LOADING: Put the most vital 3-4 words first (primary subject + dynamic action, e.g., 'Business team meeting in modern office.').
+     * CONTEXT & SYNONYMS: In the second clause, include camera movement, lighting, and natural synonyms (e.g., 'Corporate colleagues collaborating around conference table in 4k slow motion.').
+     * COMMERCIAL INTENT: End with commercial use-case or format intent (e.g., 'Concept for enterprise leadership, teamwork and presentation background.').
+     * CAPITALIZATION: Capitalize only the first word of each sentence and proper nouns. Avoid brand or trademark names.
    - **Description:** Write a factual, detailed description around ${descriptionLength} words detailing the complete progression of action from beginning to end, camera motion (e.g., static, panning, tracking, aerial, slow motion), lighting, and setting.
-   - **Keyword Best Practices:** Generate a rich list of exactly ${keywordsCount} comma-separated, SEO-friendly keywords without stopping early. In addition to primary subjects and setting, include video-specific motion keywords (e.g., action verbs, walking, running, panning, movement, footage, 4k, slow motion, aerial, timelapse, tracking shot). The first 10 keywords MUST be the most direct visual subjects and actions.
+   - **Keyword Best Practices (Title-Keyword Convergence):** Generate a rich list of exactly ${keywordsCount} comma-separated, SEO-friendly keywords without stopping early.
+     * The first 10 keywords MUST converge directly with the title, containing all core subject, action, and context terms used in the title.
+     * Include motion keywords (e.g., action verbs, walking, running, panning, movement, footage, 4k, slow motion, aerial, timelapse, tracking shot).
 
 2. **Guidelines for People & Action in Video:**
    - Identify activities as dynamic processes (e.g., running, gesturing, smiling, typing). Include gender, age group, and emotion if relevant.
@@ -91,30 +98,38 @@ Strict JSON format: {"title": "...", "description": "...", "keywords": "...", "c
       ? 'Auto-detect (determine whether the image is a photo, illustration, vector, 3D render, icon, or transparent graphic based on image content)'
       : fileType;
 
-  return `You are a professional stock photography metadata generator. Analyze the provided image and generate metadata for a stock photo agency.
+  return `You are a professional stock photography metadata generator for top microstock platforms (Adobe Stock, Shutterstock, Freepik, Vecteezy). Analyze the provided image and generate metadata following the empirical Universal Best-Seller Metadata Architecture.
 
 **File Type:** ${fileTypeSpec}.
 
 **Instructions:**
-1. **General Guidelines for Titles and Keywords**
-   - **Title:** Create a concise, descriptive, and commercially appealing title around ${titleLength} characters (maximum 70 characters). Crucial: DO NOT use any commas in the title (Adobe Stock CSV strictly forbids commas in title). Capitalize only the first word and proper nouns. Avoid brand or people's names.
-   - **Description:** Write a detailed, factual description around ${descriptionLength} words. Capitalize only the first word and proper nouns.
-   - **Keyword Best Practices:** Use singular nouns. Use factual adjectives (color, texture) and avoid subjective ones (cute, beautiful). Generate a rich, comprehensive list of exactly ${keywordsCount} comma-separated, SEO-friendly keywords without stopping early (cover visual subjects, background, environment, lighting, mood, concept, industry, and composition). The first 10 keywords MUST be the most direct, observable visual subjects.
+1. **Title Guidelines (Universal Best-Seller Architecture):**
+   - **Length:** Generate a title around ${titleLength} characters (optimal range 90-150 characters, maximum 160 characters).
+   - **STRICT NO COMMAS:** DO NOT use any commas in the title. Adobe Stock CSV strictly forbids commas in the title field. Separate clauses or phrases using periods (.) only.
+   - **Front-Loading (Crucial for Search Algorithm):** The very first 3-4 words MUST be the primary visual subject and core keyword phrase (e.g., "Fresh organic sushi roll", "Modern data center server rack", "Portrait of confident doctor").
+   - **Multi-Sentence Compound Structure:** Compose 2 to 3 concise, grammatically complete phrases separated by periods (.):
+     * Sentence 1 (Core Subject & Context): [Front-loaded core subject] + [Primary action, state, or setting].
+     * Sentence 2 (Synonym Stacking & Aesthetic Attributes): Include 1-2 natural, high-search-volume synonyms, mood, lighting, or style details (e.g., "Japanese cuisine dish with raw salmon and avocado.", "Futuristic cloud computing infrastructure with neon blue lighting.").
+     * Sentence 3 (Commercial Intent & Buyer Use-Case): Conclude with a practical commercial application or media utility (e.g., "Concept for restaurant menu banner and food blog.", "Generative AI illustration for cyber security background and website banner with copy space.").
+   - **Capitalization & Brand Safety:** Capitalize only the first letter of each sentence and proper nouns. Strictly avoid trademarked names, logos, or celebrity names.
 
-2. **Guidelines for People**
-   - **Representation:** Describe subjects accurately. Include gender, age, and ethnicity/race if known.
-   - **Details:** Identify activities (e.g., run, jump), roles (e.g., mother, colleague), and expressions (e.g., smile). Be inclusive and factual.
+2. **Description Guidelines:**
+   - Write a detailed, factual description around ${descriptionLength} words expanding on the visual narrative, color palette, lighting, angle, and atmosphere. Capitalize only the first word and proper nouns.
 
-3. **Guidelines for Other Asset Categories**
-   - **Objects:** Use specific singular nouns (e.g., armchair). Describe patterns, colors, and arrangements.
-   - **Animals:** Use specific species names. Include number, gender, or age if relevant.
-   - **Places:** Describe the setting (urban, rural, season, weather).
-   - **Plants & Flowers:** Use specific names (e.g., marigold). Describe appearance (blooming, dewy) and parts (petal, stem).
-   - **Food & Drinks:** Use specific singular nouns (e.g., pizza). Describe taste, texture, or cultural significance.
-   - **Illustrations & Vectors:** If the asset is an illustration, vector, 3D render, or graphic, describe the style and set "illustration": true in the output JSON. If it is a real photo, set "illustration": false.
-   - **Transparent Backgrounds:** If the asset has a transparent background (especially for cutouts or isolated graphics), include keywords like "transparent background", "cutout", and "isolated".
+3. **Keyword Guidelines (Title-Keyword Convergence):**
+   - Use singular nouns and factual adjectives.
+   - Generate a rich, comprehensive list of exactly ${keywordsCount} comma-separated, SEO-friendly keywords without stopping early.
+   - **Convergence Rule:** The first 5 to 10 keywords MUST strictly converge with the title, containing every primary keyword and synonym present in the title's sentences.
+   - Follow with secondary contextual keywords: visual elements, background, composition (e.g., copy space, close up, flat lay), lighting, mood, concept, and commercial domain.
 
-4. **Microstock Category Assignment:**
+4. **Category-Specific Guidance (Universal across all 21 Stock Categories):**
+   - **People & Lifestyle:** Identify activities, roles (mother, student, engineer), demographics, and emotional expression. Be respectful and objective.
+   - **Objects, Food & Architecture:** Use specific nouns (e.g., espresso, sourdough bread, minimalist kitchen). Describe textures, materials, and angles.
+   - **Nature, Animals & Landscapes:** Use exact species or geographical features (e.g., golden retriever, tropical palm tree, alpine mountain lake).
+   - **Graphic Resources, AI & Vectors:** If the asset is an illustration, vector, 3D render, icon, or generative AI image, explicitly note the style (e.g., "3d render", "vector illustration", "generative ai") and set "illustration": true. Set "illustration": false for authentic photographs.
+   - **Isolated & Transparent Backgrounds:** If the subject has an isolated or transparent background, include "isolated on white", "transparent background", "cutout", or "clipping path".
+
+5. **Microstock Category Assignment:**
    - **Adobe Stock Category ("category"):** Choose the single most accurate numeric code (1 to 21):
      1=Animals, 2=Buildings and Architecture, 3=Business, 4=Drinks, 5=The Environment, 6=States of Mind, 7=Food, 8=Graphic Resources, 9=Hobbies and Leisure, 10=Industry, 11=Landscape, 12=Lifestyle, 13=People, 14=Plants and Flowers, 15=Culture and Religion, 16=Science, 17=Social Issues, 18=Sports, 19=Technology, 20=Transport, 21=Travel.
    - **Shutterstock Category ("shutterstockCategory"):** Choose the most accurate category name:
@@ -127,9 +142,9 @@ Provide the output in strict JSON format. Do not include any text before or afte
 
 Example JSON output:
 {
-  "title": "Minimalist modern desk setup with laptop and plant",
-  "description": "Aerial view of a clean modern workplace with laptop, notebook, and coffee mug on a wooden table.",
-  "keywords": "desk, laptop, workplace, computer, office, table, wooden, coffee, notebook, technology",
+  "title": "Minimalist modern desk setup with laptop. Clean home office workspace with coffee cup and houseplant. Concept for remote work and freelance productivity with copy space.",
+  "description": "Aerial view of a clean modern workplace with laptop computer, ceramic coffee mug, notebook, and succulent potted plant on an oak wooden table in natural morning sunlight.",
+  "keywords": "desk, laptop, home office, workspace, computer, modern desk, remote work, freelance, productivity, table, coffee cup, houseplant, wooden desk, copy space, minimal, overhead view, business, technology",
   "category": "19",
   "shutterstockCategory": "Technology",
   "illustration": false
@@ -246,7 +261,7 @@ export default function App() {
 
   // Settings state
   const [fileType, setFileType] = useState<FileType>('auto');
-  const [titleLength, setTitleLength] = useState(70);
+  const [titleLength, setTitleLength] = useState(120);
   const [descriptionLength, setDescriptionLength] = useState(60);
   const [keywordsCount, setKeywordsCount] = useState(35);
   const [extra, setExtra] = useState('');

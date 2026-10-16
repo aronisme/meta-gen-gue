@@ -448,16 +448,22 @@ async function uploadFileToFtp(profile, buffer, remoteFilename, slotIndex = 0) {
             );
           }
 
-          if (remoteDir !== '/' && !entry.createdDirs.has(remoteDir)) {
-            try {
-              await entry.client.ensureDir(remoteDir);
-              entry.createdDirs.add(remoteDir);
-            } catch {
+          if (!entry.currentDir) entry.currentDir = '/';
+          if (entry.currentDir !== remoteDir) {
+            if (remoteDir !== '/') {
               try {
-                await entry.client.cd(remoteDir);
+                await entry.client.ensureDir(remoteDir);
+              } catch {
+                try {
+                  await entry.client.cd(remoteDir);
+                } catch {}
+              }
+            } else {
+              try {
+                await entry.client.cd('/');
               } catch {}
-              entry.createdDirs.add(remoteDir);
             }
+            entry.currentDir = remoteDir;
           }
 
           const stream = Readable.from(buffer);
