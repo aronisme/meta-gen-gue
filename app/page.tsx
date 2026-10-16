@@ -64,12 +64,16 @@ Analyze the provided sequence of chronological keyframes captured across the dur
 **Asset Type:** Stock Video / Footage (${fileType === 'auto' ? 'Auto-detect action' : fileType}).
 
 **Instructions for Video Metadata:**
-1. **Title & Description Guidelines (Universal Best-Seller Architecture):**
+1. **Title & Description Guidelines (Dynamic Best-Seller Architecture):**
    - **Title:** Create a highly searchable, commercially appealing video title around ${titleLength} characters (target 80-150 characters, maximum 160 characters).
-     * STRUCTURE: Use a multi-sentence compound structure separated ONLY by periods (.) — DO NOT use any commas in the title (Adobe Stock CSV strictly forbids commas in title).
+     * STRUCTURE & PUNCTUATION: Use 1 or 2 natural, grammatically complete sentences separated ONLY by periods (.) — STRICTLY NO COMMAS in the title (Adobe Stock CSV strictly forbids commas in title).
      * FRONT-LOADING: Put the most vital 3-4 words first (primary subject + dynamic action, e.g., 'Business team meeting in modern office.').
-     * CONTEXT & SYNONYMS: In the second clause, include camera movement, lighting, and natural synonyms (e.g., 'Corporate colleagues collaborating around conference table in 4k slow motion.').
-     * COMMERCIAL INTENT: End with commercial use-case or format intent (e.g., 'Concept for enterprise leadership, teamwork and presentation background.').
+     * MOTION & CONTEXT: Weave in camera movement, lighting, and natural synonyms smoothly across the sentence(s).
+     * DYNAMIC COMMERCIAL CLOSERS (STRICT ANTI-REPETITION RULE): DO NOT repeatedly write 'Concept for...'. Use diverse commercial framings tailored to the footage:
+       - Representation: "Representing teamwork and modern corporate leadership."
+       - Utility & Media: "Ideal for business presentation and documentary broadcast.", "Suitable for marketing campaign and website background."
+       - Spatial & Compositional: "Cinematic 4k slow motion footage with copy space for text."
+       - Direct action flow: Or simply describe the complete progression without any forced concept phrase if the action is self-explanatory.
      * CAPITALIZATION: Capitalize only the first word of each sentence and proper nouns. Avoid brand or trademark names.
    - **Description:** Write a factual, detailed description around ${descriptionLength} words detailing the complete progression of action from beginning to end, camera motion (e.g., static, panning, tracking, aerial, slow motion), lighting, and setting.
    - **Keyword Best Practices (Title-Keyword Convergence):** Generate a rich list of exactly ${keywordsCount} comma-separated, SEO-friendly keywords without stopping early.
@@ -103,14 +107,20 @@ Strict JSON format: {"title": "...", "description": "...", "keywords": "...", "c
 **File Type:** ${fileTypeSpec}.
 
 **Instructions:**
-1. **Title Guidelines (Universal Best-Seller Architecture):**
+1. **Title Guidelines (Dynamic Universal Best-Seller Architecture):**
    - **Length:** Generate a title around ${titleLength} characters (optimal range 90-150 characters, maximum 160 characters).
-   - **STRICT NO COMMAS:** DO NOT use any commas in the title. Adobe Stock CSV strictly forbids commas in the title field. Separate clauses or phrases using periods (.) only.
-   - **Front-Loading (Crucial for Search Algorithm):** The very first 3-4 words MUST be the primary visual subject and core keyword phrase (e.g., "Fresh organic sushi roll", "Modern data center server rack", "Portrait of confident doctor").
-   - **Multi-Sentence Compound Structure:** Compose 2 to 3 concise, grammatically complete phrases separated by periods (.):
-     * Sentence 1 (Core Subject & Context): [Front-loaded core subject] + [Primary action, state, or setting].
-     * Sentence 2 (Synonym Stacking & Aesthetic Attributes): Include 1-2 natural, high-search-volume synonyms, mood, lighting, or style details (e.g., "Japanese cuisine dish with raw salmon and avocado.", "Futuristic cloud computing infrastructure with neon blue lighting.").
-     * Sentence 3 (Commercial Intent & Buyer Use-Case): Conclude with a practical commercial application or media utility (e.g., "Concept for restaurant menu banner and food blog.", "Generative AI illustration for cyber security background and website banner with copy space.").
+   - **STRICT NO COMMAS:** DO NOT use any commas in the title. Adobe Stock CSV strictly forbids commas in the title field. Separate clauses or sentences using periods (.) only.
+   - **Front-Loading (Algorithmic Priority):** The very first 3-4 words MUST be the primary visual subject and core keyword phrase (e.g., "Fresh organic sushi roll", "Modern data center server rack", "Portrait of confident doctor", "Solar farm wind turbines").
+   - **Flexible Organic Sentence Flow:** Compose 1 to 2 natural, expressive sentences separated by periods (.):
+     * Sentence 1 (Core Subject & Primary Action/State): [Front-loaded core subject] + [Primary action, state, or setting].
+     * Sentence 2 (Context, Synonyms & Intent): Natural high-search-volume synonyms, mood, lighting, or buyer intent.
+   - **CRITICAL ANTI-REPETITION RULE (Diversified Commercial Intent):**
+     * DO NOT lock into a repetitive formula! NEVER begin the last phrase with "Concept for..." on every single asset.
+     * Choose the most natural framing from these diverse options:
+       1. **Representation & Metaphor:** "Representing [modern teamwork / healthy living / sustainable growth]...", "A representation of [corporate innovation]...", "Symbolizing [freedom / success / peacefulness]..."
+       2. **Commercial Utility & Format:** "Ideal for [website banner / restaurant menu / editorial article]...", "Designed for [marketing brochure / social media advertising]...", "Perfect for [fintech promotion / healthcare campaign]..."
+       3. **Composition & Spatial Intent:** "...with copy space for advertising text.", "...isolated on white background with clipping path.", "...flat lay overhead view."
+       4. **Pure Organic Visual Flow (No Concept Needed):** For self-evident subjects like food, nature, landscapes, animals, vectors, and portraits, you DO NOT need any concept phrase at all! A vivid, detail-rich description with natural synonyms is often the highest-converting title (e.g., "Artisanal sourdough bread loaf on rustic wooden cutting board with scattered flour.").
    - **Capitalization & Brand Safety:** Capitalize only the first letter of each sentence and proper nouns. Strictly avoid trademarked names, logos, or celebrity names.
 
 2. **Description Guidelines:**
@@ -142,7 +152,7 @@ Provide the output in strict JSON format. Do not include any text before or afte
 
 Example JSON output:
 {
-  "title": "Minimalist modern desk setup with laptop. Clean home office workspace with coffee cup and houseplant. Concept for remote work and freelance productivity with copy space.",
+  "title": "Minimalist modern desk setup with laptop. Clean home office workspace with potted plant and coffee cup representing remote work productivity.",
   "description": "Aerial view of a clean modern workplace with laptop computer, ceramic coffee mug, notebook, and succulent potted plant on an oak wooden table in natural morning sunlight.",
   "keywords": "desk, laptop, home office, workspace, computer, modern desk, remote work, freelance, productivity, table, coffee cup, houseplant, wooden desk, copy space, minimal, overhead view, business, technology",
   "category": "19",
