@@ -101,7 +101,7 @@ export async function checkBridgeHealth(targetUrl?: string): Promise<BridgeHealt
 /**
  * Mengembalikan URL endpoint FTP yang efektif (mengarahkan ke bridge atau same-origin).
  */
-export function getFtpApiUrl(action: 'test' | 'upload', status: BridgeHealthStatus): string {
+export function getFtpApiUrl(action: 'test' | 'upload' | 'disconnect-all', status: BridgeHealthStatus): string {
   if (status.endpointType === 'local-bridge' && status.baseUrl) {
     return `${status.baseUrl}/api/ftp/${action}`;
   }

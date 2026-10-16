@@ -1,43 +1,41 @@
 # Current Project State
 
 ## Last Updated
-2026-10-16 02:08
+2026-10-16 17:22
 
 ## Current Objective
-Optimasi kecepatan dan arsitektur pengunggahan file massal FTP/SFTP pada Local Bridge (`ftp-bridge/server.mjs`) dan antrean frontend (`components/FtpQueueView.tsx`) dengan persistent connection, controlled concurrency (2–3 parallel streams), dan pipelining.
+Penyempurnaan performa batch upload FTP/SFTP dengan Keep-Alive Session Pool, Controlled Multi-Worker Concurrency, dan validasi operasional lintas agensi microstock.
 
 ## Completed Recently
-- **Refinement Visual Concept Prompt Agent (VCPA)**:
-  - Opsi engine Google Flow & Nano Banana + opsi rasio bebas/tanpa rasio.
-  - Section setting foldable/collapsible dan pembersihan tombol yang tidak perlu di Mode 1.
-  - Penyelarasan penuh model `auto` di Mode 1 agar mendukung seluruh model vision kustom pada proxy GAS.
-  - Build dan deployment sukses ke Cloudflare Pages (`https://meta-gen-gue.pages.dev`).
-- **Analisis Bottleneck Upload FTP**:
-  - Mengidentifikasi pemborosan waktu handshake/auth per-file (overhead 1.5–3 detik/file) dan antrean sekuensial tunggal.
-  - Merancang arsitektur optimasi Session Pool & Parallel Workers.
+- **Optimasi Batch Upload FTP/SFTP**:
+  - Implementasi **Persistent Connection Session Pool** di `ftp-bridge/server.mjs`:
+    - Keep-Alive sesi aktif SFTP (`ssh2-sftp-client`) & FTPS (`basic-ftp`) tanpa handshake berulang.
+    - Slot-based Concurrency dengan `SlotMutex` untuk mencegah konflik transfer pada slot yang sama.
+    - Idle timer TTL (60 detik) untuk pembersihan otomatis sesi yang tidak aktif.
+    - Penanganan auto-reconnect dan retry jika terjadi koneksi terputus/stale di tengah jalan.
+    - Endpoint pembersih `/api/ftp/disconnect-all` dan penanganan shutdown `SIGINT`/`SIGTERM`.
+  - Implementasi **Controlled Concurrency & Multi-Worker** di `components/FtpQueueView.tsx`:
+    - Worker pool paralel (1x Serial, 2x Optimal, 3x Turbo) dengan selektor UI di toolbar.
+    - Pembatalan serentak melalui `activeAbortControllersRef` (Map per file) dan update badge aktif.
+    - Pemangkasan inter-file pacing delay dari 800ms menjadi 50ms per worker.
+    - Sinkronisasi tipe endpoint `disconnect-all` di `lib/ftp/bridge-client.ts`.
+  - Verifikasi: 77 unit tests lolos hijau (`pnpm test:run`), TypeScript check lolos (`tsc --noEmit`).
 
 ## Currently Working On
-- Persiapan implementasi optimasi kecepatan batch upload FTP untuk sesi kerja berikutnya.
+- Benchmarking & pengujian operasional upload riil ke akun microstock (Adobe Stock / Shutterstock).
 
 ## Remaining Tasks
-- [ ] **Persistent Session Pool di Bridge**: Perbarui `ftp-bridge/server.mjs` agar mempertahankan sesi aktif (keep-alive) selama antrean berjalan dan tidak disconnect per file.
-- [ ] **Controlled Parallel Concurrency di UI**: Tambahkan multi-worker upload (2–3 stream paralel) di `components/FtpQueueView.tsx` dengan selektor concurrency.
-- [ ] **Metadata Pipelining**: Lakukan pre-buffering penyematan metadata sebelum file berikutnya di-upload.
-- [ ] **Benchmarking**: Uji perbandingan kecepatan upload 10–20 file sebelum vs sesudah optimasi.
+- [x] **Persistent Session Pool di Bridge**: Selesai diimplementasikan di `ftp-bridge/server.mjs`.
+- [x] **Controlled Parallel Concurrency di UI**: Selesai diimplementasikan di `components/FtpQueueView.tsx`.
+- [ ] **Benchmarking Riil**: Uji kecepatan batch upload 10–20 file ke server agensi dengan perbandingan profil 1x vs 2x.
 
 ## Blockers / Errors
-- None. Seluruh test lolos, build Cloudflare Pages hijau, dan server lokal berjalan normal.
+- None. Seluruh test lolos, lint bersih, dan server bridge lokal v1.1.0 siap dijalankan.
 
 ## Files Recently Changed
-- `components/PromptGeneratorView.tsx`
-- `lib/prompt-agent/client.ts`
-- `lib/prompt-agent/engine.ts`
-- `lib/prompt-agent/types.ts`
-- `app/api/generate/prompt-agent/route.ts`
-- `functions/api/generate/prompt-agent.ts`
+- `ftp-bridge/server.mjs`
+- `components/FtpQueueView.tsx`
+- `lib/ftp/bridge-client.ts`
 
 ## Next Recommended Step
-Buka dan mulai sesi kerja berikutnya dengan mengimplementasikan **Session Reuse / Keep-Alive** pada `ftp-bridge/server.mjs`, lalu hubungkan dengan **Concurrency Controller** di `components/FtpQueueView.tsx`.
-
-## Notes for Next Session
-Fokus besok adalah memotong waktu upload FTP hingga 60–70% lebih cepat dengan mengubah loop sekuensial menjadi 2 worker paralel dan menjaga koneksi SSH/FTPS tetap terbuka (keep-alive) selama batch berlangsung.
+Lakukan uji coba batch upload langsung ke server agensi atau uji coba simulasi menggunakan `start-ftp-bridge.bat` dan periksa log terminal bridge untuk melihat aktivasi `SFTP-REUSE` dan `Slot #0 / Slot #1`.

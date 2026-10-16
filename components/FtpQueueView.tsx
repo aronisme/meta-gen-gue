@@ -97,8 +97,31 @@ export function FtpQueueView({
   const [isUploading, setIsUploading] = useState(false);
   const isUploadingRef = useRef(false);
   const abortUploadRef = useRef(false);
-  const activeAbortControllerRef = useRef<AbortController | null>(null);
+  const activeAbortControllersRef = useRef<Map<string, AbortController>>(new Map());
+  const activeFilenamesRef = useRef<Set<string>>(new Set());
   const [currentUploadingFilename, setCurrentUploadingFilename] = useState<string>('');
+
+  // Concurrency state (1 | 2 | 3 paralel stream)
+  const [concurrency, setConcurrency] = useState<number>(() => {
+    if (typeof window !== 'undefined') {
+      try {
+        const saved = localStorage.getItem('metagen_ftp_concurrency_v1');
+        if (saved) {
+          const parsed = parseInt(saved, 10);
+          if ([1, 2, 3].includes(parsed)) return parsed;
+        }
+      } catch {}
+    }
+    return 2; // Default 2x (Optimal)
+  });
+
+  const handleConcurrencyChange = (val: string) => {
+    const num = parseInt(val, 10) || 2;
+    setConcurrency(num);
+    try {
+      localStorage.setItem('metagen_ftp_concurrency_v1', String(num));
+    } catch {}
+  };
 
   const [uploadStats, setUploadStats] = useState<{
     speed: string;
@@ -389,18 +412,26 @@ export function FtpQueueView({
   // Upload cancellation handler
   const handleCancelUpload = () => {
     abortUploadRef.current = true;
-    if (activeAbortControllerRef.current) {
+    activeAbortControllersRef.current.forEach((controller) => {
       try {
-        activeAbortControllerRef.current.abort();
+        controller.abort();
       } catch {}
-    }
+    });
+    activeAbortControllersRef.current.clear();
+    activeFilenamesRef.current.clear();
     setIsUploading(false);
     isUploadingRef.current = false;
     setCurrentUploadingFilename('');
     toast.info('Unggahan dihentikan oleh pengguna.');
+
+    // Fire and forget pembersihan sesi bridge jika diperlukan
+    try {
+      const disconnectUrl = getFtpApiUrl('disconnect-all', bridgeStatus);
+      void fetch(disconnectUrl, { method: 'POST' }).catch(() => {});
+    } catch {}
   };
 
-  // Upload handler
+  // Upload handler dengan Controlled Concurrency & Session Keep-Alive
   const handleStartUpload = async () => {
     if (!selectedProfile) {
       toast.error('Pilih akun FTP tujuan terlebih dahulu.');
@@ -446,6 +477,8 @@ export function FtpQueueView({
     setIsUploading(true);
     isUploadingRef.current = true;
     abortUploadRef.current = false;
+    activeAbortControllersRef.current.clear();
+    activeFilenamesRef.current.clear();
 
     const totalBytes = readyItems.reduce((acc, it) => acc + it.fileSize, 0);
     setUploadStats({
@@ -457,14 +490,24 @@ export function FtpQueueView({
 
     const startTime = Date.now();
     let cumulativeBytes = 0;
+    let completedCount = 0;
+    let queueCursor = 0;
 
-    for (let i = 0; i < targetItems.length; i++) {
-      if (abortUploadRef.current) {
-        break;
+    // Helper untuk memperbarui status upload aktif
+    const updateActiveFilenames = () => {
+      const list = Array.from(activeFilenamesRef.current);
+      if (list.length === 0) {
+        setCurrentUploadingFilename('');
+      } else if (list.length === 1) {
+        setCurrentUploadingFilename(list[0]);
+      } else {
+        setCurrentUploadingFilename(`${list[0]} (+${list.length - 1} paralel)`);
       }
+    };
 
-      const qItem = targetItems[i];
-      setCurrentUploadingFilename(qItem.filename);
+    // Fungsi untuk memproses satu item antrean di slot worker tertentu
+    const processItem = async (qItem: LocalQueueItem, slotIndex: number) => {
+      if (abortUploadRef.current) return;
 
       // Pre-flight check terhadap ledger live
       if (qItem.file && selectedProfile) {
@@ -494,7 +537,7 @@ export function FtpQueueView({
 
             if (skipDuplicates) {
               toast.warning(`File "${qItem.filename}" dilewati karena sudah ada di ${selectedProfile.accountLabel}.`);
-              continue;
+              return;
             }
           }
         } catch (err) {
@@ -510,7 +553,7 @@ export function FtpQueueView({
               : item
           )
         );
-        continue;
+        return;
       }
 
       if (!qItem.hasValidMeta) {
@@ -521,15 +564,18 @@ export function FtpQueueView({
               : item
           )
         );
-        continue;
+        return;
       }
+
+      activeFilenamesRef.current.add(qItem.filename);
+      updateActiveFilenames();
 
       setQueue((prev) =>
         prev.map((item) => (item.id === qItem.id ? { ...item, status: 'uploading', progress: 30 } : item))
       );
 
       const abortController = new AbortController();
-      activeAbortControllerRef.current = abortController;
+      activeAbortControllersRef.current.set(qItem.id, abortController);
 
       try {
         const formData = new FormData();
@@ -543,6 +589,7 @@ export function FtpQueueView({
             username: selectedProfile.username,
             password: selectedProfile.password,
             agencyId: selectedProfile.agencyId,
+            slotIndex,
           })
         );
         formData.append('remoteFilename', qItem.filename);
@@ -576,6 +623,7 @@ export function FtpQueueView({
         }
 
         cumulativeBytes += qItem.fileSize;
+        completedCount++;
         const elapsedSecs = Math.max(0.5, (Date.now() - startTime) / 1000);
         const speedKB = cumulativeBytes / 1024 / elapsedSecs;
         const speedStr = speedKB > 1024 ? `${(speedKB / 1024).toFixed(1)} MB/s` : `${Math.round(speedKB)} KB/s`;
@@ -584,7 +632,7 @@ export function FtpQueueView({
           ...prev,
           speed: speedStr,
           bytesUploaded: cumulativeBytes,
-          completedCount: prev.completedCount + 1,
+          completedCount,
         }));
 
         setQueue((prev) =>
@@ -617,25 +665,54 @@ export function FtpQueueView({
           setQueue((prev) =>
             prev.map((item) => (item.id === qItem.id ? { ...item, status: 'pending', progress: 0 } : item))
           );
-          break;
+          return;
         }
         const msg = err instanceof Error ? err.message : String(err);
         setQueue((prev) =>
           prev.map((item) => (item.id === qItem.id ? { ...item, status: 'error', error: msg } : item))
         );
       } finally {
-        activeAbortControllerRef.current = null;
+        activeAbortControllersRef.current.delete(qItem.id);
+        activeFilenamesRef.current.delete(qItem.filename);
+        updateActiveFilenames();
       }
+    };
 
-      // Pacing delay (800ms) antar file agar server SFTP agensi (Adobe Stock) tidak me-reset koneksi (ECONNRESET)
-      if (i < targetItems.length - 1 && !abortUploadRef.current) {
-        await new Promise((res) => setTimeout(res, 800));
+    // Worker loop runner
+    const runWorker = async (slotIndex: number) => {
+      while (!abortUploadRef.current) {
+        let currentIndex = -1;
+        if (queueCursor < targetItems.length) {
+          currentIndex = queueCursor;
+          queueCursor++;
+        } else {
+          break;
+        }
+
+        const qItem = targetItems[currentIndex];
+        if (!qItem) break;
+
+        await processItem(qItem, slotIndex);
+
+        // Pacing delay ringan (50ms) per worker agar event loop tetap responsif
+        if (!abortUploadRef.current && queueCursor < targetItems.length) {
+          await new Promise((res) => setTimeout(res, 50));
+        }
       }
-    }
+    };
+
+    // Jalankan worker pool secara paralel sesuai konfigurasi concurrency (1, 2, atau 3)
+    const workerCount = Math.min(concurrency, targetItems.length);
+    await Promise.all(
+      Array.from({ length: workerCount }, (_, i) => runWorker(i))
+    );
 
     setIsUploading(false);
     isUploadingRef.current = false;
     setCurrentUploadingFilename('');
+    activeAbortControllersRef.current.clear();
+    activeFilenamesRef.current.clear();
+
     if (!abortUploadRef.current) {
       toast.success('Proses batch upload selesai!');
     }
@@ -928,6 +1005,34 @@ export function FtpQueueView({
                   </span>
                 </span>
               </label>
+
+              {/* Concurrency Selector */}
+              <div
+                className="flex items-center gap-1.5 text-xs font-bold text-[#2c1810]"
+                title="Jumlah koneksi paralel yang mengunggah secara bersamaan (2x disarankan untuk Adobe Stock & Shutterstock)"
+              >
+                <span className="text-[#6b5344] whitespace-nowrap">Stream:</span>
+                <Select
+                  value={String(concurrency)}
+                  onValueChange={handleConcurrencyChange}
+                  disabled={isUploading}
+                >
+                  <SelectTrigger className="h-8 w-28 sm:w-32 bg-white border-2 border-[#2c1810] font-bold text-xs shadow-[1px_1px_0_#2c1810]">
+                    <SelectValue />
+                  </SelectTrigger>
+                  <SelectContent className="bg-white border-2 border-[#2c1810] shadow-[3px_3px_0_#2c1810]">
+                    <SelectItem value="1" className="text-xs font-bold cursor-pointer">
+                      1x (Serial)
+                    </SelectItem>
+                    <SelectItem value="2" className="text-xs font-bold cursor-pointer">
+                      2x (Optimal)
+                    </SelectItem>
+                    <SelectItem value="3" className="text-xs font-bold cursor-pointer">
+                      3x (Turbo)
+                    </SelectItem>
+                  </SelectContent>
+                </Select>
+              </div>
 
               {/* Upload Stats / Speed */}
               {isUploading && (

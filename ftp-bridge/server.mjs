@@ -170,9 +170,81 @@ async function testFtpConnection(profile) {
 }
 
 /**
- * Mengunggah file buffer ke FTP/SFTP
+ * Simple Mutex Lock untuk mencegah bentrok transfer paralel di slot koneksi yang sama.
  */
-async function uploadFileToFtp(profile, buffer, remoteFilename) {
+class SlotMutex {
+  constructor() {
+    this._queue = [];
+    this._locked = false;
+  }
+  async acquire() {
+    if (!this._locked) {
+      this._locked = true;
+      return () => this._release();
+    }
+    return new Promise((resolve) => {
+      this._queue.push(resolve);
+    }).then(() => () => this._release());
+  }
+  _release() {
+    if (this._queue.length > 0) {
+      const next = this._queue.shift();
+      next();
+    } else {
+      this._locked = false;
+    }
+  }
+}
+
+/**
+ * Connection Session Pool untuk Keep-Alive SFTP & FTPS
+ */
+const sessionPool = new Map();
+const IDLE_TIMEOUT_MS = 60000; // 60 detik idle timeout sebelum koneksi ditutup otomatis
+
+function getSessionPoolKey(profile, slotIndex = 0) {
+  const host = sanitizeFtpHost(profile.host);
+  const port = Number(profile.port) || (profile.protocol === 'sftp' ? 22 : 21);
+  const protocol = profile.protocol || 'sftp';
+  const username = (profile.username || '').trim();
+  return `${protocol}://${username}@${host}:${port}#slot_${slotIndex}`;
+}
+
+async function closePoolEntry(poolKey) {
+  const entry = sessionPool.get(poolKey);
+  if (!entry) return;
+  if (entry.idleTimer) {
+    clearTimeout(entry.idleTimer);
+    entry.idleTimer = null;
+  }
+  entry.connected = false;
+  const client = entry.client;
+  entry.client = null;
+  sessionPool.delete(poolKey);
+
+  if (client) {
+    try {
+      if (entry.protocol === 'sftp') {
+        await client.end();
+      } else {
+        client.close();
+      }
+    } catch {}
+  }
+  log('POOL-CLOSE', `Sesi koneksi ${poolKey} ditutup (idle/cleanup).`, c.gray);
+}
+
+async function closeAllPoolSessions() {
+  const keys = Array.from(sessionPool.keys());
+  for (const k of keys) {
+    await closePoolEntry(k);
+  }
+}
+
+/**
+ * Mengunggah file buffer ke FTP/SFTP dengan dukungan Persistent Session Pool & Concurrency Slot
+ */
+async function uploadFileToFtp(profile, buffer, remoteFilename, slotIndex = 0) {
   const start = Date.now();
   const host = sanitizeFtpHost(profile.host);
   const port = Number(profile.port) || (profile.protocol === 'sftp' ? 22 : 21);
@@ -186,127 +258,265 @@ async function uploadFileToFtp(profile, buffer, remoteFilename) {
     host
   );
 
-  if (protocol === 'sftp') {
-    const Client = (await import('ssh2-sftp-client')).default;
-    const maxRetries = 2;
-    let lastErr = null;
-
-    const sftpConfig = {
-      host,
-      port,
-      username,
-      password,
-      readyTimeout: 40000,
-      retries: 2,
-      retry_factor: 2,
-      retry_minTimeout: 2000,
-      keepaliveInterval: 10000,
-      keepaliveCountMax: 5,
-      algorithms: {
-        serverHostKey: [
-          'ssh-ed25519',
-          'ecdsa-sha2-nistp256',
-          'ecdsa-sha2-nistp384',
-          'ecdsa-sha2-nistp521',
-          'rsa-sha2-512',
-          'rsa-sha2-256',
-          'ssh-rsa',
-        ],
-      },
+  const poolKey = getSessionPoolKey(profile, slotIndex);
+  let entry = sessionPool.get(poolKey);
+  if (!entry) {
+    entry = {
+      mutex: new SlotMutex(),
+      client: null,
+      protocol,
+      connected: false,
+      idleTimer: null,
+      createdDirs: new Set(),
     };
+    sessionPool.set(poolKey, entry);
+  }
 
-    for (let attempt = 1; attempt <= maxRetries; attempt++) {
-      const sftp = new Client();
-      try {
-        await sftp.connect(sftpConfig);
+  // Lindungi eksekusi dengan slot mutex
+  const releaseLock = await entry.mutex.acquire();
 
-        if (remoteDir !== '/') {
-          try {
-            await sftp.mkdir(remoteDir, true);
-          } catch {
-            // Folder mungkin sudah ada
-          }
-        }
+  // Reset idle timer saat ada upload aktif
+  if (entry.idleTimer) {
+    clearTimeout(entry.idleTimer);
+    entry.idleTimer = null;
+  }
 
-        await sftp.put(buffer, remotePath);
-        await sftp.end();
-
-        const durationMs = Date.now() - start;
-        return {
-          ok: true,
-          remotePath,
-          bytesUploaded: buffer.length,
-          durationMs,
-        };
-      } catch (err) {
-        try { await sftp.end(); } catch {}
-        lastErr = err;
-        const msg = err instanceof Error ? err.message : String(err);
-        const isTransient = /ECONNRESET|ETIMEDOUT|Connection lost|handshake/i.test(msg);
-
-        if (attempt < maxRetries && isTransient) {
-          log('SFTP-RETRY', `Koneksi SFTP terputus (${msg}). Mencoba ulang otomatis (${attempt}/${maxRetries}) setelah jeda 2.5 detik...`, c.yellow);
-          await new Promise((res) => setTimeout(res, 2500));
-          continue;
-        }
-        break;
-      }
-    }
-
-    const msg = lastErr instanceof Error ? lastErr.message : String(lastErr);
-    return {
-      ok: false,
-      remotePath,
-      bytesUploaded: 0,
-      durationMs: Date.now() - start,
-      error: `SFTP upload gagal: ${msg}`,
-    };
-  } else {
-    const ftp = await import('basic-ftp');
-    const client = new ftp.Client(35000);
-
-    try {
-      await client.access({
+  try {
+    if (protocol === 'sftp') {
+      const Client = (await import('ssh2-sftp-client')).default;
+      const sftpConfig = {
         host,
         port,
-        user: username,
+        username,
         password,
-        secure: protocol === 'ftps',
-        secureOptions: { rejectUnauthorized: false },
-      });
+        readyTimeout: 40000,
+        retries: 2,
+        retry_factor: 2,
+        retry_minTimeout: 2000,
+        keepaliveInterval: 10000,
+        keepaliveCountMax: 5,
+        algorithms: {
+          serverHostKey: [
+            'ssh-ed25519',
+            'ecdsa-sha2-nistp256',
+            'ecdsa-sha2-nistp384',
+            'ecdsa-sha2-nistp521',
+            'rsa-sha2-512',
+            'rsa-sha2-256',
+            'ssh-rsa',
+          ],
+        },
+      };
 
-      if (remoteDir !== '/') {
+      const maxAttempts = 2;
+      let lastErr = null;
+
+      for (let attempt = 1; attempt <= maxAttempts; attempt++) {
         try {
-          await client.ensureDir(remoteDir);
-        } catch (dirErr) {
-          try {
-            await client.cd(remoteDir);
-          } catch {}
+          // Buka koneksi baru jika belum terhubung atau terputus
+          if (!entry.client || !entry.connected) {
+            log(
+              'SFTP-CONN',
+              `[Slot #${slotIndex}] Membuka sesi SFTP baru ke ${host}:${port}...`,
+              c.cyan
+            );
+            const client = new Client();
+            client.on('error', (err) => {
+              log('SFTP-ERR', `[Slot #${slotIndex}] Socket error: ${err.message}`, c.yellow);
+              entry.connected = false;
+            });
+            client.on('end', () => {
+              entry.connected = false;
+            });
+            client.on('close', () => {
+              entry.connected = false;
+            });
+
+            await client.connect(sftpConfig);
+            entry.client = client;
+            entry.connected = true;
+            entry.createdDirs = new Set();
+            log('SFTP-CONN OK', `[Slot #${slotIndex}] Sesi SFTP terotentikasi & siap digunakan.`, c.green);
+          } else {
+            log(
+              'SFTP-REUSE',
+              `[Slot #${slotIndex}] Menggunakan kembali sesi aktif SFTP (hemat ~1.5s handshake)`,
+              c.green
+            );
+          }
+
+          if (remoteDir !== '/' && !entry.createdDirs.has(remoteDir)) {
+            try {
+              await entry.client.mkdir(remoteDir, true);
+              entry.createdDirs.add(remoteDir);
+            } catch {
+              entry.createdDirs.add(remoteDir);
+            }
+          }
+
+          // Transfer data buffer ke remote path dengan stream buffer teroptimasi 64KB
+          await entry.client.put(buffer, remotePath, {
+            writeStreamOptions: {
+              highWaterMark: 64 * 1024,
+            },
+          });
+
+          // Jadwalkan idle timeout (60 detik) untuk menutup koneksi jika tidak ada aktivitas lanjutan
+          entry.idleTimer = setTimeout(() => {
+            void closePoolEntry(poolKey);
+          }, IDLE_TIMEOUT_MS);
+
+          const durationMs = Date.now() - start;
+          return {
+            ok: true,
+            remotePath,
+            bytesUploaded: buffer.length,
+            durationMs,
+            slotIndex,
+          };
+        } catch (err) {
+          lastErr = err;
+          const msg = err instanceof Error ? err.message : String(err);
+          log(
+            'SFTP-ERR',
+            `[Slot #${slotIndex}] Kesalahan upload (attempt ${attempt}/${maxAttempts}): ${msg}`,
+            c.yellow
+          );
+
+          // Bersihkan client yang rusak
+          if (entry.client) {
+            try {
+              await entry.client.end();
+            } catch {}
+            entry.client = null;
+          }
+          entry.connected = false;
+
+          if (attempt < maxAttempts) {
+            log(
+              'SFTP-RETRY',
+              `[Slot #${slotIndex}] Mencoba menghubungkan ulang otomatis...`,
+              c.yellow
+            );
+            await new Promise((res) => setTimeout(res, 1000));
+            continue;
+          }
         }
       }
 
-      const stream = Readable.from(buffer);
-      await client.uploadFrom(stream, cleanFilename);
-      client.close();
-
-      const durationMs = Date.now() - start;
+      const msg = lastErr instanceof Error ? lastErr.message : String(lastErr);
       return {
-        ok: true,
+        ok: false,
         remotePath,
-        bytesUploaded: buffer.length,
-        durationMs,
+        bytesUploaded: 0,
+        durationMs: Date.now() - start,
+        error: `SFTP upload gagal: ${msg}`,
+        slotIndex,
       };
-    } catch (err) {
-      client.close();
-      const msg = err instanceof Error ? err.message : String(err);
+    } else {
+      // FTP / FTPS via basic-ftp
+      const ftp = await import('basic-ftp');
+      const maxAttempts = 2;
+      let lastErr = null;
+
+      for (let attempt = 1; attempt <= maxAttempts; attempt++) {
+        try {
+          if (!entry.client || entry.client.closed || !entry.connected) {
+            log(
+              'FTP-CONN',
+              `[Slot #${slotIndex}] Membuka sesi ${protocol.toUpperCase()} baru ke ${host}:${port}...`,
+              c.cyan
+            );
+            const client = new ftp.Client(35000);
+            await client.access({
+              host,
+              port,
+              user: username,
+              password,
+              secure: protocol === 'ftps',
+              secureOptions: { rejectUnauthorized: false },
+            });
+            entry.client = client;
+            entry.connected = true;
+            entry.createdDirs = new Set();
+            log('FTP-CONN OK', `[Slot #${slotIndex}] Sesi ${protocol.toUpperCase()} terhubung.`, c.green);
+          } else {
+            log(
+              'FTP-REUSE',
+              `[Slot #${slotIndex}] Menggunakan kembali sesi aktif ${protocol.toUpperCase()} (hemat ~1.5s)`,
+              c.green
+            );
+          }
+
+          if (remoteDir !== '/' && !entry.createdDirs.has(remoteDir)) {
+            try {
+              await entry.client.ensureDir(remoteDir);
+              entry.createdDirs.add(remoteDir);
+            } catch {
+              try {
+                await entry.client.cd(remoteDir);
+              } catch {}
+              entry.createdDirs.add(remoteDir);
+            }
+          }
+
+          const stream = Readable.from(buffer);
+          await entry.client.uploadFrom(stream, cleanFilename);
+
+          // Jadwalkan idle timeout
+          entry.idleTimer = setTimeout(() => {
+            void closePoolEntry(poolKey);
+          }, IDLE_TIMEOUT_MS);
+
+          const durationMs = Date.now() - start;
+          return {
+            ok: true,
+            remotePath,
+            bytesUploaded: buffer.length,
+            durationMs,
+            slotIndex,
+          };
+        } catch (err) {
+          lastErr = err;
+          const msg = err instanceof Error ? err.message : String(err);
+          log(
+            'FTP-ERR',
+            `[Slot #${slotIndex}] Kesalahan ${protocol.toUpperCase()} (attempt ${attempt}/${maxAttempts}): ${msg}`,
+            c.yellow
+          );
+
+          if (entry.client) {
+            try {
+              entry.client.close();
+            } catch {}
+            entry.client = null;
+          }
+          entry.connected = false;
+
+          if (attempt < maxAttempts) {
+            log(
+              'FTP-RETRY',
+              `[Slot #${slotIndex}] Mencoba menghubungkan ulang ${protocol.toUpperCase()}...`,
+              c.yellow
+            );
+            await new Promise((res) => setTimeout(res, 1000));
+            continue;
+          }
+        }
+      }
+
+      const msg = lastErr instanceof Error ? lastErr.message : String(lastErr);
       return {
         ok: false,
         remotePath,
         bytesUploaded: 0,
         durationMs: Date.now() - start,
         error: `${protocol.toUpperCase()} upload gagal: ${msg}`,
+        slotIndex,
       };
     }
+  } finally {
+    releaseLock();
   }
 }
 
@@ -422,6 +632,21 @@ const server = http.createServer(async (req, res) => {
     return;
   }
 
+  // 2.5 Disconnect All Sessions endpoint (Membersihkan sesi aktif di pool saat antrean selesai/dibatalkan)
+  if (req.method === 'POST' && (pathname === '/api/ftp/disconnect-all' || pathname === '/disconnect-all')) {
+    try {
+      await closeAllPoolSessions();
+      log('POOL', 'Semua sesi koneksi pool FTP/SFTP berhasil dibersihkan.', c.green);
+      res.writeHead(200, { 'Content-Type': 'application/json' });
+      res.end(JSON.stringify({ ok: true, message: 'Semua koneksi sesi pool berhasil ditutup.' }));
+    } catch (err) {
+      const msg = err instanceof Error ? err.message : String(err);
+      res.writeHead(500, { 'Content-Type': 'application/json' });
+      res.end(JSON.stringify({ ok: false, error: msg }));
+    }
+    return;
+  }
+
   // 3. Upload File endpoint
   if (req.method === 'POST' && (pathname === '/api/ftp/upload' || pathname === '/upload')) {
     try {
@@ -461,6 +686,8 @@ const server = http.createServer(async (req, res) => {
         return;
       }
 
+      const slotIndex = Number(config.slotIndex) || 0;
+
       const arrayBuf = await file.arrayBuffer();
       let buffer = Buffer.from(arrayBuf);
 
@@ -478,19 +705,19 @@ const server = http.createServer(async (req, res) => {
             embeddedFormat = ext.replace('.', '').toUpperCase();
             log(
               'EMBED',
-              `Metadata disematkan ke ${remoteFilename} (${embeddedFormat}): "${(metadata.title || '').slice(0, 30)}..."`,
+              `[Slot #${slotIndex}] Metadata disematkan ke ${remoteFilename} (${embeddedFormat}): "${(metadata.title || '').slice(0, 30)}..."`,
               c.magenta
             );
           }
         } catch (embedErr) {
-          log('EMBED WARN', `Gagal menyematkan metadata, mengunggah file original: ${embedErr}`, c.yellow);
+          log('EMBED WARN', `[Slot #${slotIndex}] Gagal menyematkan metadata, mengunggah file original: ${embedErr}`, c.yellow);
         }
       }
 
       const sizeMb = (buffer.length / (1024 * 1024)).toFixed(1);
       log(
         'UPLOAD',
-        `Mengunggah "${remoteFilename}" (${sizeMb} MB) ke ${config.protocol || 'sftp'}://${config.host}:${config.port || 22}...`,
+        `[Slot #${slotIndex}] Mengunggah "${remoteFilename}" (${sizeMb} MB) ke ${config.protocol || 'sftp'}://${config.host}:${config.port || 22}...`,
         c.cyan
       );
 
@@ -504,11 +731,12 @@ const server = http.createServer(async (req, res) => {
           agencyId: config.agencyId,
         },
         buffer,
-        remoteFilename
+        remoteFilename,
+        slotIndex
       );
 
       if (!result.ok) {
-        log('UPLOAD FAIL', `Gagal mengunggah ${remoteFilename}: ${result.error}`, c.red);
+        log('UPLOAD FAIL', `[Slot #${slotIndex}] Gagal mengunggah ${remoteFilename}: ${result.error}`, c.red);
         res.writeHead(500, { 'Content-Type': 'application/json' });
         res.end(JSON.stringify(result));
         return;
@@ -518,7 +746,7 @@ const server = http.createServer(async (req, res) => {
       const speedMBs = (buffer.length / (1024 * 1024) / Math.max(0.1, result.durationMs / 1000)).toFixed(1);
       log(
         'UPLOAD OK',
-        `Sukses: "${remoteFilename}" terkirim ke ${result.remotePath} (${speedSec}s @ ${speedMBs} MB/s)`,
+        `[Slot #${slotIndex}] Sukses: "${remoteFilename}" terkirim ke ${result.remotePath} (${speedSec}s @ ${speedMBs} MB/s)`,
         c.green
       );
 
@@ -557,31 +785,33 @@ server.on('error', (err) => {
 server.listen(PORT, HOST, () => {
   console.log(`
 ${c.cyan}================================================================${c.reset}
-  ${c.bright}${c.green}🚀 MetaGen Local FTP Bridge v1.0.0 is running!${c.reset}
+  ${c.bright}${c.green}🚀 MetaGen Local FTP Bridge v1.1.0 (Session Pool Edition) is running!${c.reset}
 ${c.cyan}================================================================${c.reset}
   ${c.bright}Port:${c.reset}        ${PORT}
   ${c.bright}Local URL:${c.reset}   http://127.0.0.1:${PORT}
   ${c.bright}Health:${c.reset}      http://127.0.0.1:${PORT}/health
-  ${c.bright}Status:${c.reset}      ${c.green}● Ready & Listening for Web App Requests${c.reset}
+  ${c.bright}Status:${c.reset}      ${c.green}● Ready & Listening with Keep-Alive Session Pool${c.reset}
 
   ${c.yellow}💡 Info:${c.reset}
   - Biarkan jendela terminal ini tetap terbuka saat mengunggah file.
-  - Web app (Cloudflare Pages atau Local) akan otomatis mendeteksi bridge ini.
-  - Upload file video/gambar bebas dari batas 100MB Cloudflare & timeout.
+  - Sesi koneksi SFTP/FTPS dipertahankan (Keep-Alive) untuk kecepatan maksimal.
+  - Mendukung transfer multi-worker (paralel 2-3 stream) tanpa reconnect berulang.
 ${c.cyan}================================================================${c.reset}
 `);
 });
 
 // Tangani shutdown graceful
-process.on('SIGINT', () => {
+process.on('SIGINT', async () => {
   log('STOP', 'Menghentikan MetaGen Local FTP Bridge...', c.yellow);
+  await closeAllPoolSessions();
   server.close(() => {
     log('STOP', 'Bridge dihentikan.', c.gray);
     process.exit(0);
   });
 });
 
-process.on('SIGTERM', () => {
+process.on('SIGTERM', async () => {
+  await closeAllPoolSessions();
   server.close(() => {
     process.exit(0);
   });
