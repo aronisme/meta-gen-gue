@@ -39,15 +39,16 @@ Penerapan Universal Best-Seller Metadata Architecture (Pilihan 1: Seamless Engin
   - Verifikasi: 77 unit tests lolos hijau (`pnpm test:run`), TypeScript check lolos tanpa error (`npx tsc --noEmit`).
 
 ## Currently Working On
-- Siap digunakan untuk pengujian generasi metadata pada aset riil di studio.
+- Deployment rilis terbaru live di Cloudflare Pages (`https://meta-gen-gue.pages.dev`, deployment ID `b30f8fe6`).
 
 ## Remaining Tasks
 - [x] **Persistent Session Pool di Bridge**: Selesai diimplementasikan di `ftp-bridge/server.mjs`.
 - [x] **Controlled Parallel Concurrency di UI**: Selesai diimplementasikan di `components/FtpQueueView.tsx`.
 - [x] **Pilihan 1 (Seamless Engine Upgrade)**: Selesai diimplementasikan pada prompt generator, sanitasi CSV, UI counter, dan auto-migrasi setting.
+- [x] **Cloudflare Pages Production Deployment**: Selesai dideploy via Wrangler ke `https://meta-gen-gue.pages.dev` (Deployment ID: `b30f8fe6`).
 
 ## Blockers / Errors
-- None. Seluruh test lolos, lint bersih, server dev Next.js dan bridge lokal aktif.
+- None. Seluruh test lolos (77/77), TypeScript lolos bersih, static export berhasil, dan live deployment di Cloudflare Pages 100% healthy.
 
 ## Files Recently Changed
 - `lib/csv.ts`
@@ -57,4 +58,5 @@ Penerapan Universal Best-Seller Metadata Architecture (Pilihan 1: Seamless Engin
 - `components/StudioPanel.tsx`
 - `components/SettingsCard.tsx`
 - `lib/store.ts`
+- `wrangler.toml`
 - `ftp-bridge/server.mjs`
