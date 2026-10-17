@@ -4,6 +4,7 @@ import { useEffect, useRef, useState } from 'react';
 import {
   Camera,
   Check,
+  CheckCircle2,
   ChevronDown,
   ChevronUp,
   Copy,
@@ -177,7 +178,7 @@ export function PromptGeneratorView({ onSwitchToMetadata }: PromptGeneratorViewP
   // 8. Automated Multi-Image Queue System State
   const [queue, setQueue] = useState<PromptQueueItem[]>([]);
   const [isQueuePaused, setIsQueuePaused] = useState<boolean>(false);
-  const [isQueueDrawerOpen, setIsQueueDrawerOpen] = useState<boolean>(false);
+  const [isQueueDrawerOpen, setIsQueueDrawerOpen] = useState<boolean>(true);
   const activeProcessingRef = useRef<boolean>(false);
   const processedPayloadIdsRef = useRef<Set<string>>(new Set());
 
@@ -759,6 +760,40 @@ export function PromptGeneratorView({ onSwitchToMetadata }: PromptGeneratorViewP
       setSession(updatedSession);
       void savePromptSession(updatedSession);
 
+      // Record image to VCPA Queue completed history
+      if (mode === 'reference_to_prompt' && refImageDataUrl) {
+        setQueue((prev) => {
+          const exists = prev.some((q) => q.imageDataUrl === refImageDataUrl);
+          if (exists) {
+            return prev.map((q) =>
+              q.imageDataUrl === refImageDataUrl
+                ? {
+                    ...q,
+                    status: 'completed',
+                    completedAt: now,
+                    generatedCount: (q.generatedCount || 0) + result.completedCount,
+                  }
+                : q
+            );
+          }
+          return [
+            ...prev,
+            {
+              id: `manual_${now}`,
+              source: 'upload',
+              imageDataUrl: refImageDataUrl,
+              filename: refImageFile?.name || `Ref_${Date.now().toString().slice(-4)}.jpg`,
+              addedAt: now,
+              status: 'completed',
+              completedAt: now,
+              generatedCount: result.completedCount,
+              progressStep: 'Selesai',
+            },
+          ];
+        });
+        setIsQueueDrawerOpen(true);
+      }
+
       toast.success(
         `Berhasil menambahkan ${result.completedCount} konsep baru! Total di sesi: ${updatedPrompts.length} prompt.`
       );
@@ -994,6 +1029,7 @@ export function PromptGeneratorView({ onSwitchToMetadata }: PromptGeneratorViewP
   const pendingQueueCount = queue.filter((q) => q.status === 'pending').length;
   const processingQueueItem = queue.find((q) => q.status === 'processing');
   const completedQueueCount = queue.filter((q) => q.status === 'completed').length;
+  const completedQueueItems = queue.filter((q) => q.status === 'completed');
 
   return (
     <div className="space-y-6">
@@ -1008,9 +1044,13 @@ export function PromptGeneratorView({ onSwitchToMetadata }: PromptGeneratorViewP
             <span className="bg-[#fff5e6] border-2 border-[#2c1810] text-[#2c1810] text-[10px] font-black px-2.5 py-0.5 rounded-full uppercase tracking-wider shadow-[1px_1px_0_#2c1810]">
               Creative Intelligence v1.0
             </span>
+            <span className="bg-[#ff6b35] text-white border-2 border-[#2c1810] text-[10px] font-black px-2.5 py-0.5 rounded-full uppercase tracking-wider flex items-center gap-1 shadow-[1px_1px_0_#2c1810]">
+              <Sparkles className="w-3 h-3 text-amber-200" />
+              <span>Total Sesi: {prompts.length} Prompt</span>
+            </span>
             {queue.length > 0 && (
-              <span className="bg-[#ff6b35] text-white text-[10px] font-black px-2.5 py-0.5 rounded-full uppercase tracking-wider flex items-center gap-1 shadow-[1px_1px_0_#2c1810] animate-pulse">
-                <Layers className="w-3 h-3" />
+              <span className="bg-[#fff5e6] border-2 border-[#2c1810] text-[#2c1810] text-[10px] font-black px-2.5 py-0.5 rounded-full uppercase tracking-wider flex items-center gap-1 shadow-[1px_1px_0_#2c1810] animate-pulse">
+                <Layers className="w-3 h-3 text-[#ff6b35]" />
                 <span>Antrean Aktif ({queue.filter((q) => q.status === 'pending' || q.status === 'processing').length})</span>
               </span>
             )}
@@ -1479,8 +1519,8 @@ export function PromptGeneratorView({ onSwitchToMetadata }: PromptGeneratorViewP
                       {settings.count} Prompt
                     </span>
                   </div>
-                  <div className="grid grid-cols-4 gap-2">
-                    {[1, 5, 10, 20].map((cnt) => (
+                  <div className="grid grid-cols-6 gap-1.5">
+                    {[1, 2, 3, 5, 10, 20].map((cnt) => (
                       <button
                         key={cnt}
                         type="button"
@@ -1789,9 +1829,30 @@ export function PromptGeneratorView({ onSwitchToMetadata }: PromptGeneratorViewP
                 </div>
               </div>
 
+              {/* Highlight Total Prompt Sesi Ini */}
+              <div className="p-3 rounded-xl bg-gradient-to-r from-[#fff5e6] via-amber-50 to-[#fff5e6] border-2 border-[#ff6b35] shadow-[2px_2px_0_#2c1810] flex items-center justify-between gap-3">
+                <div className="flex items-center gap-2.5 min-w-0">
+                  <div className="w-8 h-8 rounded-lg bg-[#ff6b35] border border-[#2c1810] flex items-center justify-center text-white shrink-0 shadow-sm">
+                    <Sparkles className="w-4 h-4 animate-pulse" />
+                  </div>
+                  <div className="min-w-0">
+                    <div className="text-[11px] font-black uppercase text-[#ff6b35] tracking-wider truncate">
+                      Highlight Akumulasi Sesi
+                    </div>
+                    <div className="text-[11px] font-bold text-[#6b5344] truncate">
+                      Total prompt yang tergenerate & tersimpan dalam sesi kerja aktif
+                    </div>
+                  </div>
+                </div>
+                <div className="flex items-center gap-1.5 bg-[#ff6b35] text-white px-3 py-1.5 rounded-xl border-2 border-[#2c1810] shadow-[2px_2px_0_#2c1810] shrink-0">
+                  <span className="text-lg sm:text-xl font-black leading-none">{prompts.length}</span>
+                  <span className="text-[11px] font-bold uppercase tracking-wide">Prompt</span>
+                </div>
+              </div>
+
               {/* Queue Items Drawer */}
               {isQueueDrawerOpen && (
-                <div className="pt-2 border-t border-stone-200 space-y-2.5">
+                <div className="pt-2 border-t border-stone-200 space-y-3">
                   {/* 1. Currently Processing Item */}
                   {processingQueueItem && (
                     <div className="p-2.5 rounded-xl border-2 border-[#ff6b35] bg-[#fff5e6] flex items-center justify-between gap-3 shadow-[2px_2px_0_#2c1810]">
@@ -1865,12 +1926,51 @@ export function PromptGeneratorView({ onSwitchToMetadata }: PromptGeneratorViewP
                     </div>
                   )}
 
-                  {/* 3. Completed Items Summary */}
+                  {/* 3. Riwayat Gambar Selesai (Completed Images History Thumbnails) */}
                   {completedQueueCount > 0 && (
-                    <div className="pt-1">
-                      <span className="text-[10px] font-bold text-stone-500">
-                        ✓ {completedQueueCount} gambar dalam antrean ini telah berhasil ditambahkan ke sesi.
-                      </span>
+                    <div className="pt-2 border-t border-stone-200 space-y-2">
+                      <div className="flex items-center justify-between">
+                        <span className="text-[11px] font-black uppercase text-[#2c1810] tracking-wide flex items-center gap-1.5">
+                          <CheckCircle2 className="w-4 h-4 text-emerald-600" />
+                          <span>Riwayat Gambar Selesai ({completedQueueCount})</span>
+                        </span>
+                        <span className="text-[10px] font-bold text-[#6b5344]">
+                          Total {completedQueueItems.reduce((acc, it) => acc + (it.generatedCount || 0), 0)} prompt dihasilkan
+                        </span>
+                      </div>
+
+                      {/* Horizontal Scrollable Thumbnail Strip */}
+                      <div className="flex items-center gap-2.5 overflow-x-auto pb-2 pt-1 scrollbar-thin">
+                        {completedQueueItems.map((item, idx) => (
+                          <div
+                            key={item.id || idx}
+                            className="group relative flex-shrink-0 w-24 bg-white border-2 border-[#2c1810] rounded-xl p-1.5 shadow-[2px_2px_0_#2c1810] hover:shadow-[3px_3px_0_#ff6b35] hover:-translate-y-0.5 transition-all cursor-pointer"
+                            title={`${item.filename} (Klik untuk jadikan acuan aktif)`}
+                            onClick={() => {
+                              setRefImageDataUrl(item.imageDataUrl);
+                              toast.info(`Gambar "${item.filename}" dimuat sebagai referensi visual aktif.`);
+                            }}
+                          >
+                            <div className="relative w-full h-20 rounded-lg overflow-hidden border border-stone-200 bg-stone-100">
+                              {/* eslint-disable-next-line @next/next/no-img-element */}
+                              <img
+                                src={item.imageDataUrl}
+                                alt={item.filename}
+                                className="w-full h-full object-cover group-hover:scale-105 transition-transform"
+                              />
+                              <span className="absolute bottom-1 right-1 bg-emerald-600 text-white text-[9px] font-black px-1.5 py-0.5 rounded shadow">
+                                +{item.generatedCount || settings.count}P
+                              </span>
+                              <span className="absolute top-1 left-1 bg-[#2c1810]/80 text-white text-[9px] font-bold px-1 rounded flex items-center gap-0.5">
+                                <Check className="w-2.5 h-2.5 text-emerald-400" />
+                              </span>
+                            </div>
+                            <p className="text-[10px] font-bold text-[#2c1810] truncate mt-1 text-center" title={item.filename}>
+                              {item.filename}
+                            </p>
+                          </div>
+                        ))}
+                      </div>
                     </div>
                   )}
                 </div>
@@ -1959,9 +2059,17 @@ export function PromptGeneratorView({ onSwitchToMetadata }: PromptGeneratorViewP
                   <span className="text-[10px] font-black uppercase tracking-wider text-[#ff6b35] bg-[#fff5e6] border border-[#2c1810] px-2 py-0.5 rounded-md">
                     ⚡ Auto-Add Sesi Aktif
                   </span>
-                  <span className="text-xs font-black text-[#2c1810] bg-stone-100 border border-stone-300 px-2 py-0.5 rounded-md">
-                    {prompts.length} Prompt
+
+                  {/* Highlight Jumlah Prompt Keseluruhan Sesi */}
+                  <span className="text-xs font-black text-white bg-[#ff6b35] border-2 border-[#2c1810] shadow-[2px_2px_0_#2c1810] px-2.5 py-1 rounded-lg flex items-center gap-1.5 animate-in fade-in">
+                    <Sparkles className="w-3.5 h-3.5 text-amber-200 animate-pulse" />
+                    <span>TOTAL SESI:</span>
+                    <span className="bg-white text-[#ff6b35] px-1.5 py-0.5 rounded font-black text-xs leading-none">
+                      {prompts.length}
+                    </span>
+                    <span>PROMPT</span>
                   </span>
+
                   <span className="text-xs font-bold text-stone-600 bg-white border border-stone-200 px-2 py-0.5 rounded-md">
                     {ENGINE_LABELS[settings.engine]}
                   </span>
