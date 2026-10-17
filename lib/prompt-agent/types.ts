@@ -55,6 +55,21 @@ export interface PromptCardItem {
   isFavorite?: boolean;
   isEdited?: boolean;
   rawBasePrompt?: string;
+  createdAt?: number;
+  batchId?: string;
+}
+
+export interface PromptGenerationSession {
+  id: string;
+  userEmail: string;
+  title: string;
+  createdAt: number;
+  updatedAt: number;
+  mode: VCPAMode;
+  prompts: PromptCardItem[];
+  visualDna?: VisualDNAProfile;
+  refImageFilename?: string;
+  settings: VCPASettings;
 }
 
 export interface VCPAResult {
@@ -66,3 +81,4 @@ export interface VCPAResult {
   failedCount: number;
   prompts: PromptCardItem[];
 }
+

@@ -1,33 +1,49 @@
 # Current Project State
 
 ## Last Updated
-2026-10-17 19:18
+2026-10-17 20:30
 
 ## Current Objective
-Pemeliharaan multi-tenant client isolation, stabilitas produksi Cloudflare Pages, dan persiapan modul lanjutan (Keyword Research).
+Penyempurnaan arsitektur sesi generator prompt (Visual Concept Prompt Agent - VCPA), auto-accumulation, urutan prompt terbaru di posisi teratas, ekspor massal multi-format, dan sinkronisasi penuh fitur UI.
 
 ## Completed Recently
-- **Multi-Tenant Client-Side Storage Isolation**: Kunci IndexedDB & LocalStorage diprefix dengan email pengguna (`hist:${userEmail}:`, `sess:${userEmail}:`, `metagen_ftp_accounts_${userEmail}`); pergantian akun di browser yang sama tidak lagi mewarisi riwayat/akun akun lain.
-- **Local FTP Bridge Identity Binding**: Endpoint `/api/ftp/profiles?userEmail=...` pada `ftp-bridge/server.mjs` memfilter akun secara ketat per user; akun lokal di `accounts.json` tidak lagi merembes ke browser baru akun lain.
-- **Sanitasi Logout Menyeluruh**: Handler `handleLogout` di `app/page.tsx` menyeka seluruh state memori UI aktif (`items`, `files`, `sessions`, `currentSession`, `hist`, `ftpProfilesCount`) saat user keluar.
-- **Live Production Deployment ke Cloudflare Pages**: Build statis bersih (`pnpm pages:build`) dan deploy sukses via Wrangler ke `https://meta-gen-gue.pages.dev` (HTTP 200 OK).
-- **Quality Assurance**: 95/95 unit test lulus (`pnpm test:run`) termasuk suite baru `lib/__tests__/multi-tenant.test.ts`, TypeScript 0 error.
+- **Zero-Click Session Accumulation (Auto-Add)**: Setiap generasi prompt AI otomatis diakumulasikan ke sesi aktif di canvas tanpa tombol manual "Tambah ke Sesi".
+- **Prepending Prompt Terbaru**: Prompt baru selalu dimunculkan paling atas (`[...newBatch, ...prev]`) dengan penanda visual "Terbaru" agar kurator langsung fokus pada output termutakhir.
+- **Bulk Download / Ekspor Sekaligus**:
+  - `CSV (Excel)`: Format RFC 4180 dengan UTF-8 BOM, judul kolom terstandar, nilai kutip ganda ter-escape aman.
+  - `Queue TXT`: Antrean baris per baris siap render batch di Midjourney bot / ComfyUI / Stable Diffusion.
+  - `TXT Lengkap`: Format teks komprehensif memuat strategi kreatif dan rationale.
+  - `JSON`: Arsip terstruktur metadata, parameter engine, visual DNA profile, dan kartu prompt.
+  - `Salin Semua`: Salin seluruh baris prompt ke clipboard dalam 1 klik.
+- **Card-Level Operations & Full Sync**:
+  - Tombol hapus kartu satuan (`Trash2`) pada setiap kartu prompt.
+  - Regenerasi prompt per-kartu di tempat (in-place update).
+  - Edit inline teks prompt dan judul konsep secara langsung dengan auto-save.
+  - Penanda favorit (bintang) tersimpan real-time.
+  - Ganti Engine AI & Aspect Ratio otomatis menyesuaikan format sintaks seluruh kartu prompt di sesi aktif.
+- **Riwayat Sesi Terisolasi (Multi-Tenant)**:
+  - Modal `PromptSessionModal` untuk pencarian, pemuatan ("Buka Sesi"), unduh CSV langsung, dan penghapusan sesi.
+  - Store `lib/prompt-agent/store.ts` berbasis IndexedDB dengan user scoping (`getUserScope()`), terisolasi aman antar-pengguna.
+- **Quality Assurance**:
+  - 101/101 unit tests lulus (`pnpm test:run`), termasuk suite baru `lib/__tests__/prompt-session.test.ts`.
+  - TypeScript 0 error (`npx tsc --noEmit`).
+  - Static export berhasil (`pnpm pages:build`).
+  - Deploy produksi sukses ke Cloudflare Pages: `https://meta-gen-gue.pages.dev` (preview `https://47e3da46.meta-gen-gue.pages.dev`).
 
 ## Currently Working On
-- Sistem Auth, Database D1, Cloud Sync, Multi-Tenant Client Isolation, dan Live Deployment telah selesai dan terverifikasi penuh.
+- Fitur Sesi Prompt VCPA telah rampung, teruji 101/101 tests, dan ter-deploy langsung ke Cloudflare Pages.
 
 ## Remaining Tasks (Next Session Roadmap)
-- [ ] **Modul Keyword Research**: Eksplorasi tren mikrostock, tag cloud interaktif, dan filter kata kunci terlarang di `components/KeywordResearchView.tsx`.
+- [ ] **Modul Keyword Research**: Eksplorasi tren microstock, tag cloud interaktif, dan filter kata kunci terlarang di `components/KeywordResearchView.tsx`.
 - [ ] **Peningkatan Local FTP Bridge**: Indikator byte transfer per-file dan integrasi ExifTool lokal untuk embed langsung metadata IPTC/XMP.
 
 ## Blockers / Errors
-- None. Semua sistem hijau (95 tests passing, TypeScript 0 error, build & deploy Cloudflare live).
+- None. Semua sistem hijau (101 tests passing, TypeScript 0 error, build & deploy Cloudflare live).
 
 ## Files Recently Changed
-- `lib/store.ts`, `lib/ftp/store.ts`, `lib/sync/engine.ts`, `app/page.tsx`, `ftp-bridge/server.mjs`, `ftp-bridge/accounts.json`
-- `lib/__tests__/multi-tenant.test.ts`
-
-## Next Recommended Step
-Pengerjaan modul **Keyword Research** (`components/KeywordResearchView.tsx`) atau uji interaksi kurasi live di `https://meta-gen-gue.pages.dev`.
-
-
+- `components/PromptGeneratorView.tsx`
+- `components/PromptSessionModal.tsx`
+- `lib/prompt-agent/engine.ts`
+- `lib/prompt-agent/store.ts`
+- `lib/prompt-agent/types.ts`
+- `lib/__tests__/prompt-session.test.ts`

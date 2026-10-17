@@ -8,7 +8,10 @@ import {
   ChevronUp,
   Copy,
   Download,
+  Edit2,
   Eye,
+  FileSpreadsheet,
+  History,
   ImageIcon,
   Lightbulb,
   Loader2,
@@ -23,7 +26,6 @@ import {
   Trash2,
   Upload,
   Wand2,
-  X,
 } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
@@ -34,7 +36,9 @@ import { resizeImageToMax1024 } from '@/lib/resize';
 import {
   CREATIVE_FOCUS_LABELS,
   ENGINE_LABELS,
+  exportPromptsToCsv,
   exportPromptsToJson,
+  exportPromptsToQueueText,
   exportPromptsToText,
   formatPromptForEngine,
 } from '@/lib/prompt-agent/engine';
@@ -43,12 +47,21 @@ import {
   executeVCPAGeneration,
   regenerateSinglePromptCard,
 } from '@/lib/prompt-agent/client';
+import {
+  createNewPromptSession,
+  DEFAULT_VCPA_SETTINGS,
+  loadActivePromptSession,
+  saveActivePromptSession,
+  savePromptSession,
+} from '@/lib/prompt-agent/store';
+import { PromptSessionModal } from '@/components/PromptSessionModal';
 import { getRandomCuratedIdeas, type InspirationIdea } from '@/lib/prompt-agent/inspirations';
 import type {
   AspectRatio,
   CreativeFocus,
   EngineType,
   PromptCardItem,
+  PromptGenerationSession,
   SemanticMode,
   VCPAMode,
   VCPASettings,
@@ -63,7 +76,6 @@ export interface PromptGeneratorViewProps {
 const STORAGE_KEY_PROMPTS = 'vcpa_prompts_v1';
 const STORAGE_KEY_SETTINGS = 'vcpa_settings_v1';
 const STORAGE_KEY_DNA = 'vcpa_dna_v1';
-
 
 const VISUAL_DIRECTION_OPTIONS: Array<{ id: VisualDirection; label: string; desc: string }> = [
   { id: 'photorealistic', label: 'Foto Komersial (Stock Photo)', desc: 'Sony A7R V, 85mm f/1.4, tekstur natural 8K' },
@@ -91,29 +103,25 @@ const ASPECT_RATIO_ITEMS: Array<{ id: AspectRatio; label: string; desc: string }
 ];
 
 export function PromptGeneratorView({ onSwitchToMetadata }: PromptGeneratorViewProps) {
-  // 1. Generation Mode: reference_to_prompt vs text_ideation
+  // 1. Session & History State
+  const [session, setSession] = useState<PromptGenerationSession>(() => createNewPromptSession());
+  const [isSessionModalOpen, setIsSessionModalOpen] = useState<boolean>(false);
+  const [isEditingTitle, setIsEditingTitle] = useState<boolean>(false);
+  const [titleInput, setTitleInput] = useState<string>('');
+
+  // 2. Generation Mode: reference_to_prompt vs text_ideation
   const [mode, setMode] = useState<VCPAMode>('reference_to_prompt');
 
-  // 2. Input Reference State
+  // 3. Input Reference State
   const [refImageFile, setRefImageFile] = useState<File | null>(null);
   const [refImageDataUrl, setRefImageDataUrl] = useState<string>('');
   const [brief, setBrief] = useState<string>('');
   const fileInputRef = useRef<HTMLInputElement>(null);
 
-  // 3. Settings State
-  const [settings, setSettings] = useState<VCPASettings>({
-    count: 5,
-    similarity: 60,
-    engine: 'midjourney',
-    visualDirection: 'photorealistic',
-    aspectRatio: '16:9',
-    creativeFocus: 'composition_lighting',
-    semanticMode: 'meaning_preservation',
-    commercialSafety: true,
-    promptLanguage: 'en',
-  });
+  // 4. Settings State
+  const [settings, setSettings] = useState<VCPASettings>({ ...DEFAULT_VCPA_SETTINGS });
 
-  // 4. Fold / Accordion States for Left Side Panel
+  // 5. Fold / Accordion States for Left Side Panel
   const [foldedSections, setFoldedSections] = useState<{
     input: boolean;
     engine: boolean;
@@ -123,14 +131,14 @@ export function PromptGeneratorView({ onSwitchToMetadata }: PromptGeneratorViewP
     input: false,
     engine: false,
     visual: false,
-    safety: true, // folded by default
+    safety: true,
   });
 
   const toggleFold = (key: keyof typeof foldedSections) => {
     setFoldedSections((prev) => ({ ...prev, [key]: !prev[key] }));
   };
 
-  // 4. Output & Visual DNA State
+  // 6. Output & Visual DNA State
   const [visualDna, setVisualDna] = useState<VisualDNAProfile | null>(null);
   const [isDnaExpanded, setIsDnaExpanded] = useState<boolean>(true);
   const [prompts, setPrompts] = useState<PromptCardItem[]>([]);
@@ -140,13 +148,136 @@ export function PromptGeneratorView({ onSwitchToMetadata }: PromptGeneratorViewP
   const [copiedId, setCopiedId] = useState<string | null>(null);
   const [copiedAll, setCopiedAll] = useState<boolean>(false);
 
-  // 5. Inspirasi Ide Komersial (Shuffle & AI Brainstorm)
+  // 7. Inspirations & Brainstorm
   const [inspirations, setInspirations] = useState<InspirationIdea[]>(() => getRandomCuratedIdeas(10));
   const [isBrainstorming, setIsBrainstorming] = useState<boolean>(false);
   const [isBrainstormOpen, setIsBrainstormOpen] = useState<boolean>(false);
   const [brainstormTopic, setBrainstormTopic] = useState<string>('');
   const [brainstormCount, setBrainstormCount] = useState<number>(10);
 
+  // Restore active session from IndexedDB on initial render
+  useEffect(() => {
+    let isMounted = true;
+    void (async () => {
+      try {
+        const active = await loadActivePromptSession();
+        if (active && isMounted) {
+          setSession(active);
+          setPrompts(active.prompts || []);
+          if (active.settings) {
+            setSettings(active.settings);
+          }
+          if (active.visualDna) {
+            setVisualDna(active.visualDna);
+          }
+          if (active.mode) {
+            setMode(active.mode);
+          }
+        } else if (isMounted) {
+          const legacyPrompts = localStorage.getItem(STORAGE_KEY_PROMPTS);
+          if (legacyPrompts) {
+            try {
+              const parsed = JSON.parse(legacyPrompts);
+              if (Array.isArray(parsed) && parsed.length > 0) {
+                const fresh = createNewPromptSession();
+                fresh.prompts = parsed;
+                setSession(fresh);
+                setPrompts(parsed);
+                void savePromptSession(fresh);
+              }
+            } catch {}
+          }
+        }
+      } catch (e) {
+        console.error('Failed to load active prompt session:', e);
+      }
+    })();
+
+    return () => {
+      isMounted = false;
+    };
+  }, []);
+
+  // Sync state changes to localStorage backup
+  useEffect(() => {
+    try {
+      localStorage.setItem(STORAGE_KEY_SETTINGS, JSON.stringify(settings));
+    } catch {}
+  }, [settings]);
+
+  useEffect(() => {
+    try {
+      localStorage.setItem(STORAGE_KEY_PROMPTS, JSON.stringify(prompts));
+    } catch {}
+  }, [prompts]);
+
+  useEffect(() => {
+    try {
+      if (visualDna) {
+        localStorage.setItem(STORAGE_KEY_DNA, JSON.stringify(visualDna));
+      } else {
+        localStorage.removeItem(STORAGE_KEY_DNA);
+      }
+    } catch {}
+  }, [visualDna]);
+
+  // Handle Session Title Editing
+  const handleStartEditTitle = () => {
+    setTitleInput(session.title);
+    setIsEditingTitle(true);
+  };
+
+  const handleSaveTitle = () => {
+    const trimmed = titleInput.trim();
+    if (trimmed && trimmed !== session.title) {
+      const updated: PromptGenerationSession = {
+        ...session,
+        title: trimmed,
+        updatedAt: Date.now(),
+      };
+      setSession(updated);
+      void savePromptSession(updated);
+      toast.success('Nama sesi diperbarui.');
+    }
+    setIsEditingTitle(false);
+  };
+
+  // Start a fresh session
+  const handleNewSession = async () => {
+    if (prompts.length > 0) {
+      await savePromptSession({
+        ...session,
+        prompts,
+        settings,
+        visualDna: visualDna || undefined,
+        mode,
+        updatedAt: Date.now(),
+      });
+    }
+    const fresh = createNewPromptSession();
+    setSession(fresh);
+    setPrompts([]);
+    setVisualDna(null);
+    setRefImageFile(null);
+    setRefImageDataUrl('');
+    setBrief('');
+    await saveActivePromptSession(fresh);
+    toast.success('Sesi baru dimulai. Workspace telah dibersihkan.');
+  };
+
+  // Load selected session from history modal
+  const handleSelectSession = (selected: PromptGenerationSession) => {
+    setSession(selected);
+    setPrompts(selected.prompts || []);
+    if (selected.settings) setSettings(selected.settings);
+    if (selected.visualDna) setVisualDna(selected.visualDna);
+    else setVisualDna(null);
+    if (selected.mode) setMode(selected.mode);
+    void saveActivePromptSession(selected);
+    toast.success(`Sesi "${selected.title}" dimuat (${selected.prompts?.length || 0} prompt).`);
+  };
+
+  // Inspiration handlers
   const handleShuffleInspirations = () => {
     const currentIds = inspirations.map((i) => i.id);
     const nextIdeas = getRandomCuratedIdeas(brainstormCount, currentIds);
@@ -182,56 +313,7 @@ export function PromptGeneratorView({ onSwitchToMetadata }: PromptGeneratorViewP
     }
   };
 
-  // Restore saved state from localStorage on initial render
-  useEffect(() => {
-    try {
-      const savedPrompts = localStorage.getItem(STORAGE_KEY_PROMPTS);
-      if (savedPrompts) {
-        setPrompts(JSON.parse(savedPrompts));
-      }
-      const savedSettings = localStorage.getItem(STORAGE_KEY_SETTINGS);
-      if (savedSettings) {
-        setSettings((prev) => ({ ...prev, ...JSON.parse(savedSettings) }));
-      }
-      const savedDna = localStorage.getItem(STORAGE_KEY_DNA);
-      if (savedDna) {
-        setVisualDna(JSON.parse(savedDna));
-      }
-    } catch {
-      // ignore storage parse errors
-    }
-  }, []);
-
-  // Sync state changes to localStorage
-  useEffect(() => {
-    try {
-      localStorage.setItem(STORAGE_KEY_SETTINGS, JSON.stringify(settings));
-    } catch {
-      // ignore storage error
-    }
-  }, [settings]);
-
-  useEffect(() => {
-    try {
-      localStorage.setItem(STORAGE_KEY_PROMPTS, JSON.stringify(prompts));
-    } catch {
-      // ignore storage error
-    }
-  }, [prompts]);
-
-  useEffect(() => {
-    try {
-      if (visualDna) {
-        localStorage.setItem(STORAGE_KEY_DNA, JSON.stringify(visualDna));
-      } else {
-        localStorage.removeItem(STORAGE_KEY_DNA);
-      }
-    } catch {
-      // ignore storage error
-    }
-  }, [visualDna]);
-
-  // Handle Image Selection (File Picker, Drag & Drop, or Clipboard Paste)
+  // Handle Image Selection
   const handleSelectImage = async (file: File) => {
     if (!file.type.startsWith('image/')) {
       toast.error('File yang dipilih bukan gambar.');
@@ -291,7 +373,7 @@ export function PromptGeneratorView({ onSwitchToMetadata }: PromptGeneratorViewP
     if (fileInputRef.current) fileInputRef.current.value = '';
   };
 
-  // Main Generation Handler
+  // Main Generation Handler: AUTO-ADD & PREPEND NEWEST TO THE VERY TOP
   const handleGenerate = async () => {
     if (mode === 'reference_to_prompt' && !refImageDataUrl) {
       toast.error('Silakan unggah gambar referensi terlebih dahulu.');
@@ -317,13 +399,41 @@ export function PromptGeneratorView({ onSwitchToMetadata }: PromptGeneratorViewP
         onProgressStep: (step) => setProgressStep(step),
       });
 
-      setPrompts(result.prompts);
+      const now = Date.now();
+      const newBatch: PromptCardItem[] = result.prompts.map((p, idx) => ({
+        ...p,
+        createdAt: now + idx,
+        batchId: result.jobId,
+      }));
+
+      // AUTO-ADD: PREPEND KE PALING ATAS (Prompt terbaru muncul paling atas)
+      const updatedPrompts = [...newBatch, ...prompts];
+      setPrompts(updatedPrompts);
+
+      let updatedDna: VisualDNAProfile | undefined = visualDna || undefined;
       if (mode === 'reference_to_prompt' && result.visualDna) {
         setVisualDna(result.visualDna);
+        updatedDna = result.visualDna;
       } else if (mode === 'text_ideation') {
         setVisualDna(null);
+        updatedDna = undefined;
       }
-      toast.success(`Berhasil menghasilkan ${result.completedCount} konsep prompt!`);
+
+      // Simpan pembaruan sesi ke IndexedDB secara otomatis
+      const updatedSession: PromptGenerationSession = {
+        ...session,
+        prompts: updatedPrompts,
+        visualDna: updatedDna,
+        settings,
+        mode,
+        updatedAt: Date.now(),
+      };
+      setSession(updatedSession);
+      void savePromptSession(updatedSession);
+
+      toast.success(
+        `Berhasil menambahkan ${result.completedCount} konsep baru! Total di sesi: ${updatedPrompts.length} prompt.`
+      );
     } catch (err: unknown) {
       const msg = err instanceof Error ? err.message : String(err);
       toast.error(`Gagal menghasilkan prompt: ${msg}`);
@@ -333,7 +443,7 @@ export function PromptGeneratorView({ onSwitchToMetadata }: PromptGeneratorViewP
     }
   };
 
-  // Re-generate single card
+  // Re-generate single card in place
   const handleRegenerateCard = async (card: PromptCardItem) => {
     setRegeneratingId(card.id);
     try {
@@ -345,7 +455,15 @@ export function PromptGeneratorView({ onSwitchToMetadata }: PromptGeneratorViewP
         'gas-proxy',
         'auto'
       );
-      setPrompts((prev) => prev.map((c) => (c.id === card.id ? newCard : c)));
+      const updated = prompts.map((c) => (c.id === card.id ? { ...newCard, createdAt: card.createdAt } : c));
+      setPrompts(updated);
+      const updatedSession: PromptGenerationSession = {
+        ...session,
+        prompts: updated,
+        updatedAt: Date.now(),
+      };
+      setSession(updatedSession);
+      void savePromptSession(updatedSession);
       toast.success(`Konsep #${card.ordinal} diperbarui!`);
     } catch (err: unknown) {
       const msg = err instanceof Error ? err.message : String(err);
@@ -355,56 +473,104 @@ export function PromptGeneratorView({ onSwitchToMetadata }: PromptGeneratorViewP
     }
   };
 
+  // Delete single card from active session
+  const handleDeleteCard = (cardId: string) => {
+    const updated = prompts.filter((c) => c.id !== cardId);
+    setPrompts(updated);
+    const updatedSession: PromptGenerationSession = {
+      ...session,
+      prompts: updated,
+      updatedAt: Date.now(),
+    };
+    setSession(updatedSession);
+    void savePromptSession(updatedSession);
+    toast.info('Konsep prompt dihapus dari sesi.');
+  };
+
   // Toggle Favorite
   const handleToggleFavorite = (cardId: string) => {
-    setPrompts((prev) =>
-      prev.map((c) => (c.id === cardId ? { ...c, isFavorite: !c.isFavorite } : c))
-    );
+    const updated = prompts.map((c) => (c.id === cardId ? { ...c, isFavorite: !c.isFavorite } : c));
+    setPrompts(updated);
+    void savePromptSession({
+      ...session,
+      prompts: updated,
+      updatedAt: Date.now(),
+    });
   };
 
   // Edit card prompt text directly
   const handlePromptTextChange = (cardId: string, newText: string) => {
-    setPrompts((prev) =>
-      prev.map((c) => (c.id === cardId ? { ...c, prompt: newText, isEdited: true } : c))
+    const updated = prompts.map((c) =>
+      c.id === cardId ? { ...c, prompt: newText, rawBasePrompt: newText, isEdited: true } : c
     );
+    setPrompts(updated);
+    void savePromptSession({
+      ...session,
+      prompts: updated,
+      updatedAt: Date.now(),
+    });
   };
 
-  // Re-apply engine syntax when user changes engine or AR on existing batch
+  // Edit card concept title
+  const handleCardTitleChange = (cardId: string, newTitle: string) => {
+    const updated = prompts.map((c) =>
+      c.id === cardId ? { ...c, title: newTitle } : c
+    );
+    setPrompts(updated);
+    void savePromptSession({
+      ...session,
+      prompts: updated,
+      updatedAt: Date.now(),
+    });
+  };
+
+  // Re-apply engine syntax when user changes engine
   const handleEngineChange = (newEngine: EngineType) => {
     setSettings((prev) => ({ ...prev, engine: newEngine }));
     if (prompts.length > 0) {
-      setPrompts((prev) =>
-        prev.map((card) => {
-          const formatted = formatPromptForEngine(card.rawBasePrompt || card.prompt, {
-            ...settings,
-            engine: newEngine,
-          });
-          return {
-            ...card,
-            prompt: formatted.prompt,
-            negativePrompt: formatted.negativePrompt,
-          };
-        })
-      );
+      const updated = prompts.map((card) => {
+        const formatted = formatPromptForEngine(card.rawBasePrompt || card.prompt, {
+          ...settings,
+          engine: newEngine,
+        });
+        return {
+          ...card,
+          prompt: formatted.prompt,
+          negativePrompt: formatted.negativePrompt,
+        };
+      });
+      setPrompts(updated);
+      void savePromptSession({
+        ...session,
+        prompts: updated,
+        settings: { ...settings, engine: newEngine },
+        updatedAt: Date.now(),
+      });
       toast.info(`Format sintaks diperbarui ke ${ENGINE_LABELS[newEngine]}`);
     }
   };
 
+  // Re-apply aspect ratio
   const handleAspectRatioChange = (newAr: AspectRatio) => {
     setSettings((prev) => ({ ...prev, aspectRatio: newAr }));
     if (prompts.length > 0) {
-      setPrompts((prev) =>
-        prev.map((card) => {
-          const formatted = formatPromptForEngine(card.rawBasePrompt || card.prompt, {
-            ...settings,
-            aspectRatio: newAr,
-          });
-          return {
-            ...card,
-            prompt: formatted.prompt,
-          };
-        })
-      );
+      const updated = prompts.map((card) => {
+        const formatted = formatPromptForEngine(card.rawBasePrompt || card.prompt, {
+          ...settings,
+          aspectRatio: newAr,
+        });
+        return {
+          ...card,
+          prompt: formatted.prompt,
+        };
+      });
+      setPrompts(updated);
+      void savePromptSession({
+        ...session,
+        prompts: updated,
+        settings: { ...settings, aspectRatio: newAr },
+        updatedAt: Date.now(),
+      });
     }
   };
 
@@ -419,14 +585,43 @@ export function PromptGeneratorView({ onSwitchToMetadata }: PromptGeneratorViewP
   // Copy All Prompts
   const handleCopyAll = () => {
     if (prompts.length === 0) return;
-    const txt = exportPromptsToText(prompts, settings);
+    const txt = exportPromptsToQueueText(prompts);
     void navigator.clipboard.writeText(txt);
     setCopiedAll(true);
-    toast.success('Semua prompt berhasil disalin!');
+    toast.success(`Semua (${prompts.length}) prompt disalin ke clipboard!`);
     setTimeout(() => setCopiedAll(false), 2000);
   };
 
-  // Export TXT
+  // Bulk Export: CSV Tabular (Excel / Sheets compatible with UTF-8 BOM)
+  const handleExportCsv = () => {
+    if (prompts.length === 0) return;
+    const csv = exportPromptsToCsv(prompts, settings);
+    const blob = new Blob([csv], { type: 'text/csv;charset=utf-8;' });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    a.href = url;
+    const cleanTitle = session.title.replace(/[^a-zA-Z0-9_\-]/g, '_');
+    a.download = `${cleanTitle || 'prompts'}_${Date.now()}.csv`;
+    a.click();
+    URL.revokeObjectURL(url);
+    toast.success(`File CSV (${prompts.length} prompt) berhasil diunduh!`);
+  };
+
+  // Bulk Export: Queue TXT (Line-by-line ready for Midjourney / SD / ComfyUI)
+  const handleExportQueueTxt = () => {
+    if (prompts.length === 0) return;
+    const txt = exportPromptsToQueueText(prompts);
+    const blob = new Blob([txt], { type: 'text/plain;charset=utf-8' });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    a.href = url;
+    a.download = `prompt_queue_${settings.engine}_${Date.now()}.txt`;
+    a.click();
+    URL.revokeObjectURL(url);
+    toast.success('Queue file TXT berhasil diunduh!');
+  };
+
+  // Bulk Export: Full TXT Document
   const handleExportTxt = () => {
     if (prompts.length === 0) return;
     const txt = exportPromptsToText(prompts, settings);
@@ -437,10 +632,10 @@ export function PromptGeneratorView({ onSwitchToMetadata }: PromptGeneratorViewP
     a.download = `vcpa_prompts_${settings.engine}_${Date.now()}.txt`;
     a.click();
     URL.revokeObjectURL(url);
-    toast.success('File TXT berhasil diunduh!');
+    toast.success('File TXT lengkap berhasil diunduh!');
   };
 
-  // Export JSON
+  // Bulk Export: JSON Session Archive
   const handleExportJson = () => {
     if (prompts.length === 0) return;
     const json = exportPromptsToJson(prompts, settings, visualDna || undefined);
@@ -451,13 +646,21 @@ export function PromptGeneratorView({ onSwitchToMetadata }: PromptGeneratorViewP
     a.download = `vcpa_prompts_${Date.now()}.json`;
     a.click();
     URL.revokeObjectURL(url);
-    toast.success('File JSON berhasil diunduh!');
+    toast.success('File JSON sesi berhasil diunduh!');
   };
 
-  // Clear all prompts
+  // Clear workspace canvas with confirmation
   const handleClearAll = () => {
-    setPrompts([]);
-    toast.info('Daftar prompt dibersihkan.');
+    if (prompts.length === 0) return;
+    if (confirm('Bersihkan semua prompt dari canvas kerja saat ini? Riwayat sesi tetap tersimpan.')) {
+      setPrompts([]);
+      void savePromptSession({
+        ...session,
+        prompts: [],
+        updatedAt: Date.now(),
+      });
+      toast.info('Daftar prompt pada canvas dibersihkan.');
+    }
   };
 
   return (
@@ -528,7 +731,6 @@ export function PromptGeneratorView({ onSwitchToMetadata }: PromptGeneratorViewP
       <div className="grid grid-cols-1 lg:grid-cols-12 gap-6 items-start">
         {/* Left Column: Creator Controls */}
         <div className="lg:col-span-5 space-y-4">
-          {/* Left Column Header */}
           <div className="px-1">
             <span className="text-[11px] font-black uppercase tracking-wider text-[#6b5344]">
               Panel Pengaturan Generator
@@ -625,21 +827,6 @@ export function PromptGeneratorView({ onSwitchToMetadata }: PromptGeneratorViewP
                           const f = e.dataTransfer.files?.[0];
                           if (f) void handleSelectImage(f);
                         }}
-                        onPaste={(e) => {
-                          const items = e.clipboardData?.items;
-                          if (items) {
-                            for (let i = 0; i < items.length; i++) {
-                              if (items[i].kind === 'file' && items[i].type.startsWith('image/')) {
-                                const f = items[i].getAsFile();
-                                if (f) {
-                                  e.preventDefault();
-                                  void handleSelectImage(f);
-                                  return;
-                                }
-                              }
-                            }
-                          }
-                        }}
                         className="border-2 border-dashed border-[#2c1810] rounded-xl p-5 text-center bg-white hover:bg-[#fff5e6] focus:bg-[#fff5e6] focus:outline-none focus:ring-2 focus:ring-[#ff6b35] transition-colors cursor-pointer group space-y-2"
                       >
                         <div className="w-9 h-9 rounded-full bg-[#fff5e6] border border-[#2c1810] mx-auto flex items-center justify-center group-hover:scale-105 transition-transform">
@@ -649,226 +836,182 @@ export function PromptGeneratorView({ onSwitchToMetadata }: PromptGeneratorViewP
                           <p className="text-xs font-black text-[#2c1810]">
                             Seret gambar ke sini, klik, atau Paste (Ctrl+V)
                           </p>
-                          <p className="text-[11px] text-[#6b5344] mt-0.5">
-                            JPG, PNG, WEBP, atau screenshot clipboard (otomatis dioptimasi ke 1024px)
+                          <p className="text-[10px] text-[#6b5344] mt-0.5">
+                            JPG, PNG, WebP (Maksimal 1024px auto-resize)
                           </p>
                         </div>
                       </div>
                     )}
+
                     <input
                       ref={fileInputRef}
                       type="file"
                       accept="image/*"
                       className="hidden"
                       onChange={(e) => {
-                        const f = e.target.files?.[0];
-                        if (f) void handleSelectImage(f);
+                        const file = e.target.files?.[0];
+                        if (file) void handleSelectImage(file);
                       }}
                     />
                   </div>
                 )}
 
-                {/* Brief Textarea & Quick Inspirations */}
-                <div className={`space-y-2.5 ${mode === 'reference_to_prompt' ? 'pt-2' : 'pt-3'}`}>
-                  <Label className="text-xs font-black uppercase text-[#2c1810] flex items-center gap-1.5">
-                    <Lightbulb className="w-3.5 h-3.5 text-amber-600" />
-                    <span>
-                      {mode === 'reference_to_prompt'
-                        ? 'Instruksi Tambahan / Fokus Eksplorasi (Opsional)'
-                        : 'Brief Konsep Utama (Subjek, Setting, Aksi)'}
+                {/* Brief & Inspiration Controls */}
+                <div className="space-y-2 pt-1">
+                  <div className="flex items-center justify-between">
+                    <Label className="text-xs font-black uppercase text-[#2c1810]">
+                      {mode === 'reference_to_prompt' ? 'Brief Tambahan (Opsional)' : 'Brief Konsep / Arahan Ide'}
+                    </Label>
+                    <span className="text-[10px] text-stone-500 font-semibold">
+                      {mode === 'reference_to_prompt' ? 'Remix Anchor' : 'Mandatori'}
                     </span>
-                  </Label>
+                  </div>
+
                   <Textarea
                     rows={3}
                     value={brief}
                     onChange={(e) => setBrief(e.target.value)}
                     placeholder={
                       mode === 'reference_to_prompt'
-                        ? 'Contoh: Kembangkan konsep dengan pencahayaan golden hour, ubah sudut pandang ke low-angle hero shot, pertahankan nuansa kemewahan minimalis...'
-                        : 'Contoh: Pekerja konstruksi wanita muda memegang blueprint di atas gedung pencakar langit modern berlatar langit senja cerah...'
+                        ? 'Contoh: Ubah suasana menjadi senja keemasan dengan nuansa futuristik modern...'
+                        : 'Contoh: Indonesian coffee shop barista preparing latte art, warm morning light, commercial stock photography...'
                     }
-                    className="border-2 border-[#2c1810] font-medium text-xs bg-white resize-none shadow-[2px_2px_0_#2c1810]"
+                    className="text-xs bg-white border-2 border-[#2c1810] rounded-xl focus:border-[#ff6b35] placeholder:text-stone-400 font-medium"
                   />
 
-                  {/* Quick Inspirations & Dynamic Brainstorming (Mode 2 Only) */}
-                  {mode === 'text_ideation' && (
-                    <div className="space-y-2.5 pt-1">
-                      <div className="flex items-center justify-between gap-1 flex-wrap">
-                        <span className="text-[11px] font-black uppercase tracking-wider text-[#6b5344] flex items-center gap-1.5">
-                          <Sparkles className="w-3.5 h-3.5 text-[#ff6b35]" />
-                          <span>Bank Ide & Inspirasi ({inspirations.length})</span>
-                        </span>
+                  {/* Inspirasi Ide Komersial Toolbar */}
+                  <div className="pt-1 space-y-2">
+                    <div className="flex items-center justify-between">
+                      <span className="text-[11px] font-black text-[#2c1810] flex items-center gap-1.5">
+                        <Sparkles className="w-3.5 h-3.5 text-[#ff6b35]" />
+                        <span>Inspirasi Ide Komersial</span>
+                      </span>
 
-                        <div className="flex items-center gap-1.5">
-                          {/* 1. Shuffle from rich curated pool */}
-                          <button
-                            type="button"
-                            onClick={handleShuffleInspirations}
-                            title={`Acak ${brainstormCount} ide baru dari bank inspirasi komersial`}
-                            className="text-[11px] font-bold text-[#2c1810] bg-white hover:bg-[#fff5e6] px-2.5 py-1 rounded-lg border border-[#2c1810] shadow-[1px_1px_0_#2c1810] flex items-center gap-1 cursor-pointer transition-all active:translate-y-0.5"
-                          >
-                            <Shuffle className="w-3 h-3 text-[#ff6b35]" />
-                            <span>Acak Ide</span>
-                          </button>
+                      <div className="flex items-center gap-1">
+                        <button
+                          type="button"
+                          onClick={handleShuffleInspirations}
+                          className="h-6 px-2 rounded-md border border-[#2c1810] bg-white hover:bg-[#fff5e6] text-[#2c1810] text-[10px] font-bold flex items-center gap-1 cursor-pointer shadow-[1px_1px_0_#2c1810]"
+                          title="Acak inspirasi katalog"
+                        >
+                          <Shuffle className="w-3 h-3 text-[#ff6b35]" />
+                          <span>Acak</span>
+                        </button>
 
-                          {/* 2. Toggle Brainstorm AI Box */}
-                          <button
+                        <button
+                          type="button"
+                          onClick={() => setIsBrainstormOpen((v) => !v)}
+                          className="h-6 px-2 rounded-md border border-[#2c1810] bg-[#fff5e6] hover:bg-amber-100 text-[#2c1810] text-[10px] font-black flex items-center gap-1 cursor-pointer shadow-[1px_1px_0_#2c1810]"
+                        >
+                          <Wand2 className="w-3 h-3 text-[#ff6b35]" />
+                          <span>Rancang AI</span>
+                          {isBrainstormOpen ? <ChevronUp className="w-3 h-3" /> : <ChevronDown className="w-3 h-3" />}
+                        </button>
+                      </div>
+                    </div>
+
+                    {/* AI Brainstorm Input Drawer */}
+                    {isBrainstormOpen && (
+                      <div className="p-2.5 rounded-xl border-2 border-[#2c1810] bg-[#fff5e6] space-y-2 shadow-[2px_2px_0_#2c1810]">
+                        <div className="text-[11px] font-black text-[#2c1810] flex items-center justify-between">
+                          <span>Generator Ide Tema Microstock</span>
+                          <span className="text-[10px] font-bold text-[#ff6b35]">AI Assistant</span>
+                        </div>
+                        <Input
+                          value={brainstormTopic}
+                          onChange={(e) => setBrainstormTopic(e.target.value)}
+                          placeholder="Ketik topik (e.g. ramadhan, sustainable eco, tech ai) atau kosongkan..."
+                          className="h-8 text-xs bg-white border border-[#2c1810] rounded-lg"
+                        />
+                        <div className="flex items-center justify-between gap-2">
+                          <div className="flex items-center gap-1 text-[11px] font-bold text-[#2c1810]">
+                            <span>Jumlah:</span>
+                            {[5, 10, 20].map((cnt) => (
+                              <button
+                                key={cnt}
+                                type="button"
+                                onClick={() => setBrainstormCount(cnt)}
+                                className={`px-1.5 py-0.5 rounded text-[10px] font-black border cursor-pointer ${
+                                  brainstormCount === cnt
+                                    ? 'bg-[#2c1810] text-white border-[#2c1810]'
+                                    : 'bg-white text-stone-700 border-stone-300'
+                                }`}
+                              >
+                                {cnt}
+                              </button>
+                            ))}
+                          </div>
+
+                          <Button
                             type="button"
-                            onClick={() => {
-                              setIsBrainstormOpen((prev) => {
-                                const next = !prev;
-                                if (next && !brainstormTopic && brief.trim()) {
-                                  setBrainstormTopic(brief.trim());
-                                }
-                                return next;
-                              });
-                            }}
-                            title="Buka opsi input ide untuk merancang ide baru via AI"
-                            className={`text-[11px] font-black px-2.5 py-1 rounded-lg border border-[#2c1810] shadow-[1px_1px_0_#2c1810] flex items-center gap-1 cursor-pointer transition-all active:translate-y-0.5 ${
-                              isBrainstormOpen
-                                ? 'bg-[#2c1810] text-[#fff5e6] border-[#2c1810]'
-                                : 'bg-[#2c1810] text-white hover:bg-[#ff6b35]'
-                            }`}
+                            size="sm"
+                            disabled={isBrainstorming}
+                            onClick={() => handleBrainstormIdeas(brainstormTopic, brainstormCount)}
+                            className="h-7.5 px-3 text-[11px] font-black bg-[#ff6b35] hover:bg-[#e55a2b] text-white border-2 border-[#2c1810] shadow-[1px_1px_0_#2c1810] cursor-pointer"
                           >
-                            {isBrainstormOpen ? (
+                            {isBrainstorming ? (
                               <>
-                                <X className="w-3 h-3 text-[#ff6b35]" />
-                                <span>Tutup Opsi</span>
+                                <Loader2 className="w-3 h-3 animate-spin mr-1" />
+                                <span>Merancang {brainstormCount} Ide...</span>
                               </>
                             ) : (
                               <>
-                                <Wand2 className="w-3 h-3 text-[#ff6b35]" />
-                                <span>+ Ide AI Baru</span>
+                                <Wand2 className="w-3 h-3 mr-1" />
+                                <span>Rancang {brainstormCount} Ide via AI</span>
                               </>
                             )}
-                          </button>
+                          </Button>
                         </div>
                       </div>
+                    )}
 
-                      {/* Brainstorming Input & Count Panel (Pop-down) */}
-                      {isBrainstormOpen && (
-                        <div className="p-3 bg-gradient-to-br from-[#fffdf9] to-[#fff5e6] border-2 border-[#2c1810] rounded-xl shadow-[2px_2px_0_#2c1810] space-y-2.5 animate-in fade-in duration-150">
-                          <div className="flex items-center justify-between">
-                            <span className="text-[11px] font-black text-[#2c1810] flex items-center gap-1">
-                              <Lightbulb className="w-3.5 h-3.5 text-amber-600" />
-                              <span>Arahan Topik untuk AI Brainstorm</span>
-                            </span>
-                            <button
-                              type="button"
-                              onClick={() => setIsBrainstormOpen(false)}
-                              className="text-stone-500 hover:text-[#2c1810] p-0.5 cursor-pointer"
-                              title="Tutup panel ide"
-                            >
-                              <X className="w-3.5 h-3.5" />
-                            </button>
-                          </div>
-
-                          <div className="flex items-center gap-2">
-                            <Input
-                              value={brainstormTopic}
-                              onChange={(e) => setBrainstormTopic(e.target.value)}
-                              onKeyDown={(e) => {
-                                if (e.key === 'Enter' && !isBrainstorming) {
-                                  e.preventDefault();
-                                  void handleBrainstormIdeas(brainstormTopic, brainstormCount);
-                                }
-                              }}
-                              placeholder="Ketik topik spesifik (misal: Kuliner Nusantara, Smart City IoT, Ramadhan)... kosongkan untuk tren global"
-                              className="h-8.5 text-xs font-medium bg-white border-2 border-[#2c1810] shadow-[1px_1px_0_#2c1810] flex-1"
-                            />
-                          </div>
-
-                          <div className="flex items-center justify-between gap-2 flex-wrap pt-0.5">
-                            <div className="flex items-center gap-1.5">
-                              <span className="text-[10px] font-bold text-[#6b5344]">Jumlah Ide:</span>
-                              {[5, 10, 15, 20].map((cnt) => (
-                                <button
-                                  key={cnt}
-                                  type="button"
-                                  onClick={() => setBrainstormCount(cnt)}
-                                  className={`px-2 py-0.5 text-[10px] font-black rounded border cursor-pointer transition-all ${
-                                    brainstormCount === cnt
-                                      ? 'bg-[#2c1810] text-white border-[#2c1810] shadow-[1px_1px_0_#2c1810]'
-                                      : 'bg-white text-[#2c1810] border-stone-300 hover:bg-[#fff5e6]'
-                                  }`}
-                                >
-                                  {cnt}
-                                </button>
-                              ))}
-                            </div>
-
-                            <Button
-                              type="button"
-                              size="sm"
-                              disabled={isBrainstorming}
-                              onClick={() => handleBrainstormIdeas(brainstormTopic, brainstormCount)}
-                              className="h-7.5 px-3 text-[11px] font-black bg-[#ff6b35] hover:bg-[#e55a2b] text-white border-2 border-[#2c1810] shadow-[1px_1px_0_#2c1810] cursor-pointer"
-                            >
-                              {isBrainstorming ? (
-                                <>
-                                  <Loader2 className="w-3 h-3 animate-spin mr-1" />
-                                  <span>Merancang {brainstormCount} Ide...</span>
-                                </>
-                              ) : (
-                                <>
-                                  <Wand2 className="w-3 h-3 mr-1" />
-                                  <span>Rancang {brainstormCount} Ide via AI</span>
-                                </>
-                              )}
-                            </Button>
-                          </div>
-                        </div>
-                      )}
-
-                      {/* Pills List */}
-                      <div className="flex flex-wrap gap-1.5">
-                        {inspirations.map((idea) => (
-                          <div
-                            key={idea.id}
-                            className={`inline-flex items-center rounded-lg border border-[#2c1810] text-[11px] font-bold shadow-[1px_1px_0_#2c1810] transition-all overflow-hidden ${
-                              idea.isAiGenerated
-                                ? 'bg-gradient-to-r from-[#fff5e6] to-[#fff0e0] border-[#ff6b35]'
-                                : 'bg-white hover:bg-[#fff5e6]'
-                            }`}
+                    {/* Inspirations Pills List */}
+                    <div className="flex flex-wrap gap-1.5">
+                      {inspirations.map((idea) => (
+                        <div
+                          key={idea.id}
+                          className={`inline-flex items-center rounded-lg border border-[#2c1810] text-[11px] font-bold shadow-[1px_1px_0_#2c1810] transition-all overflow-hidden ${
+                            idea.isAiGenerated
+                              ? 'bg-gradient-to-r from-[#fff5e6] to-[#fff0e0] border-[#ff6b35]'
+                              : 'bg-white hover:bg-[#fff5e6]'
+                          }`}
+                        >
+                          <button
+                            type="button"
+                            onClick={() => {
+                              setBrief(idea.brief);
+                              toast.success(`Inspirasi "${idea.title}" diterapkan ke brief.`);
+                            }}
+                            title={idea.brief}
+                            className="px-2 py-1 text-[#2c1810] cursor-pointer flex items-center gap-1 text-left"
                           >
+                            {idea.isAiGenerated ? (
+                              <span className="text-[9px] px-1 py-0.2 rounded bg-[#ff6b35] text-white font-black leading-none">
+                                AI
+                              </span>
+                            ) : (
+                              <span className="text-[#ff6b35]">⚡</span>
+                            )}
+                            <span>{idea.title}</span>
+                          </button>
+
+                          {brief.trim() && (
                             <button
                               type="button"
                               onClick={() => {
-                                setBrief(idea.brief);
-                                toast.success(`Inspirasi "${idea.title}" diterapkan ke brief.`);
+                                setBrief((prev) => `${prev.trim()}, ${idea.brief}`);
+                                toast.info(`Ditambahkan ke brief: "${idea.title}"`);
                               }}
-                              title={idea.brief}
-                              className="px-2 py-1 text-[#2c1810] cursor-pointer flex items-center gap-1 text-left"
+                              title="Tambahkan ke akhir brief saat ini"
+                              className="px-1.5 py-1 border-l border-[#2c1810]/30 text-[#6b5344] hover:text-[#ff6b35] hover:bg-[#ffe0cc] cursor-pointer"
                             >
-                              {idea.isAiGenerated ? (
-                                <span className="text-[9px] px-1 py-0.2 rounded bg-[#ff6b35] text-white font-black leading-none">
-                                  AI
-                                </span>
-                              ) : (
-                                <span className="text-[#ff6b35]">⚡</span>
-                              )}
-                              <span>{idea.title}</span>
+                              <Plus className="w-3 h-3" />
                             </button>
-
-                            {/* Append button if brief already has text */}
-                            {brief.trim() && (
-                              <button
-                                type="button"
-                                onClick={() => {
-                                  setBrief((prev) => `${prev.trim()}, ${idea.brief}`);
-                                  toast.info(`Ditambahkan ke brief: "${idea.title}"`);
-                                }}
-                                title="Tambahkan ke akhir brief saat ini"
-                                className="px-1.5 py-1 border-l border-[#2c1810]/30 text-[#6b5344] hover:text-[#ff6b35] hover:bg-[#ffe0cc] cursor-pointer"
-                              >
-                                <Plus className="w-3 h-3" />
-                              </button>
-                            )}
-                          </div>
-                        ))}
-                      </div>
+                          )}
+                        </div>
+                      ))}
                     </div>
-                  )}
+                  </div>
                 </div>
               </div>
             )}
@@ -939,7 +1082,7 @@ export function PromptGeneratorView({ onSwitchToMetadata }: PromptGeneratorViewP
                   </div>
                 </div>
 
-                {/* Aspect Ratio Selector (With None / Free option) */}
+                {/* Aspect Ratio Selector */}
                 <div className="space-y-1.5">
                   <div className="flex items-center justify-between">
                     <Label className="text-xs font-black text-[#2c1810]">Proporsi (Aspect Ratio)</Label>
@@ -1199,7 +1342,7 @@ export function PromptGeneratorView({ onSwitchToMetadata }: PromptGeneratorViewP
         </div>
 
         {/* Right Column: Output & Visual DNA Feed (7 cols) */}
-        <div className="lg:col-span-7 space-y-5">
+        <div className="lg:col-span-7 space-y-4">
           {/* A. Visual DNA Profile Inspector (Only in Mode 1 with active image) */}
           {mode === 'reference_to_prompt' && visualDna && (
             <div className="bg-[#fffdf9] border-2 border-[#2c1810] rounded-2xl shadow-[4px_4px_0_#2c1810] overflow-hidden">
@@ -1272,24 +1415,149 @@ export function PromptGeneratorView({ onSwitchToMetadata }: PromptGeneratorViewP
             </div>
           )}
 
-          {/* B. Results Toolbar Header */}
-          <div className="bg-[#fffdf9] border-2 border-[#2c1810] rounded-2xl p-4 shadow-[4px_4px_0_#2c1810] flex flex-col sm:flex-row sm:items-center justify-between gap-3">
-            <div className="flex items-center gap-2">
-              <Sparkles className="w-4 h-4 text-[#ff6b35]" />
-              <h3 className="font-black text-sm text-[#2c1810]">
-                Hasil Prompt Konseptual ({prompts.length} Siap Pakai)
-              </h3>
+          {/* B. Active Session Control & Bulk Actions Header */}
+          <div className="bg-[#fffdf9] border-2 border-[#2c1810] rounded-2xl p-4 shadow-[4px_4px_0_#2c1810] space-y-3">
+            <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3">
+              {/* Session Title & Metadata */}
+              <div className="space-y-1 min-w-0 flex-1">
+                <div className="flex items-center gap-2 flex-wrap">
+                  <span className="text-[10px] font-black uppercase tracking-wider text-[#ff6b35] bg-[#fff5e6] border border-[#2c1810] px-2 py-0.5 rounded-md">
+                    ⚡ Auto-Add Sesi Aktif
+                  </span>
+                  <span className="text-xs font-black text-[#2c1810] bg-stone-100 border border-stone-300 px-2 py-0.5 rounded-md">
+                    {prompts.length} Prompt
+                  </span>
+                  <span className="text-xs font-bold text-stone-600 bg-white border border-stone-200 px-2 py-0.5 rounded-md">
+                    {ENGINE_LABELS[settings.engine]}
+                  </span>
+                </div>
+
+                {/* Inline Editable Title */}
+                {isEditingTitle ? (
+                  <div className="flex items-center gap-1.5 pt-1">
+                    <Input
+                      value={titleInput}
+                      onChange={(e) => setTitleInput(e.target.value)}
+                      onKeyDown={(e) => {
+                        if (e.key === 'Enter') handleSaveTitle();
+                        if (e.key === 'Escape') setIsEditingTitle(false);
+                      }}
+                      autoFocus
+                      className="h-8 text-xs font-black bg-white border-2 border-[#2c1810] rounded-lg max-w-sm"
+                    />
+                    <Button
+                      type="button"
+                      size="sm"
+                      onClick={handleSaveTitle}
+                      className="h-8 px-2.5 text-xs font-black bg-[#2c1810] text-white border-2 border-[#2c1810] cursor-pointer"
+                    >
+                      <Check className="w-3.5 h-3.5 mr-1" />
+                      Simpan
+                    </Button>
+                    <Button
+                      type="button"
+                      size="sm"
+                      variant="ghost"
+                      onClick={() => setIsEditingTitle(false)}
+                      className="h-8 px-2 text-xs text-stone-600 cursor-pointer"
+                    >
+                      Batal
+                    </Button>
+                  </div>
+                ) : (
+                  <div className="flex items-center gap-2 group pt-0.5">
+                    <h3 className="font-black text-sm sm:text-base text-[#2c1810] truncate">
+                      {session.title}
+                    </h3>
+                    <button
+                      type="button"
+                      onClick={handleStartEditTitle}
+                      className="p-1 rounded text-stone-400 hover:text-[#2c1810] hover:bg-stone-100 transition-colors cursor-pointer"
+                      title="Ubah nama sesi"
+                    >
+                      <Edit2 className="w-3.5 h-3.5" />
+                    </button>
+                  </div>
+                )}
+                <p className="text-[11px] text-[#6b5344]">
+                  Setiap prompt baru otomatis ditambahkan ke sesi ini. Prompt terbaru muncul paling atas.
+                </p>
+              </div>
+
+              {/* Session Top Actions: + Sesi Baru & Riwayat Sesi */}
+              <div className="flex items-center gap-2 shrink-0 self-start sm:self-center">
+                <Button
+                  type="button"
+                  size="sm"
+                  variant="outline"
+                  onClick={() => setIsSessionModalOpen(true)}
+                  className="h-8.5 px-3 text-xs font-black border-2 border-[#2c1810] bg-white hover:bg-[#fff5e6] shadow-[2px_2px_0_#2c1810] cursor-pointer transition-all hover:translate-x-[1px] hover:translate-y-[1px]"
+                >
+                  <History className="w-3.5 h-3.5 mr-1.5 text-[#ff6b35]" />
+                  <span>Riwayat Sesi</span>
+                </Button>
+
+                <Button
+                  type="button"
+                  size="sm"
+                  onClick={handleNewSession}
+                  className="h-8.5 px-3 text-xs font-black bg-[#ff6b35] hover:bg-[#e55a2b] text-white border-2 border-[#2c1810] shadow-[2px_2px_0_#2c1810] cursor-pointer transition-all hover:translate-x-[1px] hover:translate-y-[1px]"
+                >
+                  <Plus className="w-3.5 h-3.5 mr-1" />
+                  <span>Sesi Baru</span>
+                </Button>
+              </div>
             </div>
 
-            <div className="flex items-center gap-2 flex-wrap">
-              {prompts.length > 0 && (
-                <>
+            {/* Bulk Export & Action Toolbar */}
+            {prompts.length > 0 && (
+              <div className="pt-2.5 border-t border-stone-200 flex flex-wrap items-center justify-between gap-2">
+                <div className="text-[11px] font-bold text-[#6b5344]">
+                  Unduh Sekaligus Semua:
+                </div>
+
+                <div className="flex items-center gap-1.5 flex-wrap">
+                  <Button
+                    type="button"
+                    size="sm"
+                    onClick={handleExportCsv}
+                    className="h-7.5 px-2.5 text-xs font-black bg-emerald-600 hover:bg-emerald-700 text-white border-2 border-[#2c1810] shadow-[1px_1px_0_#2c1810] cursor-pointer"
+                    title="Unduh seluruh prompt dalam format CSV tabel (Excel/Google Sheets)"
+                  >
+                    <FileSpreadsheet className="w-3.5 h-3.5 mr-1" />
+                    <span>CSV (Excel)</span>
+                  </Button>
+
+                  <Button
+                    type="button"
+                    size="sm"
+                    variant="outline"
+                    onClick={handleExportQueueTxt}
+                    className="h-7.5 px-2.5 text-xs font-bold border-2 border-[#2c1810] bg-white hover:bg-[#fff5e6] shadow-[1px_1px_0_#2c1810] cursor-pointer"
+                    title="Unduh teks antrean baris per baris siap render"
+                  >
+                    <Download className="w-3.5 h-3.5 mr-1 text-[#ff6b35]" />
+                    <span>Queue TXT</span>
+                  </Button>
+
+                  <Button
+                    type="button"
+                    size="sm"
+                    variant="outline"
+                    onClick={handleExportTxt}
+                    className="h-7.5 px-2 text-xs font-bold border-2 border-[#2c1810] bg-white hover:bg-[#fff5e6] shadow-[1px_1px_0_#2c1810] cursor-pointer"
+                    title="Unduh dokumen TXT lengkap dengan strategi & rationale"
+                  >
+                    <span>TXT Lengkap</span>
+                  </Button>
+
                   <Button
                     type="button"
                     size="sm"
                     variant="outline"
                     onClick={handleCopyAll}
-                    className="h-8 text-xs font-bold border-2 border-[#2c1810] bg-white hover:bg-[#fff5e6] cursor-pointer shadow-[1px_1px_0_#2c1810]"
+                    className="h-7.5 px-2.5 text-xs font-bold border-2 border-[#2c1810] bg-white hover:bg-[#fff5e6] shadow-[1px_1px_0_#2c1810] cursor-pointer"
+                    title="Salin seluruh prompt sekaligus ke clipboard"
                   >
                     {copiedAll ? <Check className="w-3.5 h-3.5 mr-1" /> : <Copy className="w-3.5 h-3.5 mr-1" />}
                     <span>{copiedAll ? 'Tersalin!' : 'Salin Semua'}</span>
@@ -1299,34 +1567,23 @@ export function PromptGeneratorView({ onSwitchToMetadata }: PromptGeneratorViewP
                     type="button"
                     size="sm"
                     variant="outline"
-                    onClick={handleExportTxt}
-                    className="h-8 text-xs font-bold border-2 border-[#2c1810] bg-white hover:bg-[#fff5e6] cursor-pointer shadow-[1px_1px_0_#2c1810]"
-                  >
-                    <Download className="w-3.5 h-3.5 mr-1" />
-                    <span>TXT</span>
-                  </Button>
-
-                  <Button
-                    type="button"
-                    size="sm"
-                    variant="outline"
                     onClick={handleExportJson}
-                    className="h-8 text-xs font-bold border-2 border-[#2c1810] bg-white hover:bg-[#fff5e6] cursor-pointer shadow-[1px_1px_0_#2c1810]"
+                    className="h-7.5 px-2 text-xs font-bold border-2 border-[#2c1810] bg-white hover:bg-[#fff5e6] shadow-[1px_1px_0_#2c1810] cursor-pointer"
+                    title="Unduh arsip JSON lengkap sesi"
                   >
-                    <Download className="w-3.5 h-3.5 mr-1" />
                     <span>JSON</span>
                   </Button>
 
                   <button
                     type="button"
                     onClick={handleClearAll}
-                    className="text-xs text-stone-500 hover:text-red-600 font-bold ml-1 cursor-pointer"
+                    className="text-[11px] text-stone-400 hover:text-red-600 font-bold ml-1 cursor-pointer"
                   >
-                    Reset
+                    Bersihkan
                   </button>
-                </>
-              )}
-            </div>
+                </div>
+              </div>
+            )}
           </div>
 
           {/* C. Prompt Cards Feed */}
@@ -1344,9 +1601,10 @@ export function PromptGeneratorView({ onSwitchToMetadata }: PromptGeneratorViewP
             </div>
           ) : (
             <div className="space-y-4">
-              {prompts.map((card) => {
+              {prompts.map((card, index) => {
                 const isRegenerating = regeneratingId === card.id;
                 const isCopied = copiedId === card.id;
+                const isLatestBatch = index === 0;
 
                 return (
                   <div
@@ -1357,12 +1615,22 @@ export function PromptGeneratorView({ onSwitchToMetadata }: PromptGeneratorViewP
                     <div className="flex items-center justify-between border-b-2 border-stone-200 pb-2.5 gap-2">
                       <div className="flex items-center gap-2 flex-wrap min-w-0">
                         <span className="font-black text-xs text-[#2c1810] bg-[#fff5e6] border border-[#2c1810] px-2 py-0.5 rounded">
-                          #{String(card.ordinal).padStart(2, '0')}
+                          #{String(prompts.length - index).padStart(2, '0')}
                         </span>
-                        <h4 className="font-black text-sm text-[#2c1810] truncate">{card.title}</h4>
+                        <input
+                          type="text"
+                          value={card.title}
+                          onChange={(e) => handleCardTitleChange(card.id, e.target.value)}
+                          className="font-black text-sm text-[#2c1810] bg-transparent border-b border-transparent hover:border-stone-300 focus:border-[#ff6b35] focus:outline-none px-1 rounded truncate max-w-[200px] sm:max-w-xs"
+                        />
                         <span className="bg-stone-100 border border-stone-300 text-stone-700 text-[10px] font-bold px-2 py-0.5 rounded-full">
                           {card.creativeStrategy}
                         </span>
+                        {isLatestBatch && (
+                          <span className="bg-emerald-100 border border-emerald-400 text-emerald-800 text-[9px] font-black px-1.5 py-0.2 rounded-full uppercase">
+                            Terbaru
+                          </span>
+                        )}
                       </div>
 
                       {/* Card Action Buttons */}
@@ -1399,6 +1667,15 @@ export function PromptGeneratorView({ onSwitchToMetadata }: PromptGeneratorViewP
                           {isCopied ? <Check className="w-3.5 h-3.5" /> : <Copy className="w-3.5 h-3.5" />}
                           <span className="ml-1">{isCopied ? 'Tersalin' : 'Salin'}</span>
                         </Button>
+
+                        <button
+                          type="button"
+                          onClick={() => handleDeleteCard(card.id)}
+                          className="p-1.5 rounded-md bg-white hover:bg-rose-50 border border-stone-200 text-stone-400 hover:text-red-600 cursor-pointer transition-all ml-0.5"
+                          title="Hapus konsep ini dari sesi"
+                        >
+                          <Trash2 className="w-3.5 h-3.5" />
+                        </button>
                       </div>
                     </div>
 
@@ -1434,6 +1711,19 @@ export function PromptGeneratorView({ onSwitchToMetadata }: PromptGeneratorViewP
                         {card.rationale}
                       </div>
                     )}
+
+                    {card.tags && card.tags.length > 0 && (
+                      <div className="flex flex-wrap gap-1 pt-1">
+                        {card.tags.map((tag, tIdx) => (
+                          <span
+                            key={tIdx}
+                            className="text-[10px] bg-stone-100 text-stone-600 px-2 py-0.5 rounded border border-stone-200 font-medium"
+                          >
+                            #{tag}
+                          </span>
+                        ))}
+                      </div>
+                    )}
                   </div>
                 );
               })}
@@ -1441,6 +1731,14 @@ export function PromptGeneratorView({ onSwitchToMetadata }: PromptGeneratorViewP
           )}
         </div>
       </div>
+
+      {/* 4. Prompt Session Modal */}
+      <PromptSessionModal
+        open={isSessionModalOpen}
+        activeSessionId={session.id}
+        onClose={() => setIsSessionModalOpen(false)}
+        onSelectSession={handleSelectSession}
+      />
     </div>
   );
 }

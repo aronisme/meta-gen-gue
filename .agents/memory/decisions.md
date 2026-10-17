@@ -264,3 +264,28 @@
   2. **Local FTP Bridge Identity Binding**: Endpoint `/api/ftp/profiles` pada `ftp-bridge/server.mjs` menerima parameter `?userEmail=...` dan hanya mengembalikan akun yang cocok dengan email pemanggil (profil legacy dialokasikan ke admin utama `sr7aron@gmail.com`).
   3. **Comprehensive Logout Sanitization**: Handler `handleLogout` di `app/page.tsx` menyeka seluruh state UI aktif (`items`, `files`, `sessions`, `currentSession`, `hist`, `selectedIds`, `ftpProfilesCount`) dan mengarahkan kembali ke Beranda.
 - **Rationale & Consequences**: 100% mencegah kebocoran data riwayat dan kredensial agensi antar-pengguna pada browser yang sama maupun browser berbeda di PC yang sama, memenuhi standar privasi dan keamanan multi-tenant.
+
+## [2026-10-17] VCPA Prompt Generator Session Architecture: Zero Extra Clicks, Prepending, and Unified Bulk Export
+- **Context**: Pada modul Visual Concept Prompt Agent (VCPA):
+  1. Pengguna meminta alur kerja berbasis sesi mirip Metadata Studio, namun menolak friksi tombol manual "Tambah ke Sesi".
+  2. Kurator membutuhkan hasil generate terbaru langsung muncul di posisi teratas canvas (prepending) agar tidak perlu scroll ke bawah saat batch terus bertambah.
+  3. Dibutuhkan kemampuan unduh sekaligus semua prompt di sesi aktif dalam beragam format (CSV terstruktur Excel, Queue TXT untuk bot render, TXT dokumen lengkap, JSON arsip).
+  4. Perlu audit sinkronisasi fitur: penghapusan kartu satuan (`Trash2`), regenerasi in-place, inline edit judul & teks prompt, serta penyesuaian format sintaks saat berpindah engine AI atau rasio.
+- **Decision**:
+  1. **Zero-Click Session Accumulation (Auto-Add)**: Setiap kali `handleGenerate` selesai, prompt baru otomatis terakumulasi ke dalam sesi aktif di canvas dan IndexedDB tanpa memerlukan klik tombol tambahan.
+  2. **Prepending Newest Prompts**: Batch prompt baru di-prepend ke array (`[...newBatch, ...prev]`) dengan penanda visual "Terbaru" di kartu pertama.
+  3. **Unified Bulk Export Suite**:
+     - `exportPromptsToCsv`: RFC 4180 standard dengan UTF-8 BOM, judul kolom terstandar, dan escaping tanda kutip ganda untuk Microsoft Excel dan Google Sheets.
+     - `exportPromptsToQueueText`: Format baris per baris bersih untuk batch queue di Midjourney bot, ComfyUI, dan SD WebUI.
+     - `exportPromptsToText`: Format dokumen teks naratif lengkap memuat strategi kreatif dan rationale.
+     - `exportPromptsToJson`: Arsip terstruktur JSON komprehensif.
+     - `Salin Semua`: Copy 1-klik seluruh baris prompt ke clipboard.
+  4. **Multi-Tenant Prompt Session Store (`lib/prompt-agent/store.ts`)**:
+     - Kunci penyimpanan diisolasi via `getUserScope()`: `prompt_sess:${scope}:${id}` dan `prompt_active:${scope}`.
+     - Modal `PromptSessionModal` untuk manajemen riwayat sesi (pencarian, preview snippet, pemuatan ke workspace, unduh CSV langsung, dan hapus sesi).
+  5. **Card-Level Operations Synchronization**:
+     - Ditambahkan tombol hapus kartu satuan (`Trash2`).
+     - Regenerasi prompt per-kartu ter-update di tempat tanpa melompat ke atas.
+     - Pergantian engine AI atau aspect ratio secara reaktif memformat ulang sintaks seluruh kartu prompt di canvas.
+- **Rationale & Consequences**: Menghadirkan alur kerja kurasi microstock berkecepatan tinggi, bebas friksi klik, bebas kontradiksi status UI, serta terisolasi aman antar akun pengguna.
+

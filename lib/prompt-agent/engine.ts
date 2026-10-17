@@ -378,3 +378,58 @@ export function exportPromptsToJson(
 
   return JSON.stringify(exportPayload, null, 2);
 }
+
+/**
+ * Export all prompts to RFC 4180 standard CSV format with UTF-8 BOM
+ * for seamless compatibility with Microsoft Excel, Google Sheets, and Numbers.
+ */
+export function exportPromptsToCsv(
+  prompts: PromptCardItem[],
+  settings?: VCPASettings
+): string {
+  const escapeCsv = (str: string | undefined | null) => {
+    if (!str) return '""';
+    const clean = String(str).replace(/"/g, '""');
+    return `"${clean}"`;
+  };
+
+  const headers = [
+    'No',
+    'Judul Konsep',
+    'Prompt AI',
+    'Negative Prompt',
+    'Strategi Kreatif',
+    'Engine',
+    'Aspect Ratio',
+    'Rationale',
+    'Tags',
+  ];
+
+  const rows = prompts.map((p, idx) => {
+    return [
+      idx + 1,
+      escapeCsv(p.title),
+      escapeCsv(p.prompt),
+      escapeCsv(p.negativePrompt || ''),
+      escapeCsv(p.creativeStrategy || ''),
+      escapeCsv(settings ? ENGINE_LABELS[settings.engine] : ''),
+      escapeCsv(settings?.aspectRatio && settings.aspectRatio !== 'none' ? settings.aspectRatio : 'Bebas'),
+      escapeCsv(p.rationale || ''),
+      escapeCsv(Array.isArray(p.tags) ? p.tags.join(', ') : ''),
+    ].join(',');
+  });
+
+  const bom = '\uFEFF';
+  return bom + [headers.join(','), ...rows].join('\r\n');
+}
+
+/**
+ * Export pure prompts line by line (queue format) for Midjourney batch bot or ComfyUI/SD batch queues.
+ */
+export function exportPromptsToQueueText(prompts: PromptCardItem[]): string {
+  return prompts
+    .map((p) => p.prompt.trim())
+    .filter(Boolean)
+    .join('\n\n');
+}
+
