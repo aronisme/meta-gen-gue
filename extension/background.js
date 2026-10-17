@@ -74,7 +74,6 @@ async function sendPayloadToMetaGenTabSilently(payload, targetAppUrl) {
       await chrome.scripting.executeScript({
         target: { tabId: targetTab.id },
         func: (data) => {
-          // 1. Post to window
           window.postMessage(
             {
               type: 'METAGEN_ENQUEUE_PROMPT_IMAGE',
@@ -82,16 +81,6 @@ async function sendPayloadToMetaGenTabSilently(payload, targetAppUrl) {
             },
             '*'
           );
-
-          // 2. Broadcast across tabs
-          try {
-            const bc = new BroadcastChannel('metagen_extension_bus');
-            bc.postMessage({
-              type: 'METAGEN_ENQUEUE_PROMPT_IMAGE',
-              payload: data,
-            });
-            bc.close();
-          } catch {}
         },
         args: [payload],
       });

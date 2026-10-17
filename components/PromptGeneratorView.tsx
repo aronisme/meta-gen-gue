@@ -179,6 +179,7 @@ export function PromptGeneratorView({ onSwitchToMetadata }: PromptGeneratorViewP
   const [isQueuePaused, setIsQueuePaused] = useState<boolean>(false);
   const [isQueueDrawerOpen, setIsQueueDrawerOpen] = useState<boolean>(false);
   const activeProcessingRef = useRef<boolean>(false);
+  const processedPayloadIdsRef = useRef<Set<string>>(new Set());
 
   // Restore active session from IndexedDB on initial render
   useEffect(() => {
@@ -314,11 +315,14 @@ export function PromptGeneratorView({ onSwitchToMetadata }: PromptGeneratorViewP
       source: 'extension' | 'upload' | 'paste' | 'url';
       sourceUrl?: string;
       brief?: string;
+      id?: string;
     }>
   ) => {
+    if (!items || items.length === 0) return;
+
     const timestamp = Date.now();
     const newQueueItems: PromptQueueItem[] = items.map((it, idx) => ({
-      id: `q_${timestamp}_${idx}_${Math.random().toString(36).substring(2, 6)}`,
+      id: it.id || `q_${timestamp}_${idx}_${Math.random().toString(36).substring(2, 6)}`,
       source: it.source,
       imageDataUrl: it.dataUrl,
       filename: it.filename,
@@ -327,7 +331,26 @@ export function PromptGeneratorView({ onSwitchToMetadata }: PromptGeneratorViewP
       brief: it.brief,
     }));
 
-    setQueue((prev) => [...prev, ...newQueueItems]);
+    setQueue((prev) => {
+      // Prevent duplicates: filter out any item that is already active (pending or processing)
+      const activeUrls = new Set(
+        prev
+          .filter((q) => q.status === 'pending' || q.status === 'processing')
+          .map((q) => q.imageDataUrl)
+      );
+
+      const uniqueNewItems: PromptQueueItem[] = [];
+      for (const item of newQueueItems) {
+        if (!activeUrls.has(item.imageDataUrl)) {
+          activeUrls.add(item.imageDataUrl);
+          uniqueNewItems.push(item);
+        }
+      }
+
+      if (uniqueNewItems.length === 0) return prev;
+      return [...prev, ...uniqueNewItems];
+    });
+
     if (mode !== 'reference_to_prompt') setMode('reference_to_prompt');
     setIsQueueDrawerOpen(true);
   };
@@ -430,8 +453,9 @@ export function PromptGeneratorView({ onSwitchToMetadata }: PromptGeneratorViewP
 
   // Listener for Browser Extension & External URL Actions
   useEffect(() => {
-    // 1. Listen for window postMessage and BroadcastChannel from Chrome Extension
+    // 1. Listen for window postMessage from Chrome Extension
     type ExtensionIncomingItem = {
+      id?: string;
       imageDataUrl?: string;
       sourceUrl?: string;
       filename?: string;
@@ -441,14 +465,27 @@ export function PromptGeneratorView({ onSwitchToMetadata }: PromptGeneratorViewP
       if (!payload) return;
 
       if (Array.isArray(payload)) {
-        const validItems = (payload as ExtensionIncomingItem[])
-          .filter((p) => p && (p.imageDataUrl || p.sourceUrl))
-          .map((p) => ({
+        const validItems: Array<{
+          dataUrl: string;
+          filename: string;
+          source: 'extension';
+          sourceUrl?: string;
+          id?: string;
+        }> = [];
+
+        for (const p of payload as ExtensionIncomingItem[]) {
+          if (!p || (!p.imageDataUrl && !p.sourceUrl)) continue;
+          if (p.id && processedPayloadIdsRef.current.has(p.id)) continue;
+          if (p.id) processedPayloadIdsRef.current.add(p.id);
+
+          validItems.push({
             dataUrl: (p.imageDataUrl || p.sourceUrl) as string,
             filename: p.filename || `Web_Batch_${Date.now().toString().slice(-4)}.jpg`,
-            source: 'extension' as const,
+            source: 'extension',
             sourceUrl: p.sourceUrl,
-          }));
+            id: p.id,
+          });
+        }
 
         if (validItems.length > 0) {
           enqueueImages(validItems);
@@ -457,6 +494,11 @@ export function PromptGeneratorView({ onSwitchToMetadata }: PromptGeneratorViewP
       } else {
         const p = payload as ExtensionIncomingItem;
         if (p?.imageDataUrl || p?.sourceUrl) {
+          if (p.id && processedPayloadIdsRef.current.has(p.id)) {
+            return; // Duplicate payload ID ignored
+          }
+          if (p.id) processedPayloadIdsRef.current.add(p.id);
+
           const effectiveDataUrl = (p.imageDataUrl || p.sourceUrl) as string;
           enqueueImages([
             {
@@ -464,6 +506,7 @@ export function PromptGeneratorView({ onSwitchToMetadata }: PromptGeneratorViewP
               filename: p.filename || `Web_Image_${Date.now().toString().slice(-4)}.jpg`,
               source: 'extension',
               sourceUrl: p.sourceUrl,
+              id: p.id,
             },
           ]);
           toast.success('Gambar dari ekstensi browser berhasil masuk ke antrean generator!');
@@ -478,16 +521,6 @@ export function PromptGeneratorView({ onSwitchToMetadata }: PromptGeneratorViewP
     };
 
     window.addEventListener('message', handleWindowMessage);
-
-    let channel: BroadcastChannel | null = null;
-    try {
-      channel = new BroadcastChannel('metagen_extension_bus');
-      channel.onmessage = (ev) => {
-        if (ev.data?.type === 'METAGEN_ENQUEUE_PROMPT_IMAGE') {
-          handleIncomingPayload(ev.data.payload);
-        }
-      };
-    } catch {}
 
     // 2. Check URL query parameters for ?action=enqueue_prompt&imgUrl=...
     try {
@@ -510,9 +543,6 @@ export function PromptGeneratorView({ onSwitchToMetadata }: PromptGeneratorViewP
 
     return () => {
       window.removeEventListener('message', handleWindowMessage);
-      try {
-        channel?.close();
-      } catch {}
     };
   }, []);
 
