@@ -15,6 +15,7 @@ vi.mock('idb-keyval', () => ({
 import {
   exportPromptsToCsv,
   exportPromptsToQueueText,
+  normalizeVisualDna,
 } from '../prompt-agent/engine';
 import {
   createNewPromptSession,
@@ -207,6 +208,59 @@ describe('VCPA Prompt Session & Bulk Export System', () => {
     expect(extensionPayload.imageDataUrl.startsWith('data:image/')).toBe(true);
     expect(extensionPayload.filename).toContain('.jpg');
     expect(extensionPayload.addedAt).toBeGreaterThan(0);
+  });
+
+  it('normalizes malformed VisualDNAProfile with string fields into crash-proof arrays', () => {
+    const malformedRaw = {
+      subject: 'Barista preparing coffee',
+      observed: 'Coffee cup, ceramic mug, wooden table',
+      inferred: 'Cozy autumn morning, warm ambient lighting', // string instead of string[]
+      anchors: 'Espresso cup',
+      variables: 'Camera angle, daylight tone', // "variables" instead of "editableVariables"
+      semanticProfile: {
+        coreTheme: 'Morning Routine',
+        metaphor: 'Warmth and relaxation',
+      },
+    };
+
+    const normalized = normalizeVisualDna(malformedRaw);
+    expect(normalized).not.toBeNull();
+    if (!normalized) return;
+
+    // Must be arrays
+    expect(Array.isArray(normalized.inferred)).toBe(true);
+    expect(Array.isArray(normalized.observed)).toBe(true);
+    expect(Array.isArray(normalized.anchors)).toBe(true);
+    expect(Array.isArray(normalized.editableVariables)).toBe(true);
+    expect(Array.isArray(normalized.semanticProfile?.metaphor)).toBe(true);
+
+    // .join() must work seamlessly without throwing TypeError
+    expect(() => normalized.inferred.join(', ')).not.toThrow();
+    expect(normalized.inferred.join(', ')).toContain('Cozy autumn morning');
+    expect(normalized.editableVariables.join(', ')).toContain('Camera angle');
+    expect(normalized.subject.type).toBe('Barista preparing coffee');
+  });
+
+  it('sanitizes legacy unnormalized visualDna when loaded from store', async () => {
+    const legacySession = createNewPromptSession('Legacy Session', 'test@user.com');
+    // Simulate legacy corrupted data where inferred was a raw string
+    (legacySession as unknown as { visualDna: Record<string, unknown> }).visualDna = {
+      subject: { type: 'Woman' },
+      observed: 'Woman sitting',
+      inferred: 'Tranquil serene atmosphere',
+      anchors: 'Woman silhouette',
+      editableVariables: 'Colors',
+    };
+
+    await saveActivePromptSession(legacySession, 'test@user.com');
+
+    const loaded = await loadActivePromptSession('test@user.com');
+    expect(loaded).not.toBeNull();
+    expect(loaded?.visualDna).toBeDefined();
+
+    // Verify inferred is an array so .join() cannot crash
+    expect(Array.isArray(loaded?.visualDna?.inferred)).toBe(true);
+    expect(loaded?.visualDna?.inferred.join(', ')).toBe('Tranquil serene atmosphere');
   });
 });
 

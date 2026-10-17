@@ -1,35 +1,30 @@
 # Current Project State
 
 ## Last Updated
-2026-10-17 22:42
+2026-10-17 23:02
 
 ## Current Objective
-Pengembangan Browser Extension Manifest V3: Penyederhanaan Single-Click Context Menu, 100% Background Execution (tanpa berpindah tab), Multi-Frame / Iframe Image Detection, dan In-Page Floating Toast.
+Penyelesaian Bug Crash `O.inferred.join is not a function` pada Visual DNA Profile di Visual Concept Prompt Agent (VCPA).
 
 ## Completed Recently
-- **Single Context Menu (Zero Friction)**:
-  - Dihapus seluruh opsi membingungkan (`metagen_open_app`, `metagen_scan_tab_images`).
-  - Menyisakan hanya 1 menu klik-kanan tunggal: `✨ Generate Prompt (Meta-Gen)` pada `image`, `link`, `page`, dan `frame`.
-- **100% Background Execution (Tanpa Berpindah Tab)**:
-  - Dihilangkan pemindahan tab aktif (`chrome.tabs.update(active: true)` dan `chrome.windows.update(focused: true)`).
-  - Pengguna tetap berada di tab/situs web yang sedang dibaca.
-  - Tab Meta-Gen dibuka/dioperasikan sepenuhnya di latar belakang (`active: false`).
-  - In-Page Floating Toast: notifikasi elegan neo-brutalis langsung muncul di sudut kanan bawah halaman web pengguna saat gambar dikirim.
-- **Deteksi Gambar Komprehensif (Multi-Frame / Iframe / Overlay / Lazy / Background-Image)**:
-  - `manifest.json` ditambahkan `"all_frames": true` dan `"match_about_blank": true`.
-  - Ekstraksi gambar cerdas menggunakan `document.elementsFromPoint(x, y)` untuk menembus lapisan pembungkus div/link transparan (seperti di Freepik, Unsplash, Adobe Stock, Pinterest).
-  - Deteksi gambar di dalam frame/iframe, tag `<picture>`, CSS `background-image`, `data-src`, `data-original`, SVG `<image>`, dan `<canvas>`.
-  - Popup scanner mengeksekusi scanning ke seluruh frame (`allFrames: true`), menyortir resolusi, dan menyertakan toggle filter elemen kecil.
-- **Web App Bridge Resilience (`components/PromptGeneratorView.tsx`)**:
-  - Penanganan batch payload array dan `BroadcastChannel('metagen_extension_bus')` yang lulus audit ketat ESLint (tanpa explicit `any`).
+- **Hotfix Crash Visual DNA (`inferred.join is not a function`)**:
+  - Dibuat normalizer `normalizeVisualDna` di `lib/prompt-agent/engine.ts` yang memastikan seluruh field array (`observed`, `inferred`, `anchors`, `editableVariables`, `metaphor`, dll.) selalu bertipe `string[]`, mengantisipasi jika AI mengembalikan string, koma, baris baru, atau objek.
+  - Normalisasi otomatis saat response API masuk di `lib/prompt-agent/client.ts`.
+  - Normalisasi otomatis saat sesi lama dimuat dari IndexedDB di `lib/prompt-agent/store.ts` (`loadActivePromptSession`, `loadPromptSessions`, `getPromptSession`).
+  - Safe UI formatting di `components/PromptGeneratorView.tsx` menggunakan `safeFormatList()` menggantikan seluruh pemanggilan `.join()` langsung, sehingga UI tidak akan pernah crash jika ada format data lama di storage browser.
+- **Ekstensi Browser Manifest V3 (`extension/`)**:
+  - Single context menu: `✨ Generate Prompt (Meta-Gen)` pada `image`, `link`, `page`, dan `frame`.
+  - 100% background execution tanpa tab berpindah (`active: false`).
+  - Multi-frame image extraction menembus `iframe`, CSS `background-image`, overlay transparan, dan lazy-loading.
+  - Floating toast notification langsung di tab browsing aktif.
 - **Testing, Build & Live Production Deployment**:
-  - 103/103 unit tests lulus (`pnpm test:run`).
+  - 105/105 unit tests lulus (`pnpm test:run`).
   - TypeScript 0 error (`npx tsc --noEmit`).
   - Static export berhasil (`pnpm pages:build`).
-  - Live deploy sukses ke Cloudflare Pages: `https://meta-gen-gue.pages.dev` (preview `https://2546977e.meta-gen-gue.pages.dev`).
+  - Live deploy sukses ke Cloudflare Pages: `https://meta-gen-gue.pages.dev` (preview `https://7073388f.meta-gen-gue.pages.dev`).
 
 ## Currently Working On
-- Fitur Browser Extension Single-Click Background Execution & Multi-Frame Scanner telah rampung dan live di Cloudflare Pages.
+- Hotfix Visual DNA crash telah selesai, teruji (105 tests), dan live di Cloudflare Pages.
 
 ## Remaining Tasks (Next Session Roadmap)
 - [ ] **Modul Keyword Research**: Eksplorasi tren microstock, tag cloud interaktif, dan filter kata kunci terlarang di `components/KeywordResearchView.tsx`.

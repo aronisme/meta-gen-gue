@@ -107,6 +107,87 @@ export function formatPromptForEngine(
   };
 }
 
+/**
+ * Safely converts raw AI output into a strictly typed, crash-proof VisualDNAProfile.
+ * Ensures all array fields (observed, inferred, anchors, editableVariables, etc.)
+ * are ALWAYS valid string[] arrays, even if the AI returned strings, objects, or nulls.
+ */
+export function normalizeVisualDna(raw: unknown): VisualDNAProfile | null {
+  if (!raw || typeof raw !== 'object') return null;
+
+  const toStrArray = (val: unknown): string[] => {
+    if (!val) return [];
+    if (Array.isArray(val)) {
+      return val
+        .map((v) => (typeof v === 'string' ? v.trim() : String(v || '').trim()))
+        .filter(Boolean);
+    }
+    if (typeof val === 'string') {
+      const trimmed = val.trim();
+      if (!trimmed) return [];
+      if (trimmed.includes('\n') || trimmed.includes(',')) {
+        return trimmed
+          .split(/[\n,]+/)
+          .map((s) => s.trim())
+          .filter(Boolean);
+      }
+      return [trimmed];
+    }
+    if (typeof val === 'object') {
+      return Object.values(val as Record<string, unknown>)
+        .map((v) => String(v || '').trim())
+        .filter(Boolean);
+    }
+    return [String(val)];
+  };
+
+  const obj = raw as Record<string, unknown>;
+
+  // Normalize subject
+  let subjectObj = { type: 'Subject', attributes: [] as string[] };
+  if (obj.subject && typeof obj.subject === 'object') {
+    const s = obj.subject as Record<string, unknown>;
+    subjectObj = {
+      type: typeof s.type === 'string' && s.type.trim() ? s.type.trim() : 'Subject',
+      attributes: toStrArray(s.attributes),
+    };
+  } else if (typeof obj.subject === 'string' && obj.subject.trim()) {
+    subjectObj = {
+      type: obj.subject.trim(),
+      attributes: [],
+    };
+  }
+
+  // Handle editableVariables (supporting alternative key 'variables')
+  const rawVariables = obj.editableVariables ?? obj.variables;
+
+  // Normalize semanticProfile
+  let semProfile: VisualDNAProfile['semanticProfile'] = undefined;
+  if (obj.semanticProfile && typeof obj.semanticProfile === 'object') {
+    const sp = obj.semanticProfile as Record<string, unknown>;
+    semProfile = {
+      coreTheme: typeof sp.coreTheme === 'string' ? sp.coreTheme.trim() : undefined,
+      emotionTension: typeof sp.emotionTension === 'string' ? sp.emotionTension.trim() : undefined,
+      metaphor: sp.metaphor ? toStrArray(sp.metaphor) : undefined,
+      symbolism: sp.symbolism ? toStrArray(sp.symbolism) : undefined,
+      evidence: sp.evidence ? toStrArray(sp.evidence) : undefined,
+      ambiguity:
+        sp.ambiguity === 'low' || sp.ambiguity === 'medium' || sp.ambiguity === 'high'
+          ? sp.ambiguity
+          : undefined,
+    };
+  }
+
+  return {
+    subject: subjectObj,
+    observed: toStrArray(obj.observed),
+    inferred: toStrArray(obj.inferred),
+    anchors: toStrArray(obj.anchors),
+    editableVariables: toStrArray(rawVariables),
+    semanticProfile: semProfile,
+  };
+}
+
 export function buildVCPAPromptInstruction(params: {
   mode: VCPAMode;
   brief: string;
@@ -119,13 +200,17 @@ export function buildVCPAPromptInstruction(params: {
   let contextIntro = '';
   if (mode === 'reference_to_prompt') {
     if (visualDna) {
+      const safeDna = normalizeVisualDna(visualDna) || visualDna;
+      const safeStr = (arr: unknown) =>
+        Array.isArray(arr) ? arr.join(', ') : typeof arr === 'string' ? arr : '';
+
       contextIntro = `=== REFERENCE IMAGE VISUAL DNA (PREVIOUSLY ANALYZED) ===
-Observed elements: ${visualDna.observed.join(', ')}
-Inferred mood/atmosphere: ${visualDna.inferred.join(', ')}
-Core anchors to respect: ${visualDna.anchors.join(', ')}
-Editable creative variables: ${visualDna.editableVariables.join(', ')}
-${visualDna.semanticProfile?.coreTheme ? `Core semantic theme: ${visualDna.semanticProfile.coreTheme}` : ''}
-${visualDna.semanticProfile?.metaphor ? `Metaphors: ${visualDna.semanticProfile.metaphor.join(', ')}` : ''}
+Observed elements: ${safeStr(safeDna.observed)}
+Inferred mood/atmosphere: ${safeStr(safeDna.inferred)}
+Core anchors to respect: ${safeStr(safeDna.anchors)}
+Editable creative variables: ${safeStr(safeDna.editableVariables)}
+${safeDna.semanticProfile?.coreTheme ? `Core semantic theme: ${safeDna.semanticProfile.coreTheme}` : ''}
+${safeDna.semanticProfile?.metaphor ? `Metaphors: ${safeStr(safeDna.semanticProfile.metaphor)}` : ''}
 
 Similarity Level: ${settings.similarity}% (0 = wide creative exploration while preserving core essence; 100 = strict visual fidelity to subject and style).
 Semantic Preservation Mode: ${settings.semanticMode}

@@ -45,6 +45,7 @@ import {
   exportPromptsToQueueText,
   exportPromptsToText,
   formatPromptForEngine,
+  normalizeVisualDna,
 } from '@/lib/prompt-agent/engine';
 import {
   brainstormBriefIdeas,
@@ -81,6 +82,19 @@ export interface PromptGeneratorViewProps {
 const STORAGE_KEY_PROMPTS = 'vcpa_prompts_v1';
 const STORAGE_KEY_SETTINGS = 'vcpa_settings_v1';
 const STORAGE_KEY_DNA = 'vcpa_dna_v1';
+
+function safeFormatList(val: unknown, fallback = ''): string {
+  if (Array.isArray(val)) {
+    const valid = val
+      .map((v) => (typeof v === 'string' ? v.trim() : String(v || '').trim()))
+      .filter(Boolean);
+    return valid.length > 0 ? valid.join(', ') : fallback;
+  }
+  if (typeof val === 'string' && val.trim()) {
+    return val.trim();
+  }
+  return fallback;
+}
 
 const VISUAL_DIRECTION_OPTIONS: Array<{ id: VisualDirection; label: string; desc: string }> = [
   { id: 'photorealistic', label: 'Foto Komersial (Stock Photo)', desc: 'Sony A7R V, 85mm f/1.4, tekstur natural 8K' },
@@ -179,7 +193,7 @@ export function PromptGeneratorView({ onSwitchToMetadata }: PromptGeneratorViewP
             setSettings(active.settings);
           }
           if (active.visualDna) {
-            setVisualDna(active.visualDna);
+            setVisualDna(normalizeVisualDna(active.visualDna));
           }
           if (active.mode) {
             setMode(active.mode);
@@ -281,7 +295,7 @@ export function PromptGeneratorView({ onSwitchToMetadata }: PromptGeneratorViewP
     setSession(selected);
     setPrompts(selected.prompts || []);
     if (selected.settings) setSettings(selected.settings);
-    if (selected.visualDna) setVisualDna(selected.visualDna);
+    if (selected.visualDna) setVisualDna(normalizeVisualDna(selected.visualDna));
     else setVisualDna(null);
     if (selected.mode) setMode(selected.mode);
     void saveActivePromptSession(selected);
@@ -378,7 +392,7 @@ export function PromptGeneratorView({ onSwitchToMetadata }: PromptGeneratorViewP
         });
 
         if (result.visualDna) {
-          setVisualDna(result.visualDna);
+          setVisualDna(normalizeVisualDna(result.visualDna));
         }
 
         setQueue((prev) =>
@@ -691,10 +705,14 @@ export function PromptGeneratorView({ onSwitchToMetadata }: PromptGeneratorViewP
       const updatedPrompts = [...newBatch, ...prompts];
       setPrompts(updatedPrompts);
 
-      let updatedDna: VisualDNAProfile | undefined = visualDna || undefined;
+      let updatedDna: VisualDNAProfile | undefined = visualDna
+        ? normalizeVisualDna(visualDna) || undefined
+        : undefined;
+
       if (mode === 'reference_to_prompt' && result.visualDna) {
-        setVisualDna(result.visualDna);
-        updatedDna = result.visualDna;
+        const safeDna = normalizeVisualDna(result.visualDna);
+        setVisualDna(safeDna);
+        updatedDna = safeDna || undefined;
       } else if (mode === 'text_ideation') {
         setVisualDna(null);
         updatedDna = undefined;
@@ -1853,7 +1871,7 @@ export function PromptGeneratorView({ onSwitchToMetadata }: PromptGeneratorViewP
                         🔍 Observed (Fakta Visual):
                       </span>
                       <p className="text-[#6b5344] leading-relaxed">
-                        {visualDna.observed.join(', ') || 'Subjek teramati'}
+                        {safeFormatList(visualDna.observed, 'Subjek teramati')}
                       </p>
                     </div>
 
@@ -1862,7 +1880,7 @@ export function PromptGeneratorView({ onSwitchToMetadata }: PromptGeneratorViewP
                         💭 Inferred (Suasana & Tafsir):
                       </span>
                       <p className="text-[#6b5344] leading-relaxed">
-                        {visualDna.inferred.join(', ') || 'Suasana komersial'}
+                        {safeFormatList(visualDna.inferred, 'Suasana komersial')}
                       </p>
                     </div>
 
@@ -1871,7 +1889,7 @@ export function PromptGeneratorView({ onSwitchToMetadata }: PromptGeneratorViewP
                         ⚓ Anchors (Elemen yang Dijaga):
                       </span>
                       <p className="text-amber-900 leading-relaxed">
-                        {visualDna.anchors.join(', ') || 'Subjek utama'}
+                        {safeFormatList(visualDna.anchors, 'Subjek utama')}
                       </p>
                     </div>
 
@@ -1880,7 +1898,7 @@ export function PromptGeneratorView({ onSwitchToMetadata }: PromptGeneratorViewP
                         🔄 Variables (Variabel yang Diubah):
                       </span>
                       <p className="text-blue-900 leading-relaxed">
-                        {visualDna.editableVariables.join(', ') || 'Komposisi, sudut kamera, pencahayaan'}
+                        {safeFormatList(visualDna.editableVariables, 'Komposisi, sudut kamera, pencahayaan')}
                       </p>
                     </div>
                   </div>
@@ -1893,7 +1911,7 @@ export function PromptGeneratorView({ onSwitchToMetadata }: PromptGeneratorViewP
                       <p className="font-medium text-xs">
                         {visualDna.semanticProfile.coreTheme}
                         {visualDna.semanticProfile.metaphor &&
-                          ` (Metafora: ${visualDna.semanticProfile.metaphor.join(', ')})`}
+                          ` (Metafora: ${safeFormatList(visualDna.semanticProfile.metaphor, '')})`}
                       </p>
                     </div>
                   )}

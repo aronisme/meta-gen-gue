@@ -1,6 +1,7 @@
 import { get, set, del, keys } from 'idb-keyval';
 import { nanoid } from 'nanoid';
 import { getUserScope } from '@/lib/store';
+import { normalizeVisualDna } from './engine';
 import type {
   PromptGenerationSession,
   VCPASettings,
@@ -91,7 +92,13 @@ export async function loadActivePromptSession(
   const scope = targetScope || getUserScope();
   const key = getActivePromptSessionKey(scope);
   const active = await get<PromptGenerationSession>(key);
-  return active || null;
+  if (active) {
+    if (active.visualDna) {
+      active.visualDna = normalizeVisualDna(active.visualDna) || undefined;
+    }
+    return active;
+  }
+  return null;
 }
 
 /**
@@ -119,7 +126,12 @@ export async function loadPromptSessions(
   );
 
   const valid = rawSessions.filter(Boolean) as PromptGenerationSession[];
-  return valid.sort((a, b) => (b.updatedAt || b.createdAt) - (a.updatedAt || a.createdAt));
+  return valid
+    .map((s) => ({
+      ...s,
+      visualDna: s.visualDna ? normalizeVisualDna(s.visualDna) || undefined : undefined,
+    }))
+    .sort((a, b) => (b.updatedAt || b.createdAt) - (a.updatedAt || a.createdAt));
 }
 
 /**
@@ -132,6 +144,9 @@ export async function getPromptSession(
   const scope = targetScope || getUserScope();
   const key = `${getPromptSessionPrefix(scope)}${id}`;
   const session = await get<PromptGenerationSession>(key);
+  if (session && session.visualDna) {
+    session.visualDna = normalizeVisualDna(session.visualDna) || undefined;
+  }
   return session || null;
 }
 

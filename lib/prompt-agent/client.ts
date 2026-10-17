@@ -3,6 +3,7 @@ import {
   buildVCPAPromptInstruction,
   extractJsonFromText,
   formatPromptForEngine,
+  normalizeVisualDna,
   parseAndFormatPromptCards,
 } from './engine';
 import type {
@@ -146,11 +147,14 @@ export async function executeVCPAGeneration(
 
   const rawPrompts = Array.isArray(responseData.prompts) ? responseData.prompts : [];
   const formattedCards = parseAndFormatPromptCards(rawPrompts, settings);
+  const normalizedDna = responseData.visualDna
+    ? normalizeVisualDna(responseData.visualDna)
+    : undefined;
 
   return {
     jobId: nanoid(),
     mode,
-    visualDna: responseData.visualDna,
+    visualDna: normalizedDna || undefined,
     requestedCount: settings.count,
     completedCount: formattedCards.length,
     failedCount: Math.max(0, settings.count - formattedCards.length),
