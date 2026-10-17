@@ -253,3 +253,14 @@
   5. **D1 Batching & IndexedDB Optimization**: Mengganti query sekuensial D1 dengan `db.batch()` dalam pecahan 100 statement per chunk. Di frontend, menggunakan `getMany()` dan `setMany()` dari `idb-keyval`.
   6. **Settings Overwrite Guard**: Isolasi penyimpanan preferensi pengguna via `isSettingsInitialized` ref di `app/page.tsx` dan `triggerSync` flag pada `lib/store.ts` untuk mencegah setting D1 tertimpa nilai default perangkat baru.
 - **Rationale & Consequences**: Menjamin integritas data, keamanan akses per pengguna, akurasi perhitungan kuota tepat jam 00:00 WIB, performa push sub-detik (<200ms), serta pengalaman pengguna yang mulus tanpa kehilangan kuota akibat kegagalan jaringan.
+
+## [2026-10-17] Multi-Tenant Client-Side Storage Isolation, Local Bridge User Binding & Logout Sanitization
+- **Context**: Pada perangkat bersama atau saat berganti akun login (misal `T-Neon` atau `Hunter`):
+  1. Cache IndexedDB (`history-v1:*`, `sessions-v1:*`, `metagen_ftp_accounts_v1`) bersifat global dan tidak terisolasi per email, sehingga pengguna baru di browser lama melihat 322 riwayat dan 6 akun milik pengguna sebelumnya.
+  2. Local FTP Bridge (`ftp-bridge`) mengembalikan seluruh 6 akun di `accounts.json` ke sembarang browser di PC yang sama jika IndexedDB kosong.
+  3. Logout sebelumnya hanya menghapus auth token di `localStorage` tanpa menyeka state memori dan cache browser.
+- **Decision**:
+  1. **User-Scoped Storage Namespaces**: Seluruh key di IndexedDB dan localStorage diisolasi dengan prefix email pengguna: `hist:${userEmail}:${id}`, `sess:${userEmail}:${sessionId}`, `metagen_ftp_accounts_${userEmail}`, `metagen_upload_ledger_${userEmail}`, dan `gen_settings_${userEmail}`.
+  2. **Local FTP Bridge Identity Binding**: Endpoint `/api/ftp/profiles` pada `ftp-bridge/server.mjs` menerima parameter `?userEmail=...` dan hanya mengembalikan akun yang cocok dengan email pemanggil (profil legacy dialokasikan ke admin utama `sr7aron@gmail.com`).
+  3. **Comprehensive Logout Sanitization**: Handler `handleLogout` di `app/page.tsx` menyeka seluruh state UI aktif (`items`, `files`, `sessions`, `currentSession`, `hist`, `selectedIds`, `ftpProfilesCount`) dan mengarahkan kembali ke Beranda.
+- **Rationale & Consequences**: 100% mencegah kebocoran data riwayat dan kredensial agensi antar-pengguna pada browser yang sama maupun browser berbeda di PC yang sama, memenuhi standar privasi dan keamanan multi-tenant.

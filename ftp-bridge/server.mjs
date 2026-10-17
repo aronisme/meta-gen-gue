@@ -560,7 +560,7 @@ const server = http.createServer(async (req, res) => {
     return;
   }
 
-  // 1.5 Profiles persistence endpoint (Syncs accounts across domains/origins)
+  // 1.5 Profiles persistence endpoint (Syncs accounts across domains/origins with user-level isolation)
   if (pathname === '/api/ftp/profiles' || pathname === '/profiles') {
     const ACCOUNTS_FILE = path.join(__dirname, 'accounts.json');
 
@@ -568,8 +568,24 @@ const server = http.createServer(async (req, res) => {
       try {
         if (fs.existsSync(ACCOUNTS_FILE)) {
           const content = fs.readFileSync(ACCOUNTS_FILE, 'utf-8');
-          res.writeHead(200, { 'Content-Type': 'application/json' });
-          res.end(content || '[]');
+          const allProfiles = JSON.parse(content || '[]');
+          const reqUserEmail = url.searchParams.get('userEmail')?.trim().toLowerCase();
+
+          if (reqUserEmail) {
+            // Filter hanya profil yang secara spesifik dimiliki oleh userEmail
+            const filtered = allProfiles.filter((p) => {
+              const pEmail = p.userEmail?.trim().toLowerCase();
+              if (pEmail) return pEmail === reqUserEmail;
+              // Profil legacy tanpa email hanya dikembalikan jika peminta adalah admin utama
+              return reqUserEmail === 'sr7aron@gmail.com';
+            });
+            res.writeHead(200, { 'Content-Type': 'application/json' });
+            res.end(JSON.stringify(filtered));
+          } else {
+            // Jika tanpa identitas userEmail, kembalikan daftar kosong demi keamanan multi-tenant
+            res.writeHead(200, { 'Content-Type': 'application/json' });
+            res.end('[]');
+          }
         } else {
           res.writeHead(200, { 'Content-Type': 'application/json' });
           res.end('[]');
@@ -586,11 +602,32 @@ const server = http.createServer(async (req, res) => {
       req.on('data', (chunk) => { bodyText += chunk; });
       req.on('end', () => {
         try {
-          const list = JSON.parse(bodyText || '[]');
-          fs.writeFileSync(ACCOUNTS_FILE, JSON.stringify(list, null, 2), 'utf-8');
-          log('PROFILES', `Menyimpan ${list.length} profil akun FTP ke accounts.json`, c.green);
+          const incoming = JSON.parse(bodyText || '[]');
+          const reqUserEmail = url.searchParams.get('userEmail')?.trim().toLowerCase();
+
+          let existing = [];
+          if (fs.existsSync(ACCOUNTS_FILE)) {
+            try {
+              existing = JSON.parse(fs.readFileSync(ACCOUNTS_FILE, 'utf-8') || '[]');
+            } catch {}
+          }
+
+          let updatedList;
+          if (reqUserEmail) {
+            const taggedIncoming = incoming.map((item) => ({ ...item, userEmail: reqUserEmail }));
+            const others = existing.filter((item) => {
+              const itemEmail = item.userEmail?.trim().toLowerCase();
+              return itemEmail && itemEmail !== reqUserEmail;
+            });
+            updatedList = [...others, ...taggedIncoming];
+          } else {
+            updatedList = incoming;
+          }
+
+          fs.writeFileSync(ACCOUNTS_FILE, JSON.stringify(updatedList, null, 2), 'utf-8');
+          log('PROFILES', `Menyimpan ${updatedList.length} profil akun FTP ke accounts.json (User: ${reqUserEmail || 'all'})`, c.green);
           res.writeHead(200, { 'Content-Type': 'application/json' });
-          res.end(JSON.stringify({ ok: true, count: list.length }));
+          res.end(JSON.stringify({ ok: true, count: updatedList.length }));
         } catch (err) {
           res.writeHead(400, { 'Content-Type': 'application/json' });
           res.end(JSON.stringify({ ok: false, error: String(err) }));

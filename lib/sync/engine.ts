@@ -13,13 +13,17 @@ import type {
   AssetType,
   SessionStatus,
 } from '@/lib/types';
-import { loadSettings, saveSettings } from '@/lib/store';
+import {
+  loadSettings,
+  saveSettings,
+  getHistPrefix,
+  getSessionPrefix,
+} from '@/lib/store';
+import {
+  getFtpAccountsKey,
+  getUploadLedgerKey,
+} from '@/lib/ftp/store';
 import { getStoredUser } from '@/lib/auth/store';
-
-const HISTORE = 'history-v1';
-const SESSION_STORE = 'sessions-v1';
-const FTP_ACCOUNTS_KEY = 'metagen_ftp_accounts_v1';
-const UPLOAD_LEDGER_KEY = 'metagen_upload_ledger_v1';
 
 let syncDebounceTimer: ReturnType<typeof setTimeout> | null = null;
 let isSyncing = false;
@@ -28,31 +32,37 @@ export const SYNC_COMPLETED_EVENT = 'metagen_sync_completed';
 
 /**
  * Mendorong seluruh data lokal (IndexedDB & LocalStorage) ke Cloudflare D1
+ * Khusus untuk data yang ber-namespace sesuai userEmail
  */
 export async function pushLocalDataToCloud(userEmail: string): Promise<boolean> {
   try {
+    const cleanEmail = userEmail.trim().toLowerCase();
     const user = getStoredUser();
     const idToken = user?.idToken;
     const allKeys = (await keys()) as string[];
 
-    // 1. Kumpulkan Item Riwayat via Batch
-    const histKeys = allKeys.filter((k) => k.startsWith(`${HISTORE}:`));
+    // 1. Kumpulkan Item Riwayat via Batch khusus userEmail
+    const histPrefix = getHistPrefix(cleanEmail);
+    const histKeys = allKeys.filter((k) => k.startsWith(histPrefix));
     const rawHist = histKeys.length > 0 ? await getMany<ItemMetaBox>(histKeys) : [];
     const historyItems: ItemMetaBox[] = rawHist.filter(Boolean) as ItemMetaBox[];
 
-    // 2. Kumpulkan Sesi Batch
-    const sessionKeys = allKeys.filter((k) => k.startsWith(`${SESSION_STORE}:`));
+    // 2. Kumpulkan Sesi Batch khusus userEmail
+    const sessionPrefix = getSessionPrefix(cleanEmail);
+    const sessionKeys = allKeys.filter((k) => k.startsWith(sessionPrefix));
     const rawSessions = sessionKeys.length > 0 ? await getMany<GenerationSession>(sessionKeys) : [];
     const sessions: GenerationSession[] = rawSessions.filter(Boolean) as GenerationSession[];
 
-    // 3. Kumpulkan Akun FTP
-    const ftpAccounts = (await get<FtpAccountProfile[]>(FTP_ACCOUNTS_KEY)) || [];
+    // 3. Kumpulkan Akun FTP khusus userEmail
+    const ftpAccountsKey = getFtpAccountsKey(cleanEmail);
+    const ftpAccounts = (await get<FtpAccountProfile[]>(ftpAccountsKey)) || [];
 
-    // 4. Kumpulkan Upload Ledger
-    const uploadLedger = (await get<UploadLedgerRecord[]>(UPLOAD_LEDGER_KEY)) || [];
+    // 4. Kumpulkan Upload Ledger khusus userEmail
+    const uploadLedgerKey = getUploadLedgerKey(cleanEmail);
+    const uploadLedger = (await get<UploadLedgerRecord[]>(uploadLedgerKey)) || [];
 
-    // 5. Kumpulkan Pengaturan
-    const settings = loadSettings();
+    // 5. Kumpulkan Pengaturan khusus userEmail
+    const settings = loadSettings(cleanEmail);
 
     // Format payload untuk API D1
     const payload = {
@@ -219,10 +229,15 @@ export async function pullCloudDataToLocal(userEmail: string): Promise<boolean> 
     if (!res.ok || !res.data) return false;
 
     const { history, sessions, ftpAccounts, uploadLedger, settings } = res.data;
+    const cleanEmail = userEmail.trim().toLowerCase();
+    const histPrefix = getHistPrefix(cleanEmail);
+    const sessionPrefix = getSessionPrefix(cleanEmail);
+    const ftpAccountsKey = getFtpAccountsKey(cleanEmail);
+    const uploadLedgerKey = getUploadLedgerKey(cleanEmail);
 
-    // 1. Simpan Riwayat dari Cloud ke IndexedDB via Batch
+    // 1. Simpan Riwayat dari Cloud ke IndexedDB via Batch khusus userEmail
     if (history && history.length > 0) {
-      const keysToCheck = history.map((h) => `${HISTORE}:${h.id}`);
+      const keysToCheck = history.map((h) => `${histPrefix}${h.id}`);
       const existingItems = await getMany<ItemMetaBox>(keysToCheck);
       const newEntries: Array<[string, ItemMetaBox]> = [];
 
@@ -258,9 +273,9 @@ export async function pullCloudDataToLocal(userEmail: string): Promise<boolean> 
       }
     }
 
-    // 2. Simpan Sesi Batch dari Cloud ke IndexedDB
+    // 2. Simpan Sesi Batch dari Cloud ke IndexedDB khusus userEmail
     if (sessions && sessions.length > 0) {
-      const sessionKeysToCheck = sessions.map((s) => `${SESSION_STORE}:${s.id}`);
+      const sessionKeysToCheck = sessions.map((s) => `${sessionPrefix}${s.id}`);
       const existingSessions = await getMany<GenerationSession>(sessionKeysToCheck);
       const newSessionEntries: Array<[string, GenerationSession]> = [];
 
@@ -297,9 +312,9 @@ export async function pullCloudDataToLocal(userEmail: string): Promise<boolean> 
       }
     }
 
-    // 3. Gabungkan Akun FTP dari Cloud ke IndexedDB
+    // 3. Gabungkan Akun FTP dari Cloud ke IndexedDB khusus userEmail
     if (ftpAccounts && ftpAccounts.length > 0) {
-      const localAccounts = (await get<FtpAccountProfile[]>(FTP_ACCOUNTS_KEY)) || [];
+      const localAccounts = (await get<FtpAccountProfile[]>(ftpAccountsKey)) || [];
       const map = new Map<string, FtpAccountProfile>();
       for (const a of localAccounts) map.set(a.id, a);
       for (const a of ftpAccounts) {
@@ -318,12 +333,12 @@ export async function pullCloudDataToLocal(userEmail: string): Promise<boolean> 
           map.set(a.id, profile);
         }
       }
-      await set(FTP_ACCOUNTS_KEY, Array.from(map.values()));
+      await set(ftpAccountsKey, Array.from(map.values()));
     }
 
-    // 4. Gabungkan Upload Ledger dari Cloud ke IndexedDB
+    // 4. Gabungkan Upload Ledger dari Cloud ke IndexedDB khusus userEmail
     if (uploadLedger && uploadLedger.length > 0) {
-      const localLedger = (await get<UploadLedgerRecord[]>(UPLOAD_LEDGER_KEY)) || [];
+      const localLedger = (await get<UploadLedgerRecord[]>(uploadLedgerKey)) || [];
       const map = new Map<string, UploadLedgerRecord>();
       for (const r of localLedger) map.set(r.id, r);
       for (const r of uploadLedger) {
@@ -342,12 +357,12 @@ export async function pullCloudDataToLocal(userEmail: string): Promise<boolean> 
           map.set(r.id, record);
         }
       }
-      await set(UPLOAD_LEDGER_KEY, Array.from(map.values()));
+      await set(uploadLedgerKey, Array.from(map.values()));
     }
 
     // 5. Terapkan Pengaturan dari Cloud (tanpa memicu push balik / echo)
     if (settings) {
-      const existing = loadSettings();
+      const existing = loadSettings(cleanEmail);
       saveSettings(
         {
           provider: 'gas-proxy',
@@ -358,7 +373,8 @@ export async function pullCloudDataToLocal(userEmail: string): Promise<boolean> 
           keywordsCount: settings.keywordsCount || existing?.keywordsCount || 35,
           extraInstructions: settings.extraInstructions || existing?.extraInstructions || '',
         },
-        false
+        false,
+        cleanEmail
       );
     }
 

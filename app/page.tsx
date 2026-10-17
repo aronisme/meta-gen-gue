@@ -412,10 +412,17 @@ export default function App() {
   const [showAuthModal, setShowAuthModal] = useState(false);
   const isSettingsInitialized = useRef(false);
 
-  // Logout handler with toast feedback
+  // Logout handler with comprehensive state sanitization
   const handleLogout = useCallback(() => {
     clearStoredUser();
     setCurrentUser(null);
+    setItems([]);
+    setFiles([]);
+    setSessions([]);
+    setCurrentSession(null);
+    setHist({ items: [], total: 0 });
+    setSelectedIds(new Set());
+    setFtpProfilesCount(0);
     setActiveModule('beranda');
     toast.success('Anda telah berhasil keluar dari akun Google.');
   }, []);
@@ -436,6 +443,12 @@ export default function App() {
     } else {
       // Pengguna baru/tamu disambut oleh Halaman Beranda
       setActiveModule('beranda');
+      setItems([]);
+      setFiles([]);
+      setSessions([]);
+      setCurrentSession(null);
+      setHist({ items: [], total: 0 });
+      setFtpProfilesCount(0);
     }
 
     const unsub = onAuthChange((user) => {
@@ -443,10 +456,20 @@ export default function App() {
       if (user) {
         // Setelah login berhasil, langsung masuk ke Studio & jalankan silent sync
         setActiveModule('metadata');
+        void refreshHistory();
+        void loadSessions().then(setSessions);
+        void loadFtpProfiles().then((p) => setFtpProfilesCount(p.length));
         void runInitialSilentSync(user.email);
       } else {
-        // Saat logout, kembali ke Beranda
+        // Saat logout, kembali ke Beranda & bersihkan data layar secara menyeluruh
         setActiveModule('beranda');
+        setItems([]);
+        setFiles([]);
+        setSessions([]);
+        setCurrentSession(null);
+        setHist({ items: [], total: 0 });
+        setSelectedIds(new Set());
+        setFtpProfilesCount(0);
       }
     });
 

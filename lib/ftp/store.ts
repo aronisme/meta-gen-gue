@@ -9,11 +9,6 @@ import type {
   DuplicateCheckResult,
 } from '@/lib/types';
 
-const STORAGE_KEYS = {
-  ACCOUNTS: 'metagen_ftp_accounts_v1',
-  ACTIVE_ACCOUNT: 'metagen_ftp_active_account_v1',
-  LEDGER: 'metagen_upload_ledger_v1',
-};
 
 export interface AgencyPresetInfo {
   agencyId: MicrostockAgencyId;
@@ -107,17 +102,42 @@ export const AGENCY_PRESETS: Record<MicrostockAgencyId, AgencyPresetInfo> = {
   },
 };
 
+import { getUserScope } from '@/lib/store';
+
+const LEGACY_STORAGE_KEYS = {
+  ACCOUNTS: 'metagen_ftp_accounts_v1',
+  ACTIVE_ACCOUNT: 'metagen_ftp_active_account_v1',
+  LEDGER: 'metagen_upload_ledger_v1',
+};
+
+export function getFtpAccountsKey(scope = getUserScope()): string {
+  return scope === 'guest' ? LEGACY_STORAGE_KEYS.ACCOUNTS : `metagen_ftp_accounts_${scope}`;
+}
+
+export function getFtpActiveAccountKey(scope = getUserScope()): string {
+  return scope === 'guest' ? LEGACY_STORAGE_KEYS.ACTIVE_ACCOUNT : `metagen_ftp_active_account_${scope}`;
+}
+
+export function getUploadLedgerKey(scope = getUserScope()): string {
+  return scope === 'guest' ? LEGACY_STORAGE_KEYS.LEDGER : `metagen_upload_ledger_${scope}`;
+}
+
 /* =========================================================================
  * 1. Account Profiles Management (IndexedDB + Bridge Local File Sync)
  * ========================================================================= */
 
 const BRIDGE_PROFILES_URL = 'http://127.0.0.1:45678/api/ftp/profiles';
 
-async function syncWithBridge(list?: FtpAccountProfile[]): Promise<FtpAccountProfile[] | null> {
+async function syncWithBridge(list?: FtpAccountProfile[], targetScope?: string): Promise<FtpAccountProfile[] | null> {
   if (typeof window === 'undefined') return null;
+  const scope = targetScope || getUserScope();
+  // Jangan sinkronkan profil bridge lokal jika user adalah tamu (guest)
+  if (scope === 'guest') return null;
+
   try {
+    const url = `${BRIDGE_PROFILES_URL}?userEmail=${encodeURIComponent(scope)}`;
     if (list) {
-      await fetch(BRIDGE_PROFILES_URL, {
+      await fetch(url, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify(list),
@@ -125,10 +145,10 @@ async function syncWithBridge(list?: FtpAccountProfile[]): Promise<FtpAccountPro
       });
       return list;
     } else {
-      const resp = await fetch(BRIDGE_PROFILES_URL, { signal: AbortSignal.timeout(2000) });
+      const resp = await fetch(url, { signal: AbortSignal.timeout(2000) });
       if (resp.ok) {
         const fromBridge = (await resp.json()) as FtpAccountProfile[];
-        if (Array.isArray(fromBridge) && fromBridge.length > 0) {
+        if (Array.isArray(fromBridge)) {
           return fromBridge;
         }
       }
@@ -139,19 +159,33 @@ async function syncWithBridge(list?: FtpAccountProfile[]): Promise<FtpAccountPro
   return null;
 }
 
-export async function loadFtpProfiles(): Promise<FtpAccountProfile[]> {
+export async function loadFtpProfiles(targetScope?: string): Promise<FtpAccountProfile[]> {
   try {
-    const list = await get<FtpAccountProfile[]>(STORAGE_KEYS.ACCOUNTS);
-    // Jika IndexedDB kosong, otomatis tarik dari Bridge lokal
+    const scope = targetScope || getUserScope();
+    const key = getFtpAccountsKey(scope);
+    let list = await get<FtpAccountProfile[]>(key);
+
+    // Migrasi otomatis data legacy hanya untuk admin/pemilik asli jika namespace masih kosong
+    if ((!Array.isArray(list) || list.length === 0) && scope === 'sr7aron@gmail.com') {
+      const legacy = await get<FtpAccountProfile[]>(LEGACY_STORAGE_KEYS.ACCOUNTS);
+      if (Array.isArray(legacy) && legacy.length > 0) {
+        await set(key, legacy);
+        list = legacy;
+      }
+    }
+
+    // Jika IndexedDB kosong dan bukan guest, tarik dari Bridge lokal khusus untuk user aktif
     if (!Array.isArray(list) || list.length === 0) {
-      const fromBridge = await syncWithBridge();
-      if (fromBridge && fromBridge.length > 0) {
-        await set(STORAGE_KEYS.ACCOUNTS, fromBridge);
-        const activeId = await getActiveFtpProfileId();
-        if (!activeId) {
-          await setActiveFtpProfileId(fromBridge[0].id);
+      if (scope !== 'guest') {
+        const fromBridge = await syncWithBridge(undefined, scope);
+        if (fromBridge && fromBridge.length > 0) {
+          await set(key, fromBridge);
+          const activeId = await getActiveFtpProfileId(scope);
+          if (!activeId) {
+            await setActiveFtpProfileId(fromBridge[0].id, scope);
+          }
+          return fromBridge;
         }
-        return fromBridge;
       }
     }
     return Array.isArray(list) ? list : [];
@@ -161,25 +195,32 @@ export async function loadFtpProfiles(): Promise<FtpAccountProfile[]> {
   }
 }
 
-export async function syncFtpProfilesWithBridge(): Promise<FtpAccountProfile[]> {
-  const fromBridge = await syncWithBridge();
+export async function syncFtpProfilesWithBridge(targetScope?: string): Promise<FtpAccountProfile[]> {
+  const scope = targetScope || getUserScope();
+  if (scope === 'guest') return loadFtpProfiles(scope);
+
+  const fromBridge = await syncWithBridge(undefined, scope);
   if (fromBridge && fromBridge.length > 0) {
-    const current = (await get<FtpAccountProfile[]>(STORAGE_KEYS.ACCOUNTS)) || [];
+    const key = getFtpAccountsKey(scope);
+    const current = (await get<FtpAccountProfile[]>(key)) || [];
     const mergedMap = new Map<string, FtpAccountProfile>();
     fromBridge.forEach((p) => mergedMap.set(p.id, p));
     current.forEach((p) => mergedMap.set(p.id, p));
     const merged = Array.from(mergedMap.values());
-    await set(STORAGE_KEYS.ACCOUNTS, merged);
-    syncWithBridge(merged).catch(() => {});
+    await set(key, merged);
+    syncWithBridge(merged, scope).catch(() => {});
     return merged;
   }
-  return loadFtpProfiles();
+  return loadFtpProfiles(scope);
 }
 
 export async function saveFtpProfile(
-  profileData: Omit<FtpAccountProfile, 'id' | 'createdAt'> & { id?: string }
+  profileData: Omit<FtpAccountProfile, 'id' | 'createdAt'> & { id?: string },
+  targetScope?: string
 ): Promise<FtpAccountProfile> {
-  const current = await loadFtpProfiles();
+  const scope = targetScope || getUserScope();
+  const key = getFtpAccountsKey(scope);
+  const current = await loadFtpProfiles(scope);
   const id = profileData.id || nanoid();
   const existing = current.find((p) => p.id === id);
 
@@ -194,38 +235,43 @@ export async function saveFtpProfile(
     ? current.map((p) => (p.id === id ? updatedProfile : p))
     : [...current, updatedProfile];
 
-  await set(STORAGE_KEYS.ACCOUNTS, nextList);
-  syncWithBridge(nextList).catch(() => {});
+  await set(key, nextList);
+  syncWithBridge(nextList, scope).catch(() => {});
   queueBackgroundSync();
   return updatedProfile;
 }
 
-export async function deleteFtpProfile(id: string): Promise<void> {
-  const current = await loadFtpProfiles();
+export async function deleteFtpProfile(id: string, targetScope?: string): Promise<void> {
+  const scope = targetScope || getUserScope();
+  const key = getFtpAccountsKey(scope);
+  const current = await loadFtpProfiles(scope);
   const nextList = current.filter((p) => p.id !== id);
-  await set(STORAGE_KEYS.ACCOUNTS, nextList);
-  syncWithBridge(nextList).catch(() => {});
+  await set(key, nextList);
+  syncWithBridge(nextList, scope).catch(() => {});
   queueBackgroundSync();
   void syncDeleteFtpAccount(id);
 
-  const activeId = await getActiveFtpProfileId();
+  const activeId = await getActiveFtpProfileId(scope);
   if (activeId === id) {
-    await set(STORAGE_KEYS.ACTIVE_ACCOUNT, nextList[0]?.id || null);
+    await setActiveFtpProfileId(nextList[0]?.id || null, scope);
   }
 }
 
-export async function getActiveFtpProfileId(): Promise<string | null> {
+export async function getActiveFtpProfileId(targetScope?: string): Promise<string | null> {
   try {
-    return (await get<string>(STORAGE_KEYS.ACTIVE_ACCOUNT)) || null;
+    const scope = targetScope || getUserScope();
+    const key = getFtpActiveAccountKey(scope);
+    return (await get<string>(key)) || null;
   } catch {
     return null;
   }
 }
 
-export async function setActiveFtpProfileId(id: string | null): Promise<void> {
-  await set(STORAGE_KEYS.ACTIVE_ACCOUNT, id);
+export async function setActiveFtpProfileId(id: string | null, targetScope?: string): Promise<void> {
+  const scope = targetScope || getUserScope();
+  const key = getFtpActiveAccountKey(scope);
+  await set(key, id);
 }
-
 
 /* =========================================================================
  * 2. Deterministic File Fingerprint (SHA-256)
@@ -237,9 +283,11 @@ export { computeFileFingerprint } from '@/lib/dedupe';
  * 3. Anti-Duplicate Upload Ledger (Audit Trail)
  * ========================================================================= */
 
-export async function loadUploadLedger(): Promise<UploadLedgerRecord[]> {
+export async function loadUploadLedger(targetScope?: string): Promise<UploadLedgerRecord[]> {
   try {
-    const list = await get<UploadLedgerRecord[]>(STORAGE_KEYS.LEDGER);
+    const scope = targetScope || getUserScope();
+    const key = getUploadLedgerKey(scope);
+    const list = await get<UploadLedgerRecord[]>(key);
     return Array.isArray(list) ? list : [];
   } catch (err) {
     console.error('[FTP Store] Gagal memuat upload ledger:', err);
@@ -248,23 +296,27 @@ export async function loadUploadLedger(): Promise<UploadLedgerRecord[]> {
 }
 
 export async function recordSuccessfulUpload(
-  record: Omit<UploadLedgerRecord, 'id'>
+  record: Omit<UploadLedgerRecord, 'id'>,
+  targetScope?: string
 ): Promise<UploadLedgerRecord> {
-  const current = await loadUploadLedger();
+  const scope = targetScope || getUserScope();
+  const key = getUploadLedgerKey(scope);
+  const current = await loadUploadLedger(scope);
   const newRecord: UploadLedgerRecord = {
     ...record,
     id: nanoid(),
   };
 
-  // Simpan record baru di awal (terbaru)
-  const nextList = [newRecord, ...current.slice(0, 9999)]; // Simpan hingga 10.000 riwayat
-  await set(STORAGE_KEYS.LEDGER, nextList);
+  const nextList = [newRecord, ...current.slice(0, 9999)];
+  await set(key, nextList);
   queueBackgroundSync();
   return newRecord;
 }
 
-export async function clearUploadLedger(): Promise<void> {
-  await set(STORAGE_KEYS.LEDGER, []);
+export async function clearUploadLedger(targetScope?: string): Promise<void> {
+  const scope = targetScope || getUserScope();
+  const key = getUploadLedgerKey(scope);
+  await set(key, []);
 }
 
 /**
