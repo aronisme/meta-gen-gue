@@ -101,9 +101,11 @@ export function getApiKey(provider: Provider) {
   return localStorage.getItem(provider === 'openai' ? OPENAI_KEY : GEMINI_KEY) || '';
 }
 
-export function saveSettings(settings: SavedSettings) {
+export function saveSettings(settings: SavedSettings, triggerSync = true) {
   localStorage.setItem(SETTINGS_KEY, JSON.stringify(settings));
-  queueBackgroundSync();
+  if (triggerSync) {
+    queueBackgroundSync();
+  }
 }
 
 export function loadSettings(): SavedSettings | null {

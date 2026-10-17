@@ -7,6 +7,7 @@ import {
   loginWithGoogleIdToken,
   refreshUserStatus,
 } from '../auth/store';
+import { saveSettings, loadSettings } from '../store';
 import type { AuthUser } from '../auth/types';
 
 describe('Auth Store & Whitelist Quota Management', () => {
@@ -113,5 +114,46 @@ describe('Auth Store & Whitelist Quota Management', () => {
     expect(updated?.usageCount).toBe(20);
     expect(updated?.remainingQuota).toBe(80);
     expect(getStoredUser()?.remainingQuota).toBe(80);
+  });
+
+  it('should clamp remainingQuota to 0 when usage exceeds dailyQuota', async () => {
+    saveStoredUser(mockUser);
+
+    vi.spyOn(global, 'fetch').mockResolvedValueOnce({
+      ok: true,
+      json: async () => ({
+        ok: true,
+        user: {
+          dailyQuota: 100,
+          usageCount: 120,
+          status: 'active',
+        },
+      }),
+    } as Response);
+
+    const updated = await refreshUserStatus();
+    expect(updated?.usageCount).toBe(120);
+    expect(updated?.remainingQuota).toBe(0);
+  });
+
+  it('should save and load settings without triggering background sync when triggerSync is false', () => {
+    saveSettings(
+      {
+        provider: 'gas-proxy',
+        model: 'gemini-2.5-flash',
+        fileType: 'auto',
+        titleLength: 120,
+        descriptionLength: 60,
+        keywordsCount: 35,
+        extraInstructions: 'Focus on commercial keywords',
+      },
+      false
+    );
+
+    const loaded = loadSettings();
+    expect(loaded).not.toBeNull();
+    expect(loaded?.titleLength).toBe(120);
+    expect(loaded?.keywordsCount).toBe(35);
+    expect(loaded?.extraInstructions).toBe('Focus on commercial keywords');
   });
 });

@@ -31,6 +31,7 @@ interface D1UserRow {
   status: 'active' | 'pending' | 'blocked';
   daily_quota: number;
   usage_count: number;
+  quota_reset_date?: string | null;
   last_login?: string | null;
   created_at?: string | null;
 }
@@ -42,6 +43,18 @@ interface GoogleTokenInfo {
   name?: string;
   picture?: string;
   sub?: string;
+}
+
+/**
+ * Mengembalikan string tanggal 'YYYY-MM-DD' dalam zona waktu Indonesia (Asia/Jakarta / WIB)
+ * Menjamin kuota ter-reset tepat jam 00:00 tengah malam waktu lokal.
+ */
+function getWibDateString(date: Date = new Date()): string {
+  try {
+    return new Intl.DateTimeFormat('en-CA', { timeZone: 'Asia/Jakarta' }).format(date);
+  } catch {
+    return date.toISOString().split('T')[0];
+  }
 }
 
 export async function onRequestPost(context: { request: Request; env: Env }) {
@@ -84,11 +97,40 @@ export async function onRequestPost(context: { request: Request; env: Env }) {
       if (db) {
         try {
           const row = await db
-            .prepare('SELECT * FROM users WHERE LOWER(email) = ?')
+            .prepare('SELECT * FROM users WHERE email = ?')
             .bind(cleanEmail)
             .first<D1UserRow>();
 
           if (row) {
+            const now = new Date();
+            const todayWib = getWibDateString(now);
+            let currentUsage = row.usage_count || 0;
+            let dateChanged = false;
+
+            // Reset otomatis kuota harian jika tanggal lokal (Asia/Jakarta) telah berganti
+            if (row.quota_reset_date) {
+              if (row.quota_reset_date !== todayWib) {
+                currentUsage = 0;
+                dateChanged = true;
+              }
+            } else if (row.last_login) {
+              const lastWib = getWibDateString(new Date(row.last_login));
+              if (lastWib !== todayWib) {
+                currentUsage = 0;
+                dateChanged = true;
+              }
+            }
+
+            if (dateChanged) {
+              await db
+                .prepare('UPDATE users SET usage_count = 0, quota_reset_date = ? WHERE email = ?')
+                .bind(todayWib, cleanEmail)
+                .run();
+            }
+
+            const dailyQuota = row.daily_quota || 100;
+            const remaining = Math.max(0, dailyQuota - currentUsage);
+
             return new Response(
               JSON.stringify({
                 ok: true,
@@ -98,9 +140,9 @@ export async function onRequestPost(context: { request: Request; env: Env }) {
                   picture: row.picture || '',
                   role: row.role || 'user',
                   status: row.status || 'active',
-                  dailyQuota: row.daily_quota || 100,
-                  usageCount: row.usage_count || 0,
-                  remainingQuota: Math.max(0, (row.daily_quota || 100) - (row.usage_count || 0)),
+                  dailyQuota,
+                  usageCount: currentUsage,
+                  remainingQuota: remaining,
                   lastLogin: row.last_login || '',
                   createdAt: row.created_at || '',
                 },
@@ -179,13 +221,14 @@ export async function onRequestPost(context: { request: Request; env: Env }) {
         // Buat tabel otomatis jika belum ada (self-healing)
         await db.prepare(`
           CREATE TABLE IF NOT EXISTS users (
-            email TEXT PRIMARY KEY,
+            email TEXT PRIMARY KEY COLLATE NOCASE,
             name TEXT NOT NULL,
             picture TEXT,
             role TEXT DEFAULT 'user',
             status TEXT DEFAULT 'active',
             daily_quota INTEGER DEFAULT 100,
             usage_count INTEGER DEFAULT 0,
+            quota_reset_date TEXT,
             last_login TEXT,
             created_at TEXT
           );
@@ -193,31 +236,36 @@ export async function onRequestPost(context: { request: Request; env: Env }) {
 
         // Cari user yang sudah ada
         const existing = await db
-          .prepare('SELECT * FROM users WHERE LOWER(email) = ?')
+          .prepare('SELECT * FROM users WHERE email = ?')
           .bind(userEmail)
           .first<D1UserRow>();
 
         const now = new Date();
         const nowIso = now.toISOString();
+        const todayWib = getWibDateString(now);
 
         if (existing) {
-          // Reset kuota otomatis jika hari telah berganti (00:00)
+          // Reset kuota otomatis jika tanggal lokal WIB (Asia/Jakarta) telah berganti
           let currentUsage = existing.usage_count || 0;
-          if (existing.last_login) {
-            const lastDate = new Date(existing.last_login);
-            if (lastDate.toDateString() !== now.toDateString()) {
+          if (existing.quota_reset_date) {
+            if (existing.quota_reset_date !== todayWib) {
+              currentUsage = 0;
+            }
+          } else if (existing.last_login) {
+            const lastWib = getWibDateString(new Date(existing.last_login));
+            if (lastWib !== todayWib) {
               currentUsage = 0;
             }
           }
 
-          // Perbarui nama, foto, waktu login terakhir, dan kuota reset
+          // Perbarui nama, foto, waktu login terakhir, quota_reset_date, dan kuota reset
           await db
             .prepare(`
               UPDATE users
-              SET name = ?, picture = ?, last_login = ?, usage_count = ?
-              WHERE LOWER(email) = ?
+              SET name = ?, picture = ?, last_login = ?, usage_count = ?, quota_reset_date = ?
+              WHERE email = ?
             `)
-            .bind(userName, userPicture, nowIso, currentUsage, userEmail)
+            .bind(userName, userPicture, nowIso, currentUsage, todayWib, userEmail)
             .run();
 
           return new Response(
@@ -254,10 +302,10 @@ export async function onRequestPost(context: { request: Request; env: Env }) {
 
           await db
             .prepare(`
-              INSERT INTO users (email, name, picture, role, status, daily_quota, usage_count, last_login, created_at)
-              VALUES (?, ?, ?, ?, ?, ?, 0, ?, ?)
+              INSERT INTO users (email, name, picture, role, status, daily_quota, usage_count, quota_reset_date, last_login, created_at)
+              VALUES (?, ?, ?, ?, ?, ?, 0, ?, ?, ?)
             `)
-            .bind(userEmail, userName, userPicture, initialRole, initialStatus, initialQuota, nowIso, nowIso)
+            .bind(userEmail, userName, userPicture, initialRole, initialStatus, initialQuota, todayWib, nowIso, nowIso)
             .run();
 
           return new Response(

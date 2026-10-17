@@ -1,6 +1,6 @@
 import { get, set } from 'idb-keyval';
 import { nanoid } from 'nanoid';
-import { queueBackgroundSync } from '@/lib/sync/engine';
+import { queueBackgroundSync, syncDeleteFtpAccount } from '@/lib/sync/engine';
 import type {
   FtpAccountProfile,
   FtpProtocol,
@@ -206,6 +206,7 @@ export async function deleteFtpProfile(id: string): Promise<void> {
   await set(STORAGE_KEYS.ACCOUNTS, nextList);
   syncWithBridge(nextList).catch(() => {});
   queueBackgroundSync();
+  void syncDeleteFtpAccount(id);
 
   const activeId = await getActiveFtpProfileId();
   if (activeId === id) {

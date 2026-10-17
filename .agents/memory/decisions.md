@@ -230,5 +230,26 @@
   4. Menerapkan reset otomatis kuota pemakaian saat pergantian hari (00:00) berbasis tanggal `LastLogin`.
   5. Menghubungkan avatar dinamis di `components/AppSideRail.tsx` dengan badge status (Hijau = Aktif Whitelist, Kuning = Pending Approval, Merah = Diblokir) dan meter kuota sisa di header `app/page.tsx`.
 - **Rationale**: Memastikan akses AI terkontrol dengan kuota yang adil tanpa biaya database server terpusat.
+## [2026-10-17] Cloudflare D1 Serverless SQL Database & Edge Auth Architecture
+- **Context**: Kebutuhan migrasi dari Google Sheets ke database SQL berlatensi rendah (~0.2ms) yang terintegrasi langsung dengan Cloudflare Pages Functions tanpa cold-start, untuk autentikasi, kuota harian, riwayat generasi, sesi, akun FTP, dan upload ledger.
+- **Decision**:
+  1. Menggunakan **Cloudflare D1 (`metagen-db`)** region Singapura (`SIN`) dengan binding `DB` di `wrangler.toml`.
+  2. Merancang 6 tabel relasional di `schema.sql`: `users`, `metadata_history`, `generation_sessions`, `ftp_accounts`, `upload_ledger`, dan `user_settings`.
+  3. Mengarahkan verifikasi auth Google OAuth 2.0 ID Token langsung di Edge via `functions/api/auth/google.ts` dan pre-flight quota check di `functions/api/generate/proxy.ts`.
+- **Rationale**: Menghilangkan latensi tinggi Google Apps Script (dari ~1.5–3 detik menjadi <100ms) dan memberikan isolasi ACID transaction untuk data pengguna.
 
-
+## [2026-10-17] Auth & Sync Hardening: BOLA Protection, WIB Quota Reset Engine, Zombie-Free Sync, and D1 Batching
+- **Context**: Audit menyeluruh terhadap sistem autentikasi dan sinkronisasi menemukan 5 kerentanan/hambatan kritis:
+  1. Broken Object-Level Authorization (BOLA) pada `/api/sync` di mana request hanya mengandalkan query string `email` tanpa validasi kepemilikan token.
+  2. Penguncian kuota permanen akibat perbandingan tanggal UTC vs WIB (`Asia/Jakarta`) yang meleset 7 jam serta logika reset yang hanya berjalan saat full re-login.
+  3. Pemotongan kuota prematur sebelum AI berhasil mengembalikan metadata JSON, merugikan pengguna jika terjadi timeout cluster AI.
+  4. Fenomena "Zombie Data" di mana data sesi atau akun FTP yang dihapus lokal bangkit kembali saat sinkronisasi cloud D1.
+  5. Latensi push cloud tinggi akibat loop eksekusi SQL sekuensial (N+1) pada Cloudflare D1.
+- **Decision**:
+  1. **BOLA Enforcement**: `functions/api/sync.ts` memvalidasi Google ID Token resmi via Google tokeninfo dan mencocokkan `token.email === userEmail`. Semua request sync dari client (`lib/sync/engine.ts`) wajib menyertakan token ini.
+  2. **WIB Daily Quota Engine**: Helper `getWibDateString()` menggunakan `Intl.DateTimeFormat` dengan timezone `Asia/Jakarta`. Pengecekan reset kuota diaktifkan otomatis di pre-flight `proxy.ts` dan tombol "Segarkan Kuota" (`get_user_status`).
+  3. **Delayed Quota Deduction**: Pemotongan kuota D1 hanya dieksekusi setelah model AI sukses mengembalikan JSON valid. Di frontend, `currentUser` reaktif ter-update instan per item yang selesai.
+  4. **Zombie-Free Deletion**: Menambahkan endpoint `delete_session` dan `delete_ftp_account` di D1 sync API, dan mengaitkannya langsung saat user menghapus sesi di `app/page.tsx` atau akun FTP di `lib/ftp/store.ts`.
+  5. **D1 Batching & IndexedDB Optimization**: Mengganti query sekuensial D1 dengan `db.batch()` dalam pecahan 100 statement per chunk. Di frontend, menggunakan `getMany()` dan `setMany()` dari `idb-keyval`.
+  6. **Settings Overwrite Guard**: Isolasi penyimpanan preferensi pengguna via `isSettingsInitialized` ref di `app/page.tsx` dan `triggerSync` flag pada `lib/store.ts` untuk mencegah setting D1 tertimpa nilai default perangkat baru.
+- **Rationale & Consequences**: Menjamin integritas data, keamanan akses per pengguna, akurasi perhitungan kuota tepat jam 00:00 WIB, performa push sub-detik (<200ms), serta pengalaman pengguna yang mulus tanpa kehilangan kuota akibat kegagalan jaringan.

@@ -1,6 +1,6 @@
 'use client';
 
-import { useCallback, useEffect, useMemo, useState } from 'react';
+import { useCallback, useEffect, useMemo, useState, useRef } from 'react';
 import { History as HistoryIcon, Home, Key, LogOut, RefreshCw, Sparkles, UploadCloud, Zap } from 'lucide-react';
 import { nanoid } from 'nanoid/non-secure';
 
@@ -16,8 +16,8 @@ import { LandingBerandaView } from '@/components/LandingBerandaView';
 import { GoogleAuthModal } from '@/components/GoogleAuthModal';
 import { loadFtpProfiles } from '@/lib/ftp/store';
 import type { AuthUser } from '@/lib/auth/types';
-import { clearStoredUser, getStoredUser, onAuthChange, refreshUserStatus } from '@/lib/auth/store';
-import { runInitialSilentSync, syncDeleteHistoryItems, SYNC_COMPLETED_EVENT } from '@/lib/sync/engine';
+import { clearStoredUser, getStoredUser, onAuthChange, refreshUserStatus, saveStoredUser } from '@/lib/auth/store';
+import { runInitialSilentSync, syncDeleteHistoryItems, syncDeleteSession, SYNC_COMPLETED_EVENT } from '@/lib/sync/engine';
 
 import { resizeImageToMax1024 } from '@/lib/resize';
 import { extractVideoKeyframes, isVideoFile } from '@/lib/video';
@@ -34,6 +34,7 @@ import {
   saveSettings,
   loadSettings,
   saveSession,
+  getSession,
   loadSessions,
   deleteSession,
   loadSessionItems,
@@ -409,6 +410,7 @@ export default function App() {
   // Google Auth & User state
   const [currentUser, setCurrentUser] = useState<AuthUser | null>(null);
   const [showAuthModal, setShowAuthModal] = useState(false);
+  const isSettingsInitialized = useRef(false);
 
   // Logout handler with toast feedback
   const handleLogout = useCallback(() => {
@@ -453,6 +455,15 @@ export default function App() {
       void refreshHistory();
       void loadSessions().then(setSessions);
       void loadFtpProfiles().then((p) => setFtpProfilesCount(p.length));
+      const latestSettings = loadSettings();
+      if (latestSettings) {
+        setModel(GAS_PROXY_MODELS.includes(latestSettings.model) ? latestSettings.model : GAS_PROXY_MODELS[0]);
+        setFileType(latestSettings.fileType);
+        setTitleLength(latestSettings.titleLength);
+        setDescriptionLength(latestSettings.descriptionLength);
+        setKeywordsCount(latestSettings.keywordsCount);
+        setExtra(latestSettings.extraInstructions);
+      }
     };
     window.addEventListener(SYNC_COMPLETED_EVENT, handleSyncComplete);
 
@@ -482,6 +493,7 @@ export default function App() {
       setExtra(saved.extraInstructions);
     }
     setApiKey(getApiKey('gas-proxy'));
+    isSettingsInitialized.current = true;
   }, []);
 
   // Update API key when provider changes
@@ -493,8 +505,9 @@ export default function App() {
     }
   }, [provider, model]);
 
-  // Save settings when they change
+  // Save settings when they change (only after initial load to avoid overwriting cloud settings)
   useEffect(() => {
+    if (!isSettingsInitialized.current) return;
     saveSettings({
       provider,
       model,
@@ -543,7 +556,10 @@ export default function App() {
   const handleDeleteSession = useCallback(
     async (sessionId: string) => {
       if (confirm('Hapus sesi tugas ini dan semua file di dalamnya dari riwayat?')) {
+        const session = await getSession(sessionId);
+        const itemIds = session?.itemIds;
         await deleteSession(sessionId, true);
+        void syncDeleteSession(sessionId, itemIds);
         await refreshHistory();
         if (currentSession?.id === sessionId) {
           setCurrentSession(null);
@@ -727,6 +743,34 @@ export default function App() {
         const normalized = normalizeMeta(parsed);
         if (!normalized) throw new Error('Model returned invalid JSON shape.');
 
+        // Update kuota pengguna secara reaktif dan instan di antarmuka
+        const quotaInfo = (parsed as { userQuota?: { dailyQuota?: number; usageCount?: number; remainingQuota?: number } })?.userQuota;
+        if (quotaInfo && currentUser) {
+          setCurrentUser((prev) => {
+            if (!prev) return null;
+            const updated: AuthUser = {
+              ...prev,
+              dailyQuota: quotaInfo.dailyQuota ?? prev.dailyQuota,
+              usageCount: quotaInfo.usageCount ?? prev.usageCount,
+              remainingQuota: quotaInfo.remainingQuota ?? prev.remainingQuota,
+            };
+            saveStoredUser(updated);
+            return updated;
+          });
+        } else if (currentUser && currentUser.role !== 'admin') {
+          setCurrentUser((prev) => {
+            if (!prev) return null;
+            const nextUsage = (prev.usageCount || 0) + 1;
+            const updated: AuthUser = {
+              ...prev,
+              usageCount: nextUsage,
+              remainingQuota: Math.max(0, prev.dailyQuota - nextUsage),
+            };
+            saveStoredUser(updated);
+            return updated;
+          });
+        }
+
         const detectedIllustration =
           typeof normalized.illustration === 'boolean'
             ? normalized.illustration
@@ -825,6 +869,7 @@ export default function App() {
     setCurrentSession(finalSession);
     await saveSession(finalSession);
     await refreshHistory();
+    void refreshUserStatus();
 
     setBusy(false);
     setStatusText('');

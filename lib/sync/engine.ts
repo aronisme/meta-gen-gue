@@ -1,7 +1,7 @@
 // lib/sync/engine.ts
 // Automatic, Silent Two-Way Sync Engine between Browser (IndexedDB/LocalStorage) and Cloudflare D1
 
-import { get, set, keys } from 'idb-keyval';
+import { get, set, getMany, setMany, keys } from 'idb-keyval';
 import type {
   ItemMetaBox,
   GenerationSession,
@@ -10,6 +10,8 @@ import type {
   MicrostockAgencyId,
   FtpProtocol,
   FileType,
+  AssetType,
+  SessionStatus,
 } from '@/lib/types';
 import { loadSettings, saveSettings } from '@/lib/store';
 import { getStoredUser } from '@/lib/auth/store';
@@ -29,23 +31,19 @@ export const SYNC_COMPLETED_EVENT = 'metagen_sync_completed';
  */
 export async function pushLocalDataToCloud(userEmail: string): Promise<boolean> {
   try {
+    const user = getStoredUser();
+    const idToken = user?.idToken;
     const allKeys = (await keys()) as string[];
 
-    // 1. Kumpulkan Item Riwayat
+    // 1. Kumpulkan Item Riwayat via Batch
     const histKeys = allKeys.filter((k) => k.startsWith(`${HISTORE}:`));
-    const historyItems: ItemMetaBox[] = [];
-    for (const k of histKeys) {
-      const it = await get<ItemMetaBox>(k);
-      if (it && it.id) historyItems.push(it);
-    }
+    const rawHist = histKeys.length > 0 ? await getMany<ItemMetaBox>(histKeys) : [];
+    const historyItems: ItemMetaBox[] = rawHist.filter(Boolean) as ItemMetaBox[];
 
     // 2. Kumpulkan Sesi Batch
     const sessionKeys = allKeys.filter((k) => k.startsWith(`${SESSION_STORE}:`));
-    const sessions: GenerationSession[] = [];
-    for (const k of sessionKeys) {
-      const s = await get<GenerationSession>(k);
-      if (s && s.id) sessions.push(s);
-    }
+    const rawSessions = sessionKeys.length > 0 ? await getMany<GenerationSession>(sessionKeys) : [];
+    const sessions: GenerationSession[] = rawSessions.filter(Boolean) as GenerationSession[];
 
     // 3. Kumpulkan Akun FTP
     const ftpAccounts = (await get<FtpAccountProfile[]>(FTP_ACCOUNTS_KEY)) || [];
@@ -60,10 +58,12 @@ export async function pushLocalDataToCloud(userEmail: string): Promise<boolean> 
     const payload = {
       action: 'push_batch',
       userEmail,
+      idToken,
       historyItems: historyItems.slice(0, 300).map((it) => ({
         id: it.id,
         sessionId: it.sessionId,
         filename: it.filename,
+        assetType: it.assetType || 'image',
         title: it.meta?.title || '',
         description: it.meta?.description || it.meta?.title || '',
         keywords: it.meta?.keywords || '',
@@ -77,6 +77,11 @@ export async function pushLocalDataToCloud(userEmail: string): Promise<boolean> 
         id: s.id,
         name: s.title,
         fileCount: s.totalFiles || s.itemIds?.length || 0,
+        itemIds: s.itemIds || [],
+        status: s.status || 'completed',
+        totalFiles: s.totalFiles || s.itemIds?.length || 0,
+        successCount: s.successCount || 0,
+        errorCount: s.errorCount || 0,
         createdAt: new Date(s.createdAt || Date.now()).toISOString(),
       })),
       ftpAccounts: ftpAccounts.map((a) => ({
@@ -96,6 +101,9 @@ export async function pushLocalDataToCloud(userEmail: string): Promise<boolean> 
         fileHash: r.assetHash,
         filename: r.filename,
         agencyId: r.agencyId,
+        fileSize: r.fileSize || 0,
+        accountId: r.accountId || '',
+        accountLabel: r.accountLabel || r.agencyId || '',
         status: r.status,
         uploadedAt: new Date(r.uploadedAt || Date.now()).toISOString(),
       })),
@@ -104,7 +112,10 @@ export async function pushLocalDataToCloud(userEmail: string): Promise<boolean> 
 
     const resp = await fetch('/api/sync', {
       method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
+      headers: {
+        'Content-Type': 'application/json',
+        ...(idToken ? { Authorization: `Bearer ${idToken}` } : {}),
+      },
       body: JSON.stringify(payload),
     });
 
@@ -124,12 +135,19 @@ export async function pushLocalDataToCloud(userEmail: string): Promise<boolean> 
  */
 export async function pullCloudDataToLocal(userEmail: string): Promise<boolean> {
   try {
+    const user = getStoredUser();
+    const idToken = user?.idToken;
+
     const resp = await fetch('/api/sync', {
       method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
+      headers: {
+        'Content-Type': 'application/json',
+        ...(idToken ? { Authorization: `Bearer ${idToken}` } : {}),
+      },
       body: JSON.stringify({
         action: 'pull',
         userEmail,
+        idToken,
       }),
     });
 
@@ -141,6 +159,7 @@ export async function pullCloudDataToLocal(userEmail: string): Promise<boolean> 
         history?: Array<{
           id: string;
           filename: string;
+          assetType?: string;
           title: string;
           description?: string;
           keywords: string;
@@ -155,6 +174,11 @@ export async function pullCloudDataToLocal(userEmail: string): Promise<boolean> 
           id: string;
           name: string;
           fileCount?: number;
+          itemIds?: string[];
+          status?: string;
+          totalFiles?: number;
+          successCount?: number;
+          errorCount?: number;
           createdAt: string;
         }>;
         ftpAccounts?: Array<{
@@ -174,6 +198,9 @@ export async function pullCloudDataToLocal(userEmail: string): Promise<boolean> 
           fileHash: string;
           filename: string;
           agencyId: string;
+          fileSize?: number;
+          accountId?: string;
+          accountLabel?: string;
           status?: string;
           uploadedAt: string;
         }>;
@@ -193,18 +220,21 @@ export async function pullCloudDataToLocal(userEmail: string): Promise<boolean> 
 
     const { history, sessions, ftpAccounts, uploadLedger, settings } = res.data;
 
-    // 1. Simpan Riwayat dari Cloud ke IndexedDB
+    // 1. Simpan Riwayat dari Cloud ke IndexedDB via Batch
     if (history && history.length > 0) {
-      for (const h of history) {
-        const id = `${HISTORE}:${h.id}`;
-        const existing = await get<ItemMetaBox>(id);
-        if (!existing) {
+      const keysToCheck = history.map((h) => `${HISTORE}:${h.id}`);
+      const existingItems = await getMany<ItemMetaBox>(keysToCheck);
+      const newEntries: Array<[string, ItemMetaBox]> = [];
+
+      for (let i = 0; i < history.length; i++) {
+        const h = history[i];
+        if (!existingItems[i]) {
           const createdAtNum = typeof h.createdAt === 'string' ? new Date(h.createdAt).getTime() : Date.now();
           const item: ItemMetaBox = {
             id: h.id,
             filename: h.filename,
             fileType: 'auto',
-            assetType: 'image',
+            assetType: (h.assetType as AssetType) || 'image',
             createdAt: createdAtNum,
             sessionId: h.sessionId,
             status: 'success',
@@ -219,24 +249,31 @@ export async function pullCloudDataToLocal(userEmail: string): Promise<boolean> 
               aiGenerated: true,
             },
           };
-          await set(id, item);
+          newEntries.push([keysToCheck[i], item]);
         }
+      }
+
+      if (newEntries.length > 0) {
+        await setMany(newEntries);
       }
     }
 
     // 2. Simpan Sesi Batch dari Cloud ke IndexedDB
     if (sessions && sessions.length > 0) {
-      for (const s of sessions) {
-        const key = `${SESSION_STORE}:${s.id}`;
-        const existing = await get<GenerationSession>(key);
-        if (!existing) {
+      const sessionKeysToCheck = sessions.map((s) => `${SESSION_STORE}:${s.id}`);
+      const existingSessions = await getMany<GenerationSession>(sessionKeysToCheck);
+      const newSessionEntries: Array<[string, GenerationSession]> = [];
+
+      for (let i = 0; i < sessions.length; i++) {
+        const s = sessions[i];
+        if (!existingSessions[i]) {
           const sesCreatedAt = typeof s.createdAt === 'string' ? new Date(s.createdAt).getTime() : Date.now();
           const ses: GenerationSession = {
             id: s.id,
             title: s.name,
             createdAt: sesCreatedAt,
             updatedAt: sesCreatedAt,
-            status: 'completed',
+            status: (s.status as SessionStatus) || 'completed',
             settings: {
               provider: 'gas-proxy',
               model: 'gemini-2.5-flash',
@@ -246,13 +283,17 @@ export async function pullCloudDataToLocal(userEmail: string): Promise<boolean> 
               keywordsCount: 35,
               extraInstructions: '',
             },
-            itemIds: [],
-            totalFiles: s.fileCount || 0,
-            successCount: s.fileCount || 0,
-            errorCount: 0,
+            itemIds: Array.isArray(s.itemIds) ? s.itemIds : [],
+            totalFiles: s.totalFiles || s.fileCount || 0,
+            successCount: s.successCount || s.fileCount || 0,
+            errorCount: s.errorCount || 0,
           };
-          await set(key, ses);
+          newSessionEntries.push([sessionKeysToCheck[i], ses]);
         }
+      }
+
+      if (newSessionEntries.length > 0) {
+        await setMany(newSessionEntries);
       }
     }
 
@@ -291,10 +332,10 @@ export async function pullCloudDataToLocal(userEmail: string): Promise<boolean> 
             id: r.id,
             assetHash: r.fileHash,
             filename: r.filename,
-            fileSize: 0,
+            fileSize: r.fileSize || 0,
             agencyId: (r.agencyId as MicrostockAgencyId) || 'adobe',
-            accountId: '',
-            accountLabel: r.agencyId,
+            accountId: r.accountId || '',
+            accountLabel: r.accountLabel || r.agencyId,
             uploadedAt: r.uploadedAt ? new Date(r.uploadedAt).getTime() : Date.now(),
             status: (r.status as 'success' | 'failed') || 'success',
           };
@@ -304,17 +345,21 @@ export async function pullCloudDataToLocal(userEmail: string): Promise<boolean> 
       await set(UPLOAD_LEDGER_KEY, Array.from(map.values()));
     }
 
-    // 5. Simpan Pengaturan jika di lokal belum ada
-    if (settings && !loadSettings()) {
-      saveSettings({
-        provider: 'gas-proxy',
-        model: settings.model || 'gemini-2.5-flash',
-        fileType: (settings.fileType as FileType) || 'auto',
-        titleLength: settings.titleLength || 120,
-        descriptionLength: settings.descriptionLength || 60,
-        keywordsCount: settings.keywordsCount || 35,
-        extraInstructions: settings.extraInstructions || '',
-      });
+    // 5. Terapkan Pengaturan dari Cloud (tanpa memicu push balik / echo)
+    if (settings) {
+      const existing = loadSettings();
+      saveSettings(
+        {
+          provider: 'gas-proxy',
+          model: settings.model || existing?.model || 'gemini-2.5-flash',
+          fileType: (settings.fileType as FileType) || existing?.fileType || 'auto',
+          titleLength: settings.titleLength || existing?.titleLength || 120,
+          descriptionLength: settings.descriptionLength || existing?.descriptionLength || 60,
+          keywordsCount: settings.keywordsCount || existing?.keywordsCount || 35,
+          extraInstructions: settings.extraInstructions || existing?.extraInstructions || '',
+        },
+        false
+      );
     }
 
     // Beri tahu UI bahwa data baru dari cloud telah digabungkan
@@ -337,10 +382,10 @@ export async function runInitialSilentSync(userEmail: string): Promise<void> {
   isSyncing = true;
 
   try {
-    // 1. Unggah data lokal terlebih dahulu agar tidak hilang
-    await pushLocalDataToCloud(userEmail);
-    // 2. Tarik data dari cloud untuk sinkronisasi perangkat lain
+    // 1. Tarik data dari cloud terlebih dahulu agar preferensi akun termuat
     await pullCloudDataToLocal(userEmail);
+    // 2. Unggah data lokal yang belum tersimpan di cloud
+    await pushLocalDataToCloud(userEmail);
   } catch (e) {
     console.warn('[Initial Silent Sync Error]:', e);
   } finally {
@@ -350,7 +395,6 @@ export async function runInitialSilentSync(userEmail: string): Promise<void> {
 
 /**
  * Memanggil sinkronisasi di latar belakang dengan sistem debounce (2 detik)
- * agar aman dari beban request saat banyak item digenerate sekaligus
  */
 export function queueBackgroundSync(): void {
   const user = getStoredUser();
@@ -375,14 +419,72 @@ export async function syncDeleteHistoryItems(ids: string[]): Promise<void> {
   try {
     await fetch('/api/sync', {
       method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
+      headers: {
+        'Content-Type': 'application/json',
+        ...(user.idToken ? { Authorization: `Bearer ${user.idToken}` } : {}),
+      },
       body: JSON.stringify({
         action: 'delete_history',
         userEmail: user.email,
+        idToken: user.idToken,
         ids,
       }),
     });
   } catch (err) {
     console.warn('[Sync Delete Error]:', err);
+  }
+}
+
+/**
+ * Hapus sesi tugas di cloud D1 saat pengguna menghapus sesi lokal
+ */
+export async function syncDeleteSession(sessionId: string, itemIds?: string[]): Promise<void> {
+  const user = getStoredUser();
+  if (!user?.email || !sessionId) return;
+
+  try {
+    await fetch('/api/sync', {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        ...(user.idToken ? { Authorization: `Bearer ${user.idToken}` } : {}),
+      },
+      body: JSON.stringify({
+        action: 'delete_session',
+        userEmail: user.email,
+        idToken: user.idToken,
+        sessionId,
+        deleteItems: !!(itemIds && itemIds.length > 0),
+        itemIds,
+      }),
+    });
+  } catch (err) {
+    console.warn('[Sync Delete Session Error]:', err);
+  }
+}
+
+/**
+ * Hapus akun FTP/SFTP di cloud D1 saat pengguna menghapus akun lokal
+ */
+export async function syncDeleteFtpAccount(accountId: string): Promise<void> {
+  const user = getStoredUser();
+  if (!user?.email || !accountId) return;
+
+  try {
+    await fetch('/api/sync', {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        ...(user.idToken ? { Authorization: `Bearer ${user.idToken}` } : {}),
+      },
+      body: JSON.stringify({
+        action: 'delete_ftp_account',
+        userEmail: user.email,
+        idToken: user.idToken,
+        accountId,
+      }),
+    });
+  } catch (err) {
+    console.warn('[Sync Delete FTP Account Error]:', err);
   }
 }
