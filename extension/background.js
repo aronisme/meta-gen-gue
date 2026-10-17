@@ -2,28 +2,25 @@
 
 const DEFAULT_APP_URL = 'https://meta-gen-gue.pages.dev';
 
-// Setup Context Menu on Install
+// Setup Single Context Menu on Install or Startup
 chrome.runtime.onInstalled.addListener(() => {
+  setupContextMenu();
+});
+
+chrome.runtime.onStartup.addListener(() => {
+  setupContextMenu();
+});
+
+function setupContextMenu() {
   chrome.contextMenus.removeAll(() => {
+    // Exactly ONE single menu item: no submenus, no secondary options, zero clutter
     chrome.contextMenus.create({
-      id: 'metagen_send_to_vcpa',
-      title: '✨ Generate Prompt dengan VCPA (Meta-Gen)',
-      contexts: ['image'],
-    });
-
-    chrome.contextMenus.create({
-      id: 'metagen_scan_tab_images',
-      title: '🖼️ Scan Semua Gambar di Halaman Ini...',
-      contexts: ['page'],
-    });
-
-    chrome.contextMenus.create({
-      id: 'metagen_open_app',
-      title: '🚀 Buka Meta-Gen Prompt Generator',
-      contexts: ['page', 'image'],
+      id: 'metagen_generate_prompt',
+      title: '✨ Generate Prompt (Meta-Gen)',
+      contexts: ['image', 'link', 'page', 'frame'],
     });
   });
-});
+}
 
 // Helper: Convert ArrayBuffer to Base64 Data URL
 function arrayBufferToDataUrl(buffer, mimeType = 'image/jpeg') {
@@ -39,6 +36,9 @@ function arrayBufferToDataUrl(buffer, mimeType = 'image/jpeg') {
 
 // Helper: Fetch image from URL and convert to Base64 Data URL safely
 async function fetchImageAsDataUrl(url) {
+  if (!url) return '';
+  if (url.startsWith('data:')) return url;
+
   try {
     const res = await fetch(url, { mode: 'cors' });
     if (!res.ok) throw new Error(`HTTP ${res.status}`);
@@ -54,16 +54,12 @@ async function fetchImageAsDataUrl(url) {
 
 // Get configured target app URL from storage
 async function getTargetAppUrl() {
-  const data = await chrome.storage.local.get(['targetAppUrl', 'autoFocusTab']);
-  return {
-    targetAppUrl: (data.targetAppUrl || DEFAULT_APP_URL).replace(/\/$/, ''),
-    autoFocusTab: data.autoFocusTab !== false,
-  };
+  const data = await chrome.storage.local.get(['targetAppUrl']);
+  return (data.targetAppUrl || DEFAULT_APP_URL).replace(/\/$/, '');
 }
 
-// Find open Meta-Gen tab or open a new one
-async function sendPayloadToMetaGenTab(payload, targetAppUrl, autoFocus = true) {
-  // Query all tabs matching target domain
+// Send Payload to Meta-Gen Tab SILENTLY in the background (DO NOT SWITCH TAB!)
+async function sendPayloadToMetaGenTabSilently(payload, targetAppUrl) {
   const domainPattern = targetAppUrl.includes('localhost')
     ? '*://localhost:*/*'
     : '*://*.meta-gen-gue.pages.dev/*';
@@ -72,147 +68,209 @@ async function sendPayloadToMetaGenTab(payload, targetAppUrl, autoFocus = true) 
 
   if (tabs.length > 0) {
     const targetTab = tabs[0];
-    if (autoFocus && targetTab.id) {
-      await chrome.tabs.update(targetTab.id, { active: true });
-      if (targetTab.windowId) {
-        await chrome.windows.update(targetTab.windowId, { focused: true });
-      }
+
+    // Inject message into target tab WITHOUT activating it or focusing its window
+    try {
+      await chrome.scripting.executeScript({
+        target: { tabId: targetTab.id },
+        func: (data) => {
+          // 1. Post to window
+          window.postMessage(
+            {
+              type: 'METAGEN_ENQUEUE_PROMPT_IMAGE',
+              payload: data,
+            },
+            '*'
+          );
+
+          // 2. Broadcast across tabs
+          try {
+            const bc = new BroadcastChannel('metagen_extension_bus');
+            bc.postMessage({
+              type: 'METAGEN_ENQUEUE_PROMPT_IMAGE',
+              payload: data,
+            });
+            bc.close();
+          } catch {}
+        },
+        args: [payload],
+      });
+    } catch (err) {
+      console.warn('[Meta-Gen Extension] Could not inject script directly:', err);
     }
-
-    // Execute message injection to the tab
-    await chrome.scripting.executeScript({
-      target: { tabId: targetTab.id },
-      func: (data) => {
-        window.postMessage(
-          {
-            type: 'METAGEN_ENQUEUE_PROMPT_IMAGE',
-            payload: data,
-          },
-          '*'
-        );
-      },
-      args: [payload],
-    });
-
-    // Flash badge
-    chrome.action.setBadgeText({ text: 'OK', tabId: targetTab.id });
-    chrome.action.setBadgeBackgroundColor({ color: '#ff6b35', tabId: targetTab.id });
-    setTimeout(() => {
-      chrome.action.setBadgeText({ text: '', tabId: targetTab.id });
-    }, 2500);
 
     return true;
   } else {
-    // If no Meta-Gen tab is open, save to pending queue in storage and open new tab
+    // If no Meta-Gen tab is open, save to pending queue in storage
     const existing = (await chrome.storage.local.get(['pendingQueue'])).pendingQueue || [];
-    existing.push(payload);
+    if (Array.isArray(payload)) {
+      existing.push(...payload);
+    } else {
+      existing.push(payload);
+    }
     await chrome.storage.local.set({ pendingQueue: existing });
 
-    // Open Meta-Gen Prompt Generator directly
+    // Open Meta-Gen in BACKGROUND (active: false) so user stays on current tab!
     const newTabUrl = `${targetAppUrl}/?action=enqueue_prompt&source=extension&t=${Date.now()}`;
-    await chrome.tabs.create({ url: newTabUrl, active: autoFocus });
+    await chrome.tabs.create({ url: newTabUrl, active: false });
     return true;
+  }
+}
+
+// Helper: Show non-intrusive floating toast on the user's current browsing page
+async function showToastOnActiveTab(tabId, thumbnail, subtitle = '') {
+  if (!tabId) return;
+  try {
+    await chrome.scripting.executeScript({
+      target: { tabId: tabId },
+      func: (thumb, sub) => {
+        if (typeof window.__metaGenShowToast === 'function') {
+          window.__metaGenShowToast({
+            thumbnail: thumb,
+            subtitle: sub || 'Diproses di antrean tanpa mengganggu tab aktif Anda.',
+          });
+        }
+      },
+      args: [thumbnail, subtitle],
+    });
+  } catch (err) {
+    console.debug('[Meta-Gen Extension] Toast injection skipped:', err);
   }
 }
 
 // Handle Context Menu Clicks
 chrome.contextMenus.onClicked.addListener(async (info, tab) => {
-  const { targetAppUrl, autoFocusTab } = await getTargetAppUrl();
+  if (info.menuItemId !== 'metagen_generate_prompt') return;
 
-  if (info.menuItemId === 'metagen_open_app') {
-    await chrome.tabs.create({ url: targetAppUrl, active: true });
-    return;
-  }
+  const targetAppUrl = await getTargetAppUrl();
 
-  if (info.menuItemId === 'metagen_scan_tab_images') {
-    // Open extension popup or trigger image scanner
+  // Show processing badge on extension icon
+  chrome.action.setBadgeText({ text: '⏳' });
+  chrome.action.setBadgeBackgroundColor({ color: '#ff6b35' });
+
+  try {
+    let targetImageUrl = info.srcUrl || '';
+
+    // If right-clicked on an overlay/div/frame/canvas, extract real image from the clicked frame
     if (tab?.id) {
-      chrome.action.openPopup();
+      try {
+        const frameResults = await chrome.scripting.executeScript({
+          target: { tabId: tab.id, frameIds: [info.frameId || 0] },
+          func: () => {
+            return window.__metaGenExtractLastClickedImage
+              ? window.__metaGenExtractLastClickedImage()
+              : null;
+          },
+        });
+
+        const extracted = frameResults?.[0]?.result;
+        if (extracted?.url) {
+          targetImageUrl = extracted.url;
+        }
+      } catch (err) {
+        console.debug('[Meta-Gen Extension] Frame element extraction fallback:', err);
+      }
     }
-    return;
-  }
 
-  if (info.menuItemId === 'metagen_send_to_vcpa') {
-    const imageUrl = info.srcUrl;
-    if (!imageUrl) return;
+    // Fallback: check if link points directly to an image
+    if (!targetImageUrl && info.linkUrl) {
+      if (/\.(jpe?g|png|webp|avif|gif)(\?.*)?$/i.test(info.linkUrl)) {
+        targetImageUrl = info.linkUrl;
+      }
+    }
 
-    // Show loading badge
-    chrome.action.setBadgeText({ text: '...' });
-    chrome.action.setBadgeBackgroundColor({ color: '#ff6b35' });
+    if (!targetImageUrl) {
+      chrome.action.setBadgeText({ text: '?' });
+      chrome.action.setBadgeBackgroundColor({ color: '#ef4444' });
+      await showToastOnActiveTab(tab?.id, '', 'Tidak menemukan gambar di titik klik ini.');
+      setTimeout(() => chrome.action.setBadgeText({ text: '' }), 2000);
+      return;
+    }
 
-    try {
-      const dataUrl = await fetchImageAsDataUrl(imageUrl);
-      const filename = `Web_Img_${Date.now().toString().slice(-6)}.jpg`;
+    // Fetch and convert image to Data URL to bypass CORS/hotlinking
+    const dataUrl = await fetchImageAsDataUrl(targetImageUrl);
+    const filename = `Web_Img_${Date.now().toString().slice(-6)}.jpg`;
 
-      const payload = {
-        id: `ext_${Date.now()}_${Math.random().toString(36).substring(2, 7)}`,
-        source: 'extension',
-        imageDataUrl: dataUrl,
-        filename: filename,
-        sourceUrl: imageUrl,
-        pageTitle: tab?.title || 'Web Page',
-        addedAt: Date.now(),
-      };
+    const payload = {
+      id: `ext_${Date.now()}_${Math.random().toString(36).substring(2, 7)}`,
+      source: 'extension',
+      imageDataUrl: dataUrl,
+      filename: filename,
+      sourceUrl: targetImageUrl,
+      pageTitle: tab?.title || 'Web Page',
+      addedAt: Date.now(),
+    };
 
-      await sendPayloadToMetaGenTab(payload, targetAppUrl, autoFocusTab);
-    } catch (e) {
-      console.error('[Meta-Gen Extension] Error queuing image:', e);
-    } finally {
+    // Send silently to Meta-Gen in background (NEVER switch tabs)
+    await sendPayloadToMetaGenTabSilently(payload, targetAppUrl);
+
+    // Show instant feedback on the user's active browsing screen
+    await showToastOnActiveTab(tab?.id, dataUrl || targetImageUrl);
+
+    // Update extension badge to success
+    chrome.action.setBadgeText({ text: '✓' });
+    chrome.action.setBadgeBackgroundColor({ color: '#10b981' });
+    setTimeout(() => {
       chrome.action.setBadgeText({ text: '' });
-    }
+    }, 2500);
+  } catch (e) {
+    console.error('[Meta-Gen Extension] Error queuing image:', e);
+    chrome.action.setBadgeText({ text: 'ERR' });
+    chrome.action.setBadgeBackgroundColor({ color: '#ef4444' });
+    setTimeout(() => chrome.action.setBadgeText({ text: '' }), 2500);
   }
 });
 
 // Handle Messages from Content Script or Popup
 chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
   if (message.type === 'GET_CONFIG') {
-    getTargetAppUrl().then((conf) => sendResponse(conf));
+    getTargetAppUrl().then((url) => sendResponse({ targetAppUrl: url }));
+    return true;
+  }
+
+  if (message.type === 'CHECK_PENDING_QUEUE') {
+    chrome.storage.local.get(['pendingQueue']).then((data) => {
+      const pending = data.pendingQueue || [];
+      if (pending.length > 0) {
+        chrome.storage.local.set({ pendingQueue: [] });
+      }
+      sendResponse({ pending });
+    });
     return true;
   }
 
   if (message.type === 'ENQUEUE_IMAGES_BATCH') {
     (async () => {
-      const { targetAppUrl, autoFocusTab } = await getTargetAppUrl();
-      const images = message.images || [];
+      try {
+        const targetAppUrl = await getTargetAppUrl();
+        const images = message.images || [];
+        const payloads = [];
 
-      for (const img of images) {
-        const dataUrl = img.dataUrl || (await fetchImageAsDataUrl(img.url));
-        const payload = {
-          id: `ext_${Date.now()}_${Math.random().toString(36).substring(2, 7)}`,
-          source: 'extension',
-          imageDataUrl: dataUrl,
-          filename: img.filename || `Web_Batch_${Date.now().toString().slice(-6)}.jpg`,
-          sourceUrl: img.url,
-          pageTitle: message.pageTitle || 'Web Page',
-          addedAt: Date.now(),
-        };
-        await sendPayloadToMetaGenTab(payload, targetAppUrl, false);
-      }
-
-      // If requested, activate the Meta-Gen tab after all are sent
-      if (autoFocusTab) {
-        const domainPattern = targetAppUrl.includes('localhost')
-          ? '*://localhost:*/*'
-          : '*://*.meta-gen-gue.pages.dev/*';
-        const tabs = await chrome.tabs.query({ url: domainPattern });
-        if (tabs[0]?.id) {
-          await chrome.tabs.update(tabs[0].id, { active: true });
+        for (const img of images) {
+          const dataUrl = img.dataUrl || (await fetchImageAsDataUrl(img.url));
+          payloads.push({
+            id: `ext_${Date.now()}_${Math.random().toString(36).substring(2, 7)}`,
+            source: 'extension',
+            imageDataUrl: dataUrl,
+            filename: img.filename || `Web_Batch_${Date.now().toString().slice(-6)}.jpg`,
+            sourceUrl: img.url,
+            pageTitle: message.pageTitle || 'Web Page',
+            addedAt: Date.now(),
+          });
         }
-      }
 
-      sendResponse({ success: true, count: images.length });
-    })();
-    return true;
-  }
+        // Send to Meta-Gen tab silently without switching tab
+        await sendPayloadToMetaGenTabSilently(payloads, targetAppUrl);
 
-  if (message.type === 'CHECK_PENDING_QUEUE') {
-    (async () => {
-      const { pendingQueue } = await chrome.storage.local.get(['pendingQueue']);
-      if (pendingQueue && pendingQueue.length > 0) {
-        await chrome.storage.local.set({ pendingQueue: [] });
-        sendResponse({ pending: pendingQueue });
-      } else {
-        sendResponse({ pending: [] });
+        // Flash badge
+        chrome.action.setBadgeText({ text: `+${images.length}` });
+        chrome.action.setBadgeBackgroundColor({ color: '#10b981' });
+        setTimeout(() => chrome.action.setBadgeText({ text: '' }), 2500);
+
+        sendResponse({ success: true, count: payloads.length });
+      } catch (err) {
+        console.error('[Meta-Gen Extension] Batch send error:', err);
+        sendResponse({ success: false, error: err.message });
       }
     })();
     return true;

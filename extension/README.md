@@ -1,29 +1,32 @@
 # Meta-Gen VCPA Browser Extension
 
-Ekstensi browser Chrome / Edge / Brave / Chromium untuk mendeteksi gambar di semua halaman web dan mengirimkannya langsung ke antrean **Visual Concept Prompt Agent (VCPA)** di Meta-Gen.
+Ekstensi browser Google Chrome / Microsoft Edge / Brave / Chromium untuk mendeteksi gambar di semua halaman web dan mengirimkannya langsung ke antrean **Visual Concept Prompt Agent (VCPA)** di Meta-Gen.
 
 ---
 
-## Fitur Utama
+## Fitur Utama & Cara Kerja
 
-1. **Klik Kanan Langsung Pada Gambar**:
-   - Klik kanan pada gambar apa saja di halaman web mana pun (Unsplash, Freepik, Adobe Stock, Pinterest, Midjourney showcase, dll.).
-   - Pilih **"✨ Generate Prompt dengan VCPA (Meta-Gen)"**.
-   - Gambar akan otomatis dikirim ke Antrean Web App (`meta-gen-gue`) untuk dianalisis dan di-generate menjadi batch prompt terkurasi.
+1. **Satu Klik Kanan — 100% di Latar Belakang (Tanpa Berpindah Tab)**:
+   - Klik kanan pada gambar apa saja di halaman web mana pun (Unsplash, Freepik, Adobe Stock, Pinterest, Canva, Figma, Google Images, dll.).
+   - Hanya ada **1 menu tunggal**: **`✨ Generate Prompt (Meta-Gen)`**.
+   - **Tidak berpindah tab**: Anda tetap berada di halaman yang sedang Anda telusuri. Tab tidak akan melompat.
+   - **Floating In-Page Toast**: Notifikasi elegan muncul sesaat di pojok kanan bawah halaman web Anda (`✓ Masuk Antrean Meta-Gen`), mengonfirmasi gambar sedang diproses di latar belakang.
+   - Menembus overlay transparan, kartu bertingkat, dan lapisan pembungkus (`div`, `a`, `picture`).
 
-2. **Scanner Semua Gambar di Halaman (Popup)**:
-   - Klik ikon ekstensi di toolbar browser.
-   - Ekstensi secara otomatis memindai seluruh gambar beresolusi cukup pada halaman aktif.
-   - Pilih satu atau banyak gambar sekaligus (multi-select / "Pilih Semua").
-   - Klik **"Kirim [X] Gambar ke Antrean"** untuk memproses batch gambar secara beruntun.
+2. **Deteksi Komprehensif Seluruh Frame & Halaman (Multi-Frame / Iframe / Lazy)**:
+   - Memindai tag `<img>`, `<picture>`, CSS `background-image`, SVG `<image>`, `<canvas>`, dan `<video>` poster.
+   - Menembus `iframe` dan `frames` di seluruh halaman web secara otomatis.
+   - Mendeteksi gambar *lazy-loading* (`data-src`, `data-original`, `data-lazy-src`, `srcset`).
+   - Popup menampilkan galeri thumbnail, dimensi resolusi, toggle filter ikon kecil, dan tombol "Pilih Semua".
+   - Tombol **"Kirim [X] Gambar ke Antrean (Latar Belakang)"** mengirim seluruh pilihan sekaligus tanpa memindahkan tab Anda.
 
-3. **Sistem Antrean Otomatis**:
-   - Jika antrean di web sedang memproses gambar sebelumnya, gambar-gambar baru dari ekstensi akan otomatis masuk status antrean (`pending`).
-   - Begitu gambar sebelumnya selesai dan menghasilkan prompt, sistem antrean otomatis memproses gambar berikutnya tanpa intervensi manual.
+3. **Sistem Antrean Otomatis di Web App**:
+   - Jika sistem web sedang sibuk memproses gambar, gambar-gambar baru otomatis masuk antrean (`pending`).
+   - Selesai satu gambar, prompt otomatis ditambahkan ke baris teratas sesi aktif, dan sistem otomatis lanjut memproses gambar berikutnya tanpa henti.
 
 ---
 
-## Cara Memasang Ekstensi (Google Chrome / Edge / Brave)
+## Cara Memasang / Memperbarui Ekstensi (Chrome / Edge / Brave)
 
 1. Buka browser Anda (Google Chrome, Microsoft Edge, atau Brave).
 2. Di bilah alamat URL, ketik:
@@ -31,20 +34,17 @@ Ekstensi browser Chrome / Edge / Brave / Chromium untuk mendeteksi gambar di sem
    - **Edge**: `edge://extensions`
    - **Brave**: `brave://extensions`
 3. Aktifkan **Mode Pengembang (Developer Mode)** di sudut kanan atas.
-4. Klik tombol **"Muat yang belum dibongkar" (Load unpacked)** di kiri atas.
-5. Pilih folder:
-   ```
-   C:\App Tools\meta-gen-gue\extension
-   ```
-6. Ekstensi **"Meta-Gen VCPA - AI Image to Prompt Assistant"** kini aktif di browser Anda!
+4. Jika ekstensi sudah terpasang sebelumnya:
+   - Cukup klik ikon **Reload (🔄)** pada kartu ekstensi Meta-Gen VCPA.
+   - Atau jika belum terpasang, klik **"Muat yang belum dibongkar" (Load unpacked)** dan pilih folder:
+     ```
+     C:\App Tools\meta-gen-gue\extension
+     ```
+5. Ekstensi siap digunakan!
 
 ---
 
 ## Konfigurasi Target Web App
 
-Secara default, ekstensi akan mengirim gambar ke versi live:
-- **Cloud (Produksi)**: `https://meta-gen-gue.pages.dev`
-
-Jika Anda sedang menjalankan server lokal:
-- Buka popup ekstensi.
-- Ubah dropdown *Target Web App* ke: `Local (localhost:3000)`.
+- **Cloud (Produksi Default)**: `https://meta-gen-gue.pages.dev`
+- **Localhost**: Jika sedang menjalankan `pnpm dev`, buka popup ekstensi dan pilih `Local (localhost:3000)`.

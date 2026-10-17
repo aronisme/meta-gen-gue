@@ -159,6 +159,35 @@ body {
   box-shadow: none;
 }
 
+/* Filter Toggle Bar */
+.filter-bar {
+  padding: 6px 14px;
+  background-color: #fffaf0;
+  border-bottom: 1px solid #e5dcd3;
+}
+
+.filter-toggle {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 10px;
+  font-weight: 700;
+  color: #6b5344;
+  cursor: pointer;
+}
+
+.filter-toggle input[type="checkbox"] {
+  accent-color: #ff6b35;
+  cursor: pointer;
+}
+
+.empty-tip {
+  font-size: 10px;
+  color: #ff6b35;
+  margin-top: 6px;
+  font-weight: 700;
+}
+
 /* Images Grid */
 .images-container {
   flex: 1;

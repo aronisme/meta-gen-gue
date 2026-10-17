@@ -1,7 +1,7 @@
 {
   "manifest_version": 3,
   "name": "Meta-Gen VCPA - AI Image to Prompt Assistant",
-  "version": "1.0.0",
+  "version": "1.0.1",
   "description": "Deteksi gambar di semua halaman web dan generate prompt AI langsung dengan Visual Concept Prompt Agent (VCPA).",
   "permissions": [
     "contextMenus",
@@ -19,7 +19,9 @@
     {
       "matches": ["<all_urls>"],
       "js": ["content.js"],
-      "run_at": "document_end"
+      "run_at": "document_end",
+      "all_frames": true,
+      "match_about_blank": true
     }
   ],
   "action": {

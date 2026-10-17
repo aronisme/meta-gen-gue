@@ -416,18 +416,40 @@ export function PromptGeneratorView({ onSwitchToMetadata }: PromptGeneratorViewP
 
   // Listener for Browser Extension & External URL Actions
   useEffect(() => {
-    // 1. Listen for window postMessage from Chrome Extension
-    const handleWindowMessage = (event: MessageEvent) => {
-      if (event.data?.type === 'METAGEN_ENQUEUE_PROMPT_IMAGE') {
-        const payload = event.data.payload;
-        if (payload?.imageDataUrl || payload?.sourceUrl) {
-          const effectiveDataUrl = payload.imageDataUrl || payload.sourceUrl;
+    // 1. Listen for window postMessage and BroadcastChannel from Chrome Extension
+    type ExtensionIncomingItem = {
+      imageDataUrl?: string;
+      sourceUrl?: string;
+      filename?: string;
+    };
+
+    const handleIncomingPayload = (payload: unknown) => {
+      if (!payload) return;
+
+      if (Array.isArray(payload)) {
+        const validItems = (payload as ExtensionIncomingItem[])
+          .filter((p) => p && (p.imageDataUrl || p.sourceUrl))
+          .map((p) => ({
+            dataUrl: (p.imageDataUrl || p.sourceUrl) as string,
+            filename: p.filename || `Web_Batch_${Date.now().toString().slice(-4)}.jpg`,
+            source: 'extension' as const,
+            sourceUrl: p.sourceUrl,
+          }));
+
+        if (validItems.length > 0) {
+          enqueueImages(validItems);
+          toast.success(`${validItems.length} gambar dari ekstensi browser dimasukkan ke antrean!`);
+        }
+      } else {
+        const p = payload as ExtensionIncomingItem;
+        if (p?.imageDataUrl || p?.sourceUrl) {
+          const effectiveDataUrl = (p.imageDataUrl || p.sourceUrl) as string;
           enqueueImages([
             {
               dataUrl: effectiveDataUrl,
-              filename: payload.filename || `Web_Image_${Date.now().toString().slice(-4)}.jpg`,
+              filename: p.filename || `Web_Image_${Date.now().toString().slice(-4)}.jpg`,
               source: 'extension',
-              sourceUrl: payload.sourceUrl,
+              sourceUrl: p.sourceUrl,
             },
           ]);
           toast.success('Gambar dari ekstensi browser berhasil masuk ke antrean generator!');
@@ -435,7 +457,23 @@ export function PromptGeneratorView({ onSwitchToMetadata }: PromptGeneratorViewP
       }
     };
 
+    const handleWindowMessage = (event: MessageEvent) => {
+      if (event.data?.type === 'METAGEN_ENQUEUE_PROMPT_IMAGE') {
+        handleIncomingPayload(event.data.payload);
+      }
+    };
+
     window.addEventListener('message', handleWindowMessage);
+
+    let channel: BroadcastChannel | null = null;
+    try {
+      channel = new BroadcastChannel('metagen_extension_bus');
+      channel.onmessage = (ev) => {
+        if (ev.data?.type === 'METAGEN_ENQUEUE_PROMPT_IMAGE') {
+          handleIncomingPayload(ev.data.payload);
+        }
+      };
+    } catch {}
 
     // 2. Check URL query parameters for ?action=enqueue_prompt&imgUrl=...
     try {
@@ -458,6 +496,9 @@ export function PromptGeneratorView({ onSwitchToMetadata }: PromptGeneratorViewP
 
     return () => {
       window.removeEventListener('message', handleWindowMessage);
+      try {
+        channel?.close();
+      } catch {}
     };
   }, []);
 

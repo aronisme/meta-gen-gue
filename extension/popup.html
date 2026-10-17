@@ -14,10 +14,10 @@
         <div class="brand-icon">✨</div>
         <div>
           <h1 class="brand-title">Meta-Gen VCPA</h1>
-          <p class="brand-sub">AI Image to Prompt Assistant</p>
+          <p class="brand-sub">Deteksi Gambar & Frame (All Tabs)</p>
         </div>
       </div>
-      <span class="status-pill" id="statusPill">Aktif</span>
+      <span class="status-pill" id="statusPill">Latar Belakang</span>
     </header>
 
     <!-- App Target Config Bar -->
@@ -35,22 +35,31 @@
     <section class="scanner-header">
       <div class="scanner-stats">
         <span class="stat-count" id="imageCount">0</span>
-        <span class="stat-label">Gambar Terdeteksi di Halaman</span>
+        <span class="stat-label">Gambar Ditemukan</span>
       </div>
       <div class="scanner-actions">
         <button type="button" id="selectAllBtn" class="btn-text">Pilih Semua</button>
-        <button type="button" id="refreshBtn" class="btn-text" title="Pindai Ulang">🔄</button>
+        <button type="button" id="refreshBtn" class="btn-text" title="Pindai Ulang Seluruh Frame">🔄 Pindai Ulang</button>
       </div>
+    </section>
+
+    <!-- Filter Toggle Bar -->
+    <section class="filter-bar">
+      <label class="filter-toggle">
+        <input type="checkbox" id="filterSmallImages" checked>
+        <span>Sembunyikan ikon / elemen kecil (&lt; 60px)</span>
+      </label>
     </section>
 
     <!-- Images Grid List -->
     <main class="images-container" id="imagesContainer">
       <div class="loading-state" id="loadingState">
         <div class="spinner"></div>
-        <p>Memindai gambar di tab aktif...</p>
+        <p>Memindai seluruh frame & gambar di tab aktif...</p>
       </div>
       <div class="empty-state hidden" id="emptyState">
-        <p>Tidak ada gambar berukuran cukup besar ditemukan pada halaman ini.</p>
+        <p>Tidak ada gambar yang memenuhi kriteria pada halaman dan frame ini.</p>
+        <p class="empty-tip">Coba hilangkan centang "Sembunyikan ikon kecil" di atas.</p>
       </div>
       <div class="images-grid" id="imagesGrid"></div>
     </main>
@@ -58,9 +67,9 @@
     <!-- Footer Action Bar -->
     <footer class="footer">
       <button type="button" id="sendSelectedBtn" class="btn-primary" disabled>
-        <span>Kirim 0 Gambar ke Antrean</span>
+        <span>Kirim 0 Gambar ke Antrean (Latar Belakang)</span>
       </button>
-      <button type="button" id="openAppBtn" class="btn-secondary" title="Buka Workspace Meta-Gen">
+      <button type="button" id="openAppBtn" class="btn-secondary" title="Buka Tab Web App Meta-Gen">
         🚀 Buka Web App
       </button>
     </footer>
