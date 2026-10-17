@@ -13,9 +13,12 @@ import {
   FileSpreadsheet,
   History,
   ImageIcon,
+  Layers,
   Lightbulb,
   Loader2,
   Palette,
+  Pause,
+  Play,
   Plus,
   RefreshCw,
   ShieldCheck,
@@ -26,6 +29,7 @@ import {
   Trash2,
   Upload,
   Wand2,
+  X,
 } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
@@ -62,6 +66,7 @@ import type {
   EngineType,
   PromptCardItem,
   PromptGenerationSession,
+  PromptQueueItem,
   SemanticMode,
   VCPAMode,
   VCPASettings,
@@ -154,6 +159,12 @@ export function PromptGeneratorView({ onSwitchToMetadata }: PromptGeneratorViewP
   const [isBrainstormOpen, setIsBrainstormOpen] = useState<boolean>(false);
   const [brainstormTopic, setBrainstormTopic] = useState<string>('');
   const [brainstormCount, setBrainstormCount] = useState<number>(10);
+
+  // 8. Automated Multi-Image Queue System State
+  const [queue, setQueue] = useState<PromptQueueItem[]>([]);
+  const [isQueuePaused, setIsQueuePaused] = useState<boolean>(false);
+  const [isQueueDrawerOpen, setIsQueueDrawerOpen] = useState<boolean>(false);
+  const activeProcessingRef = useRef<boolean>(false);
 
   // Restore active session from IndexedDB on initial render
   useEffect(() => {
@@ -277,6 +288,195 @@ export function PromptGeneratorView({ onSwitchToMetadata }: PromptGeneratorViewP
     toast.success(`Sesi "${selected.title}" dimuat (${selected.prompts?.length || 0} prompt).`);
   };
 
+  // -------------------------------------------------------------
+  // AUTOMATED QUEUE WORKER ENGINE
+  // -------------------------------------------------------------
+
+  // Helper: Enqueue one or multiple images
+  const enqueueImages = (
+    items: Array<{
+      dataUrl: string;
+      filename: string;
+      source: 'extension' | 'upload' | 'paste' | 'url';
+      sourceUrl?: string;
+      brief?: string;
+    }>
+  ) => {
+    const timestamp = Date.now();
+    const newQueueItems: PromptQueueItem[] = items.map((it, idx) => ({
+      id: `q_${timestamp}_${idx}_${Math.random().toString(36).substring(2, 6)}`,
+      source: it.source,
+      imageDataUrl: it.dataUrl,
+      filename: it.filename,
+      addedAt: timestamp + idx,
+      status: 'pending',
+      brief: it.brief,
+    }));
+
+    setQueue((prev) => [...prev, ...newQueueItems]);
+    if (mode !== 'reference_to_prompt') setMode('reference_to_prompt');
+    setIsQueueDrawerOpen(true);
+  };
+
+  // Continuous FIFO Queue Worker Loop
+  useEffect(() => {
+    if (activeProcessingRef.current || isQueuePaused) return;
+
+    const nextPending = queue.find((q) => q.status === 'pending');
+    if (!nextPending) return;
+
+    activeProcessingRef.current = true;
+
+    void (async () => {
+      // Mark as processing
+      setQueue((prev) =>
+        prev.map((q) =>
+          q.id === nextPending.id
+            ? { ...q, status: 'processing', progressStep: 'Menganalisis Visual DNA...' }
+            : q
+        )
+      );
+
+      setRefImageDataUrl(nextPending.imageDataUrl);
+      setBusy(true);
+
+      try {
+        const result = await executeVCPAGeneration({
+          mode: 'reference_to_prompt',
+          brief: nextPending.brief || brief || '',
+          imageDataUrl: nextPending.imageDataUrl,
+          settings,
+          provider: 'gas-proxy',
+          model: 'auto',
+          onProgressStep: (step) => {
+            setProgressStep(step);
+            setQueue((prev) =>
+              prev.map((q) => (q.id === nextPending.id ? { ...q, progressStep: step } : q))
+            );
+          },
+        });
+
+        const now = Date.now();
+        const newBatch: PromptCardItem[] = result.prompts.map((p, idx) => ({
+          ...p,
+          createdAt: now + idx,
+          batchId: result.jobId,
+        }));
+
+        // AUTO-ADD: Prepend to the top of active session!
+        setPrompts((prev) => {
+          const updated = [...newBatch, ...prev];
+          void savePromptSession({
+            ...session,
+            prompts: updated,
+            visualDna: result.visualDna || undefined,
+            settings,
+            mode: 'reference_to_prompt',
+            updatedAt: Date.now(),
+          });
+          return updated;
+        });
+
+        if (result.visualDna) {
+          setVisualDna(result.visualDna);
+        }
+
+        setQueue((prev) =>
+          prev.map((q) =>
+            q.id === nextPending.id
+              ? {
+                  ...q,
+                  status: 'completed',
+                  completedAt: Date.now(),
+                  generatedCount: result.completedCount,
+                  progressStep: 'Selesai',
+                }
+              : q
+          )
+        );
+
+        toast.success(
+          `Antrean [${nextPending.filename}]: ${result.completedCount} prompt berhasil di-generate!`
+        );
+      } catch (err: unknown) {
+        const msg = err instanceof Error ? err.message : String(err);
+        setQueue((prev) =>
+          prev.map((q) =>
+            q.id === nextPending.id ? { ...q, status: 'error', error: msg, progressStep: 'Gagal' } : q
+          )
+        );
+        toast.error(`Antrean [${nextPending.filename}] gagal: ${msg}`);
+      } finally {
+        activeProcessingRef.current = false;
+        setBusy(false);
+        setProgressStep('');
+      }
+    })();
+  }, [queue, isQueuePaused, brief, settings, session]);
+
+  // Listener for Browser Extension & External URL Actions
+  useEffect(() => {
+    // 1. Listen for window postMessage from Chrome Extension
+    const handleWindowMessage = (event: MessageEvent) => {
+      if (event.data?.type === 'METAGEN_ENQUEUE_PROMPT_IMAGE') {
+        const payload = event.data.payload;
+        if (payload?.imageDataUrl || payload?.sourceUrl) {
+          const effectiveDataUrl = payload.imageDataUrl || payload.sourceUrl;
+          enqueueImages([
+            {
+              dataUrl: effectiveDataUrl,
+              filename: payload.filename || `Web_Image_${Date.now().toString().slice(-4)}.jpg`,
+              source: 'extension',
+              sourceUrl: payload.sourceUrl,
+            },
+          ]);
+          toast.success('Gambar dari ekstensi browser berhasil masuk ke antrean generator!');
+        }
+      }
+    };
+
+    window.addEventListener('message', handleWindowMessage);
+
+    // 2. Check URL query parameters for ?action=enqueue_prompt&imgUrl=...
+    try {
+      const urlParams = new URLSearchParams(window.location.search);
+      const action = urlParams.get('action');
+      const imgUrl = urlParams.get('imgUrl') || urlParams.get('img');
+      if (action === 'enqueue_prompt' && imgUrl) {
+        enqueueImages([
+          {
+            dataUrl: imgUrl,
+            filename: `URL_Image_${Date.now().toString().slice(-4)}.jpg`,
+            source: 'url',
+            sourceUrl: imgUrl,
+          },
+        ]);
+        toast.info('Gambar dari tautan eksternal dimasukkan ke antrean.');
+        window.history.replaceState({}, '', window.location.pathname);
+      }
+    } catch {}
+
+    return () => {
+      window.removeEventListener('message', handleWindowMessage);
+    };
+  }, []);
+
+  // Queue Actions
+  const handleRemoveQueueItem = (id: string) => {
+    setQueue((prev) => prev.filter((q) => q.id !== id));
+    toast.info('Item dihapus dari antrean.');
+  };
+
+  const handleClearCompletedQueue = () => {
+    setQueue((prev) => prev.filter((q) => q.status === 'pending' || q.status === 'processing'));
+    toast.info('Riwayat antrean selesai dibersihkan.');
+  };
+
+  const handleCancelPendingQueue = () => {
+    setQueue((prev) => prev.filter((q) => q.status !== 'pending'));
+    toast.info('Seluruh antrean pending dibatalkan.');
+  };
+
   // Inspiration handlers
   const handleShuffleInspirations = () => {
     const currentIds = inspirations.map((i) => i.id);
@@ -313,27 +513,54 @@ export function PromptGeneratorView({ onSwitchToMetadata }: PromptGeneratorViewP
     }
   };
 
-  // Handle Image Selection
-  const handleSelectImage = async (file: File) => {
-    if (!file.type.startsWith('image/')) {
-      toast.error('File yang dipilih bukan gambar.');
+  // Handle Multi-file Drop / Selection
+  const handleSelectMultipleImages = async (files: FileList | File[]) => {
+    const fileArray = Array.from(files).filter((f) => f.type.startsWith('image/'));
+    if (fileArray.length === 0) {
+      toast.error('File yang dipilih bukan format gambar yang valid.');
       return;
     }
-    try {
+
+    // If single file and queue is idle, also set immediate preview
+    if (fileArray.length === 1 && queue.length === 0 && !busy) {
+      const single = fileArray[0];
       const effectiveFile =
-        file.name === 'image.png' || file.name === 'blob' || !file.name
-          ? new File([file], `Pasted_Ref_${Date.now().toString().slice(-6)}.png`, {
-              type: file.type || 'image/png',
+        single.name === 'image.png' || single.name === 'blob' || !single.name
+          ? new File([single], `Pasted_Ref_${Date.now().toString().slice(-6)}.png`, {
+              type: single.type || 'image/png',
             })
-          : file;
+          : single;
 
       setRefImageFile(effectiveFile);
       setVisualDna(null);
       const resized = await resizeImageToMax1024(effectiveFile);
       setRefImageDataUrl(resized.dataUrl);
       toast.success(`Gambar referensi dimuat: ${effectiveFile.name}`);
-    } catch {
-      toast.error('Gagal memproses gambar referensi.');
+      return;
+    }
+
+    const toastId = toast.loading(`Memproses ${fileArray.length} gambar untuk antrean...`);
+    const newItems: Array<{ dataUrl: string; filename: string; source: 'upload' }> = [];
+
+    for (let i = 0; i < fileArray.length; i++) {
+      const f = fileArray[i];
+      try {
+        const resized = await resizeImageToMax1024(f);
+        newItems.push({
+          dataUrl: resized.dataUrl,
+          filename: f.name,
+          source: 'upload',
+        });
+      } catch (err) {
+        console.warn('Gagal memproses gambar:', f.name, err);
+      }
+    }
+
+    if (newItems.length > 0) {
+      enqueueImages(newItems);
+      toast.success(`${newItems.length} gambar berhasil masuk antrean generator!`, { id: toastId });
+    } else {
+      toast.error('Gagal memuat gambar ke antrean.', { id: toastId });
     }
   };
 
@@ -358,13 +585,13 @@ export function PromptGeneratorView({ onSwitchToMetadata }: PromptGeneratorViewP
           setMode('reference_to_prompt');
           toast.info('Beralih ke Mode 1 (Dengan Image Reference)');
         }
-        void handleSelectImage(imageFile);
+        void handleSelectMultipleImages([imageFile]);
       }
     };
 
     window.addEventListener('paste', handlePaste);
     return () => window.removeEventListener('paste', handlePaste);
-  }, [mode]);
+  }, [mode, queue, busy]);
 
   const handleClearImage = () => {
     setRefImageFile(null);
@@ -373,7 +600,7 @@ export function PromptGeneratorView({ onSwitchToMetadata }: PromptGeneratorViewP
     if (fileInputRef.current) fileInputRef.current.value = '';
   };
 
-  // Main Generation Handler: AUTO-ADD & PREPEND NEWEST TO THE VERY TOP
+  // Main Manual Generate Action (routes to queue or executes direct)
   const handleGenerate = async () => {
     if (mode === 'reference_to_prompt' && !refImageDataUrl) {
       toast.error('Silakan unggah gambar referensi terlebih dahulu.');
@@ -381,6 +608,19 @@ export function PromptGeneratorView({ onSwitchToMetadata }: PromptGeneratorViewP
     }
     if (mode === 'text_ideation' && !brief.trim()) {
       toast.error('Silakan isi arahan ide / brief konsep terlebih dahulu.');
+      return;
+    }
+
+    // In Reference Mode: If queue has other items, enqueue this reference image so it respects the queue line!
+    if (mode === 'reference_to_prompt' && (queue.length > 0 || busy)) {
+      enqueueImages([
+        {
+          dataUrl: refImageDataUrl,
+          filename: refImageFile?.name || `Manual_Ref_${Date.now().toString().slice(-4)}.jpg`,
+          source: 'upload',
+        },
+      ]);
+      toast.info('Gambar dimasukkan ke antrean generator.');
       return;
     }
 
@@ -406,7 +646,7 @@ export function PromptGeneratorView({ onSwitchToMetadata }: PromptGeneratorViewP
         batchId: result.jobId,
       }));
 
-      // AUTO-ADD: PREPEND KE PALING ATAS (Prompt terbaru muncul paling atas)
+      // AUTO-ADD: PREPEND KE PALING ATAS
       const updatedPrompts = [...newBatch, ...prompts];
       setPrompts(updatedPrompts);
 
@@ -419,7 +659,6 @@ export function PromptGeneratorView({ onSwitchToMetadata }: PromptGeneratorViewP
         updatedDna = undefined;
       }
 
-      // Simpan pembaruan sesi ke IndexedDB secara otomatis
       const updatedSession: PromptGenerationSession = {
         ...session,
         prompts: updatedPrompts,
@@ -663,6 +902,10 @@ export function PromptGeneratorView({ onSwitchToMetadata }: PromptGeneratorViewP
     }
   };
 
+  const pendingQueueCount = queue.filter((q) => q.status === 'pending').length;
+  const processingQueueItem = queue.find((q) => q.status === 'processing');
+  const completedQueueCount = queue.filter((q) => q.status === 'completed').length;
+
   return (
     <div className="space-y-6">
       {/* 1. Top Header Banner */}
@@ -676,9 +919,15 @@ export function PromptGeneratorView({ onSwitchToMetadata }: PromptGeneratorViewP
             <span className="bg-[#fff5e6] border-2 border-[#2c1810] text-[#2c1810] text-[10px] font-black px-2.5 py-0.5 rounded-full uppercase tracking-wider shadow-[1px_1px_0_#2c1810]">
               Creative Intelligence v1.0
             </span>
+            {queue.length > 0 && (
+              <span className="bg-[#ff6b35] text-white text-[10px] font-black px-2.5 py-0.5 rounded-full uppercase tracking-wider flex items-center gap-1 shadow-[1px_1px_0_#2c1810] animate-pulse">
+                <Layers className="w-3 h-3" />
+                <span>Antrean Aktif ({queue.filter((q) => q.status === 'pending' || q.status === 'processing').length})</span>
+              </span>
+            )}
           </div>
           <p className="text-xs sm:text-sm text-[#6b5344] mt-1 font-medium">
-            Rancang ide visual komersial berbasis analisis referensi gambar atau brief bebas. Menghasilkan batch prompt beragam secara konseptual dengan anchor yang terjaga.
+            Rancang ide visual komersial berbasis analisis referensi gambar atau brief bebas. Mendukung pengiriman gambar via klik kanan ekstensi browser dengan sistem antrean otomatis.
           </p>
         </div>
 
@@ -707,7 +956,7 @@ export function PromptGeneratorView({ onSwitchToMetadata }: PromptGeneratorViewP
           }`}
         >
           <ImageIcon className="w-4 h-4 text-[#ff6b35]" />
-          <span>Mode 1: Dengan Image Reference (Visual DNA Remix)</span>
+          <span>Mode 1: Dengan Image Reference (Visual DNA & Antrean Gambar)</span>
         </button>
 
         <button
@@ -731,10 +980,20 @@ export function PromptGeneratorView({ onSwitchToMetadata }: PromptGeneratorViewP
       <div className="grid grid-cols-1 lg:grid-cols-12 gap-6 items-start">
         {/* Left Column: Creator Controls */}
         <div className="lg:col-span-5 space-y-4">
-          <div className="px-1">
+          <div className="px-1 flex items-center justify-between">
             <span className="text-[11px] font-black uppercase tracking-wider text-[#6b5344]">
               Panel Pengaturan Generator
             </span>
+            {queue.length > 0 && (
+              <button
+                type="button"
+                onClick={() => setIsQueueDrawerOpen((v) => !v)}
+                className="text-[11px] font-black text-[#ff6b35] hover:underline flex items-center gap-1 cursor-pointer"
+              >
+                <Layers className="w-3.5 h-3.5" />
+                <span>Lihat Antrean ({queue.length})</span>
+              </button>
+            )}
           </div>
 
           {/* CARD 1: Input Konsep & Acuan (Foldable) */}
@@ -756,7 +1015,7 @@ export function PromptGeneratorView({ onSwitchToMetadata }: PromptGeneratorViewP
                   </span>
                   <span className="text-[10px] text-[#6b5344] font-medium block">
                     {mode === 'reference_to_prompt'
-                      ? refImageFile ? `${refImageFile.name.slice(0, 24)}...` : 'Unggah foto acuan visual'
+                      ? refImageFile ? `${refImageFile.name.slice(0, 24)}...` : 'Unggah satu / banyak gambar acuan'
                       : brief ? `${brief.slice(0, 30)}...` : 'Tuliskan ide konsep'}
                   </span>
                 </div>
@@ -775,7 +1034,7 @@ export function PromptGeneratorView({ onSwitchToMetadata }: PromptGeneratorViewP
 
             {!foldedSections.input && (
               <div className="p-4 pt-0 space-y-3.5 border-t border-stone-200/80 mt-1">
-                {/* Mode 1: Reference dropzone */}
+                {/* Mode 1: Reference dropzone with Multi-Image Support */}
                 {mode === 'reference_to_prompt' && (
                   <div className="space-y-2 pt-3">
                     <div className="flex items-center justify-between">
@@ -804,17 +1063,28 @@ export function PromptGeneratorView({ onSwitchToMetadata }: PromptGeneratorViewP
                           className="w-20 h-20 object-cover rounded-lg border border-[#2c1810] shrink-0"
                         />
                         <div className="text-xs text-[#2c1810] space-y-1 min-w-0 flex-1">
-                          <p className="font-bold truncate">{refImageFile?.name || 'Reference Image'}</p>
+                          <p className="font-bold truncate">{refImageFile?.name || 'Active Reference'}</p>
                           <p className="text-[11px] text-[#6b5344]">
                             {refImageFile ? `${(refImageFile.size / 1024).toFixed(0)} KB` : 'Siap dianalisis'}
                           </p>
-                          <button
-                            type="button"
-                            onClick={() => fileInputRef.current?.click()}
-                            className="text-[11px] font-black text-[#ff6b35] hover:underline cursor-pointer block"
-                          >
-                            Ganti Gambar
-                          </button>
+                          <div className="flex items-center gap-3">
+                            <button
+                              type="button"
+                              onClick={() => fileInputRef.current?.click()}
+                              className="text-[11px] font-black text-[#ff6b35] hover:underline cursor-pointer block"
+                            >
+                              Ganti / Tambah Banyak
+                            </button>
+                            {queue.length > 0 && (
+                              <button
+                                type="button"
+                                onClick={() => setIsQueueDrawerOpen((v) => !v)}
+                                className="text-[11px] font-bold text-[#2c1810] hover:underline cursor-pointer"
+                              >
+                                Antrean ({queue.length})
+                              </button>
+                            )}
+                          </div>
                         </div>
                       </div>
                     ) : (
@@ -824,8 +1094,9 @@ export function PromptGeneratorView({ onSwitchToMetadata }: PromptGeneratorViewP
                         onDragOver={(e) => e.preventDefault()}
                         onDrop={(e) => {
                           e.preventDefault();
-                          const f = e.dataTransfer.files?.[0];
-                          if (f) void handleSelectImage(f);
+                          if (e.dataTransfer.files?.length) {
+                            void handleSelectMultipleImages(e.dataTransfer.files);
+                          }
                         }}
                         className="border-2 border-dashed border-[#2c1810] rounded-xl p-5 text-center bg-white hover:bg-[#fff5e6] focus:bg-[#fff5e6] focus:outline-none focus:ring-2 focus:ring-[#ff6b35] transition-colors cursor-pointer group space-y-2"
                       >
@@ -834,10 +1105,10 @@ export function PromptGeneratorView({ onSwitchToMetadata }: PromptGeneratorViewP
                         </div>
                         <div>
                           <p className="text-xs font-black text-[#2c1810]">
-                            Seret gambar ke sini, klik, atau Paste (Ctrl+V)
+                            Seret 1 atau banyak gambar ke sini, klik, atau Paste (Ctrl+V)
                           </p>
                           <p className="text-[10px] text-[#6b5344] mt-0.5">
-                            JPG, PNG, WebP (Maksimal 1024px auto-resize)
+                            Bisa pilih banyak gambar sekaligus atau klik kanan via Ekstensi Browser
                           </p>
                         </div>
                       </div>
@@ -847,10 +1118,12 @@ export function PromptGeneratorView({ onSwitchToMetadata }: PromptGeneratorViewP
                       ref={fileInputRef}
                       type="file"
                       accept="image/*"
+                      multiple
                       className="hidden"
                       onChange={(e) => {
-                        const file = e.target.files?.[0];
-                        if (file) void handleSelectImage(file);
+                        if (e.target.files?.length) {
+                          void handleSelectMultipleImages(e.target.files);
+                        }
                       }}
                     />
                   </div>
@@ -1321,7 +1594,7 @@ export function PromptGeneratorView({ onSwitchToMetadata }: PromptGeneratorViewP
           {/* Primary Generate Action Button */}
           <Button
             type="button"
-            disabled={busy}
+            disabled={busy && queue.length === 0}
             onClick={handleGenerate}
             className="w-full h-12 bg-[#ff6b35] hover:bg-[#e55a2b] text-white font-black text-sm border-2 border-[#2c1810] shadow-[4px_4px_0_#2c1810] cursor-pointer transition-all hover:translate-x-[1px] hover:translate-y-[1px] active:translate-x-[2px] active:translate-y-[2px]"
           >
@@ -1341,9 +1614,182 @@ export function PromptGeneratorView({ onSwitchToMetadata }: PromptGeneratorViewP
           </Button>
         </div>
 
-        {/* Right Column: Output & Visual DNA Feed (7 cols) */}
+        {/* Right Column: Output & Visual DNA Feed & Queue Manager (7 cols) */}
         <div className="lg:col-span-7 space-y-4">
-          {/* A. Visual DNA Profile Inspector (Only in Mode 1 with active image) */}
+          {/* A. AUTOMATED QUEUE MANAGER PANEL */}
+          {queue.length > 0 && (
+            <div className="bg-[#fffdf9] border-2 border-[#2c1810] rounded-2xl p-4 shadow-[4px_4px_0_#2c1810] space-y-3">
+              <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2">
+                <div className="flex items-center gap-2">
+                  <Layers className="w-5 h-5 text-[#ff6b35]" />
+                  <div>
+                    <h3 className="font-black text-xs sm:text-sm text-[#2c1810] flex items-center gap-2">
+                      <span>Antrean Generator Gambar (VCPA Queue)</span>
+                      {processingQueueItem && (
+                        <span className="inline-block w-2 h-2 rounded-full bg-emerald-500 animate-ping" />
+                      )}
+                    </h3>
+                    <p className="text-[11px] text-[#6b5344]">
+                      {pendingQueueCount > 0
+                        ? `${pendingQueueCount} gambar menunggu diproses secara beruntun.`
+                        : 'Semua gambar dalam antrean telah selesai diproses.'}
+                    </p>
+                  </div>
+                </div>
+
+                <div className="flex items-center gap-1.5 flex-wrap">
+                  {/* Pause / Resume Button */}
+                  <Button
+                    type="button"
+                    size="sm"
+                    variant="outline"
+                    onClick={() => {
+                      setIsQueuePaused((v) => !v);
+                      toast.info(isQueuePaused ? 'Antrean dilanjutkan.' : 'Antrean dijeda.');
+                    }}
+                    className="h-7 px-2 text-[11px] font-black border-2 border-[#2c1810] bg-white hover:bg-[#fff5e6] shadow-[1px_1px_0_#2c1810]"
+                  >
+                    {isQueuePaused ? (
+                      <>
+                        <Play className="w-3 h-3 mr-1 text-emerald-600" />
+                        <span>Lanjutkan</span>
+                      </>
+                    ) : (
+                      <>
+                        <Pause className="w-3 h-3 mr-1 text-amber-600" />
+                        <span>Jeda</span>
+                      </>
+                    )}
+                  </Button>
+
+                  {/* Clear Completed */}
+                  {completedQueueCount > 0 && (
+                    <Button
+                      type="button"
+                      size="sm"
+                      variant="outline"
+                      onClick={handleClearCompletedQueue}
+                      className="h-7 px-2 text-[11px] font-bold border-2 border-[#2c1810] bg-white hover:bg-[#fff5e6] shadow-[1px_1px_0_#2c1810]"
+                      title="Bersihkan antrean yang telah selesai"
+                    >
+                      <Check className="w-3 h-3 mr-1 text-emerald-600" />
+                      <span>Selesai ({completedQueueCount})</span>
+                    </Button>
+                  )}
+
+                  {/* Cancel Pending */}
+                  {pendingQueueCount > 0 && (
+                    <button
+                      type="button"
+                      onClick={handleCancelPendingQueue}
+                      className="p-1 rounded text-stone-400 hover:text-red-600 hover:bg-rose-50 text-[11px] font-bold cursor-pointer"
+                      title="Batalkan antrean yang belum berjalan"
+                    >
+                      <Trash2 className="w-3.5 h-3.5" />
+                    </button>
+                  )}
+
+                  {/* Drawer Collapse Button */}
+                  <button
+                    type="button"
+                    onClick={() => setIsQueueDrawerOpen((v) => !v)}
+                    className="p-1 rounded text-stone-500 hover:text-[#2c1810] cursor-pointer ml-1"
+                  >
+                    {isQueueDrawerOpen ? <ChevronUp className="w-4 h-4" /> : <ChevronDown className="w-4 h-4" />}
+                  </button>
+                </div>
+              </div>
+
+              {/* Queue Items Drawer */}
+              {isQueueDrawerOpen && (
+                <div className="pt-2 border-t border-stone-200 space-y-2.5">
+                  {/* 1. Currently Processing Item */}
+                  {processingQueueItem && (
+                    <div className="p-2.5 rounded-xl border-2 border-[#ff6b35] bg-[#fff5e6] flex items-center justify-between gap-3 shadow-[2px_2px_0_#2c1810]">
+                      <div className="flex items-center gap-2.5 min-w-0">
+                        {/* eslint-disable-next-line @next/next/no-img-element */}
+                        <img
+                          src={processingQueueItem.imageDataUrl}
+                          alt="Processing"
+                          className="w-12 h-12 object-cover rounded-lg border border-[#2c1810] shrink-0"
+                        />
+                        <div className="min-w-0">
+                          <div className="flex items-center gap-1.5 flex-wrap">
+                            <span className="text-[9px] font-black bg-[#ff6b35] text-white px-1.5 py-0.2 rounded uppercase">
+                              Sedang Proses
+                            </span>
+                            <span className="text-xs font-black text-[#2c1810] truncate">
+                              {processingQueueItem.filename}
+                            </span>
+                          </div>
+                          <p className="text-[10px] text-[#ff6b35] font-bold flex items-center gap-1 mt-0.5">
+                            <Loader2 className="w-3 h-3 animate-spin shrink-0" />
+                            <span>{processingQueueItem.progressStep || 'Memproses Visual Concept Agent...'}</span>
+                          </p>
+                        </div>
+                      </div>
+                      <span className="text-[10px] text-[#6b5344] font-semibold shrink-0">
+                        {processingQueueItem.source === 'extension' ? '🌐 Ekstensi' : '📁 Upload'}
+                      </span>
+                    </div>
+                  )}
+
+                  {/* 2. Pending Items List */}
+                  {pendingQueueCount > 0 && (
+                    <div className="space-y-1.5">
+                      <span className="text-[10px] font-black uppercase text-[#6b5344] tracking-wide block">
+                        Menunggu Giliran ({pendingQueueCount}):
+                      </span>
+                      <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
+                        {queue
+                          .filter((q) => q.status === 'pending')
+                          .map((item, idx) => (
+                            <div
+                              key={item.id}
+                              className="p-2 rounded-lg border border-stone-300 bg-white flex items-center justify-between gap-2 shadow-[1px_1px_0_#2c1810]"
+                            >
+                              <div className="flex items-center gap-2 min-w-0">
+                                <span className="text-[10px] font-black text-stone-500 bg-stone-100 px-1 rounded">
+                                  #{idx + 1}
+                                </span>
+                                {/* eslint-disable-next-line @next/next/no-img-element */}
+                                <img
+                                  src={item.imageDataUrl}
+                                  alt="Pending"
+                                  className="w-8 h-8 object-cover rounded border border-stone-200 shrink-0"
+                                />
+                                <span className="text-[11px] font-bold text-[#2c1810] truncate">
+                                  {item.filename}
+                                </span>
+                              </div>
+                              <button
+                                type="button"
+                                onClick={() => handleRemoveQueueItem(item.id)}
+                                className="text-stone-400 hover:text-red-600 p-1 cursor-pointer shrink-0"
+                                title="Batalkan item ini"
+                              >
+                                <X className="w-3 h-3" />
+                              </button>
+                            </div>
+                          ))}
+                      </div>
+                    </div>
+                  )}
+
+                  {/* 3. Completed Items Summary */}
+                  {completedQueueCount > 0 && (
+                    <div className="pt-1">
+                      <span className="text-[10px] font-bold text-stone-500">
+                        ✓ {completedQueueCount} gambar dalam antrean ini telah berhasil ditambahkan ke sesi.
+                      </span>
+                    </div>
+                  )}
+                </div>
+              )}
+            </div>
+          )}
+
+          {/* B. Visual DNA Profile Inspector (Only in Mode 1 with active image) */}
           {mode === 'reference_to_prompt' && visualDna && (
             <div className="bg-[#fffdf9] border-2 border-[#2c1810] rounded-2xl shadow-[4px_4px_0_#2c1810] overflow-hidden">
               <button
@@ -1415,7 +1861,7 @@ export function PromptGeneratorView({ onSwitchToMetadata }: PromptGeneratorViewP
             </div>
           )}
 
-          {/* B. Active Session Control & Bulk Actions Header */}
+          {/* C. Active Session Control & Bulk Actions Header */}
           <div className="bg-[#fffdf9] border-2 border-[#2c1810] rounded-2xl p-4 shadow-[4px_4px_0_#2c1810] space-y-3">
             <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3">
               {/* Session Title & Metadata */}
@@ -1484,8 +1930,25 @@ export function PromptGeneratorView({ onSwitchToMetadata }: PromptGeneratorViewP
                 </p>
               </div>
 
-              {/* Session Top Actions: + Sesi Baru & Riwayat Sesi */}
+              {/* Session Top Actions: + Sesi Baru, Riwayat Sesi & Antrean */}
               <div className="flex items-center gap-2 shrink-0 self-start sm:self-center">
+                {queue.length > 0 && (
+                  <Button
+                    type="button"
+                    size="sm"
+                    variant={queue.some((q) => q.status === 'processing') ? 'default' : 'outline'}
+                    onClick={() => setIsQueueDrawerOpen((v) => !v)}
+                    className={`h-8.5 px-3 text-xs font-black border-2 border-[#2c1810] cursor-pointer transition-all ${
+                      queue.some((q) => q.status === 'processing')
+                        ? 'bg-[#ff6b35] text-white shadow-[2px_2px_0_#2c1810]'
+                        : 'bg-white hover:bg-[#fff5e6] text-[#2c1810] shadow-[2px_2px_0_#2c1810]'
+                    }`}
+                  >
+                    <Layers className="w-3.5 h-3.5 mr-1.5" />
+                    <span>Antrean ({queue.filter((q) => q.status === 'pending' || q.status === 'processing').length})</span>
+                  </Button>
+                )}
+
                 <Button
                   type="button"
                   size="sm"
@@ -1586,7 +2049,7 @@ export function PromptGeneratorView({ onSwitchToMetadata }: PromptGeneratorViewP
             )}
           </div>
 
-          {/* C. Prompt Cards Feed */}
+          {/* D. Prompt Cards Feed */}
           {prompts.length === 0 ? (
             <div className="bg-[#fffdf9] border-2 border-dashed border-[#2c1810] rounded-2xl p-10 text-center shadow-[4px_4px_0_#2c1810] space-y-3">
               <div className="w-12 h-12 rounded-full bg-[#fff5e6] border-2 border-[#2c1810] mx-auto flex items-center justify-center">
@@ -1595,7 +2058,7 @@ export function PromptGeneratorView({ onSwitchToMetadata }: PromptGeneratorViewP
               <div>
                 <h4 className="font-black text-sm text-[#2c1810]">Belum Ada Prompt Dihasilkan</h4>
                 <p className="text-xs text-[#6b5344] max-w-sm mx-auto mt-1">
-                  Pilih gambar referensi atau masukkan brief di panel kiri, lalu klik &quot;Hasilkan Prompt Konseptual&quot; untuk memulai eksplorasi AI.
+                  Pilih gambar referensi, seret banyak gambar ke antrean, atau klik kanan gambar di web menggunakan ekstensi browser untuk memulai eksplorasi AI.
                 </p>
               </div>
             </div>

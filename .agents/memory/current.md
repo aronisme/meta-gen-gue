@@ -1,49 +1,48 @@
 # Current Project State
 
 ## Last Updated
-2026-10-17 20:30
+2026-10-17 22:10
 
 ## Current Objective
-Penyempurnaan arsitektur sesi generator prompt (Visual Concept Prompt Agent - VCPA), auto-accumulation, urutan prompt terbaru di posisi teratas, ekspor massal multi-format, dan sinkronisasi penuh fitur UI.
+Pengembangan Browser Extension Manifest V3 untuk deteksi gambar di semua tab browser dan pembuatan sistem antrean (Queue System) otomatis di Web App Meta-Gen VCPA.
 
 ## Completed Recently
-- **Zero-Click Session Accumulation (Auto-Add)**: Setiap generasi prompt AI otomatis diakumulasikan ke sesi aktif di canvas tanpa tombol manual "Tambah ke Sesi".
-- **Prepending Prompt Terbaru**: Prompt baru selalu dimunculkan paling atas (`[...newBatch, ...prev]`) dengan penanda visual "Terbaru" agar kurator langsung fokus pada output termutakhir.
-- **Bulk Download / Ekspor Sekaligus**:
-  - `CSV (Excel)`: Format RFC 4180 dengan UTF-8 BOM, judul kolom terstandar, nilai kutip ganda ter-escape aman.
-  - `Queue TXT`: Antrean baris per baris siap render batch di Midjourney bot / ComfyUI / Stable Diffusion.
-  - `TXT Lengkap`: Format teks komprehensif memuat strategi kreatif dan rationale.
-  - `JSON`: Arsip terstruktur metadata, parameter engine, visual DNA profile, dan kartu prompt.
-  - `Salin Semua`: Salin seluruh baris prompt ke clipboard dalam 1 klik.
-- **Card-Level Operations & Full Sync**:
-  - Tombol hapus kartu satuan (`Trash2`) pada setiap kartu prompt.
-  - Regenerasi prompt per-kartu di tempat (in-place update).
-  - Edit inline teks prompt dan judul konsep secara langsung dengan auto-save.
-  - Penanda favorit (bintang) tersimpan real-time.
-  - Ganti Engine AI & Aspect Ratio otomatis menyesuaikan format sintaks seluruh kartu prompt di sesi aktif.
-- **Riwayat Sesi Terisolasi (Multi-Tenant)**:
-  - Modal `PromptSessionModal` untuk pencarian, pemuatan ("Buka Sesi"), unduh CSV langsung, dan penghapusan sesi.
-  - Store `lib/prompt-agent/store.ts` berbasis IndexedDB dengan user scoping (`getUserScope()`), terisolasi aman antar-pengguna.
-- **Quality Assurance**:
-  - 101/101 unit tests lulus (`pnpm test:run`), termasuk suite baru `lib/__tests__/prompt-session.test.ts`.
+- **Browser Extension Manifest V3 (`extension/`)**:
+  - Context menu klik kanan gambar: `✨ Generate Prompt dengan VCPA (Meta-Gen)` di semua tab/situs web.
+  - Bypass CORS/hotlink protection via Base64 DataURL converter di background service worker.
+  - Auto-detect tab Meta-Gen yang terbuka (`meta-gen-gue.pages.dev` atau `localhost:3000`) dan dispatch via `window.postMessage`, atau buka tab baru bila belum ada.
+  - Popup gallery scanner: mendeteksi semua `<img>`, `<picture>`, dan CSS `background-image` di halaman aktif, dengan thumbnail resolusi, multi-select ("Pilih Semua"), dan tombol "Kirim [X] Gambar ke Antrean".
+  - Dilengkapi ikon resmi PNG (16px, 48px, 128px) dan panduan instalasi `README.md`.
+- **Automated Web Prompt Queue System (`components/PromptGeneratorView.tsx`)**:
+  - FIFO continuous queue worker: memproses gambar antrean secara otomatis tanpa memblokir navigasi/interaksi kurator.
+  - Dukungan multi-image drag-and-drop dan file picker: langsung memasukkan batch gambar ke antrean.
+  - Sinkronisasi instan ke sesi aktif: setiap prompt baru langsung di-prepend ke baris teratas dan tersimpan ke IndexedDB.
+  - Queue Drawer & Status Widget neo-brutalis: indikator progress, status langkah ("Menganalisis Visual DNA...", "Menulis Prompt..."), kontrol pause/resume, tombol batalkan per-item (`X`), dan bersihkan antrean.
+- **Testing, Build & Live Production Deployment**:
+  - 103/103 unit tests lulus (`pnpm test:run`).
   - TypeScript 0 error (`npx tsc --noEmit`).
   - Static export berhasil (`pnpm pages:build`).
-  - Deploy produksi sukses ke Cloudflare Pages: `https://meta-gen-gue.pages.dev` (preview `https://47e3da46.meta-gen-gue.pages.dev`).
+  - Live deploy sukses ke Cloudflare Pages: `https://meta-gen-gue.pages.dev` (preview `https://4e0d68e6.meta-gen-gue.pages.dev`).
 
 ## Currently Working On
-- Fitur Sesi Prompt VCPA telah rampung, teruji 101/101 tests, dan ter-deploy langsung ke Cloudflare Pages.
+- Fitur Browser Extension dan Automated Queue System telah rampung dan ter-deploy ke Cloudflare Pages.
 
 ## Remaining Tasks (Next Session Roadmap)
 - [ ] **Modul Keyword Research**: Eksplorasi tren microstock, tag cloud interaktif, dan filter kata kunci terlarang di `components/KeywordResearchView.tsx`.
 - [ ] **Peningkatan Local FTP Bridge**: Indikator byte transfer per-file dan integrasi ExifTool lokal untuk embed langsung metadata IPTC/XMP.
 
 ## Blockers / Errors
-- None. Semua sistem hijau (101 tests passing, TypeScript 0 error, build & deploy Cloudflare live).
+- None. Semua sistem hijau (103 tests passing, TypeScript 0 error, build & deploy Cloudflare live).
 
 ## Files Recently Changed
+- `extension/manifest.json`
+- `extension/background.js`
+- `extension/content.js`
+- `extension/popup.html`
+- `extension/popup.css`
+- `extension/popup.js`
+- `extension/README.md`
+- `extension/icons/*`
 - `components/PromptGeneratorView.tsx`
-- `components/PromptSessionModal.tsx`
-- `lib/prompt-agent/engine.ts`
-- `lib/prompt-agent/store.ts`
 - `lib/prompt-agent/types.ts`
 - `lib/__tests__/prompt-session.test.ts`

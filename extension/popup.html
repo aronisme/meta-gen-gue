@@ -1,0 +1,71 @@
+<!DOCTYPE html>
+<html lang="id">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Meta-Gen VCPA Assistant</title>
+  <link rel="stylesheet" href="popup.css">
+</head>
+<body>
+  <div class="popup-container">
+    <!-- Header -->
+    <header class="header">
+      <div class="brand">
+        <div class="brand-icon">✨</div>
+        <div>
+          <h1 class="brand-title">Meta-Gen VCPA</h1>
+          <p class="brand-sub">AI Image to Prompt Assistant</p>
+        </div>
+      </div>
+      <span class="status-pill" id="statusPill">Aktif</span>
+    </header>
+
+    <!-- App Target Config Bar -->
+    <section class="config-bar">
+      <div class="config-row">
+        <label for="targetUrlSelect">Target Web App:</label>
+        <select id="targetUrlSelect">
+          <option value="https://meta-gen-gue.pages.dev">Cloud (meta-gen-gue.pages.dev)</option>
+          <option value="http://localhost:3000">Local (localhost:3000)</option>
+        </select>
+      </div>
+    </section>
+
+    <!-- Scanner Info Header -->
+    <section class="scanner-header">
+      <div class="scanner-stats">
+        <span class="stat-count" id="imageCount">0</span>
+        <span class="stat-label">Gambar Terdeteksi di Halaman</span>
+      </div>
+      <div class="scanner-actions">
+        <button type="button" id="selectAllBtn" class="btn-text">Pilih Semua</button>
+        <button type="button" id="refreshBtn" class="btn-text" title="Pindai Ulang">🔄</button>
+      </div>
+    </section>
+
+    <!-- Images Grid List -->
+    <main class="images-container" id="imagesContainer">
+      <div class="loading-state" id="loadingState">
+        <div class="spinner"></div>
+        <p>Memindai gambar di tab aktif...</p>
+      </div>
+      <div class="empty-state hidden" id="emptyState">
+        <p>Tidak ada gambar berukuran cukup besar ditemukan pada halaman ini.</p>
+      </div>
+      <div class="images-grid" id="imagesGrid"></div>
+    </main>
+
+    <!-- Footer Action Bar -->
+    <footer class="footer">
+      <button type="button" id="sendSelectedBtn" class="btn-primary" disabled>
+        <span>Kirim 0 Gambar ke Antrean</span>
+      </button>
+      <button type="button" id="openAppBtn" class="btn-secondary" title="Buka Workspace Meta-Gen">
+        🚀 Buka Web App
+      </button>
+    </footer>
+  </div>
+
+  <script src="popup.js"></script>
+</body>
+</html>

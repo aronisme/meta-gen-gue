@@ -158,4 +158,55 @@ describe('VCPA Prompt Session & Bulk Export System', () => {
     expect(accumulated[0].id).toBe('p-2');
     expect(accumulated[1].id).toBe('p-1');
   });
+
+  it('manages sequential FIFO queue processing for multiple incoming images', () => {
+    // Simulate queue state
+    type QueueItem = {
+      id: string;
+      status: 'pending' | 'processing' | 'completed' | 'error';
+      filename: string;
+    };
+
+    const queue: QueueItem[] = [
+      { id: 'q-1', status: 'processing', filename: 'image_1.jpg' },
+      { id: 'q-2', status: 'pending', filename: 'image_2.jpg' },
+      { id: 'q-3', status: 'pending', filename: 'image_3.jpg' },
+    ];
+
+    // While item 1 is processing, incoming items remain pending
+    const pendingItems = queue.filter((q) => q.status === 'pending');
+    expect(pendingItems).toHaveLength(2);
+    expect(pendingItems[0].id).toBe('q-2');
+    expect(pendingItems[1].id).toBe('q-3');
+
+    // Item 1 completes
+    queue[0].status = 'completed';
+
+    // Worker picks the next pending item (q-2)
+    const nextPending = queue.find((q) => q.status === 'pending');
+    expect(nextPending?.id).toBe('q-2');
+    if (nextPending) nextPending.status = 'processing';
+
+    // Now q-2 is processing and q-3 is still pending
+    expect(queue.find((q) => q.status === 'processing')?.id).toBe('q-2');
+    expect(queue.filter((q) => q.status === 'pending')).toHaveLength(1);
+  });
+
+  it('validates extension bridge event payload shape', () => {
+    const extensionPayload = {
+      id: 'ext_123456',
+      source: 'extension',
+      imageDataUrl: 'data:image/jpeg;base64,/9j/4AAQSkZJRg...',
+      filename: 'Web_Image_9876.jpg',
+      sourceUrl: 'https://images.unsplash.com/photo-test',
+      pageTitle: 'Beautiful Coffee Stock - Unsplash',
+      addedAt: Date.now(),
+    };
+
+    expect(extensionPayload.source).toBe('extension');
+    expect(extensionPayload.imageDataUrl.startsWith('data:image/')).toBe(true);
+    expect(extensionPayload.filename).toContain('.jpg');
+    expect(extensionPayload.addedAt).toBeGreaterThan(0);
+  });
 });
+

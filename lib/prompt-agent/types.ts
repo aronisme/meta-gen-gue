@@ -82,3 +82,20 @@ export interface VCPAResult {
   prompts: PromptCardItem[];
 }
 
+export type PromptQueueItemStatus = 'pending' | 'processing' | 'completed' | 'error';
+
+export interface PromptQueueItem {
+  id: string;
+  source: 'extension' | 'upload' | 'paste' | 'url';
+  imageDataUrl: string;
+  filename: string;
+  addedAt: number;
+  status: PromptQueueItemStatus;
+  progressStep?: string;
+  error?: string;
+  completedAt?: number;
+  generatedCount?: number;
+  brief?: string;
+}
+
+
