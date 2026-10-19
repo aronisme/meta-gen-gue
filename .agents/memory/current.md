@@ -29,11 +29,14 @@ Peningkatan Local FTP Bridge & Integrasi ExifTool untuk Penyematan Metadata IPTC
   - Memperbarui `GAS_PROXY_URL_1`, `GAS_PROXY_URL`, `DEFAULT_GAS_URL` ke `https://script.google.com/macros/s/AKfycbz0TfjsTcaMF6WvXqf8SIfHCHVqkHQjB8I8O5l_zfKmoqeqDdh0IyHvg0PJlg8kWzXKwA/exec`.
   - Memperbarui `GAS_PROXY_TOKEN_1`, `GAS_PROXY_TOKEN`, `DEFAULT_GAS_TOKEN`, `NEXT_PUBLIC_GAS_PROXY_TOKEN` ke `sk-gas-default-token133`.
   - Sinkronisasi fallback pada Cloudflare Pages functions ([functions/api/generate/proxy.ts](file:///c:/App%20Tools/meta-gen-gue/functions/api/generate/proxy.ts), [functions/api/generate/prompt-agent.ts](file:///c:/App%20Tools/meta-gen-gue/functions/api/generate/prompt-agent.ts)).
-- **Testing & Validasi**:
-  - Seluruh 12 file tes (111/111 tests) lulus 100% di Vitest.
+- **Deploy ke Cloudflare Pages Selesai (`https://meta-gen-gue.pages.dev`)**:
+  - Berhasil menjalankan static export Next.js 15 via `scripts/build-pages.mjs` (`pnpm pages:build`) ke direktori `out/`.
+  - Berhasil men-deploy bundle static dan Cloudflare Functions API menggunakan `npx wrangler pages deploy out --project-name=meta-gen-gue`.
+  - Deployment live dan aktif pada URL produksi: [https://meta-gen-gue.pages.dev](https://meta-gen-gue.pages.dev) (Deployment hash preview: [https://b059422d.meta-gen-gue.pages.dev](https://b059422d.meta-gen-gue.pages.dev)).
+  - Semua perubahan telah di-commit dan di-push ke remote repository `origin/main` di GitHub.
 
 ## Currently Working On
-- Melanjutkan ke task roadmap berikutnya (Sinkronisasi Rasio Google Flow / Modul Keyword Research).
+- Menunggu instruksi berikutnya dari pengguna atau melanjutkan roadmap fitur berikutnya.
 
 ## Remaining Tasks (Roadmap)
 - [ ] **Sinkronisasi Rasio Gambar Google Flow**: Penyesuaian aspek rasio (1:1, 16:9, 9:16) ke setting Flow saat generate dipicu.
@@ -43,6 +46,8 @@ Peningkatan Local FTP Bridge & Integrasi ExifTool untuk Penyematan Metadata IPTC
 - None.
 
 ## Files Recently Changed
+- `scripts/build-pages.mjs`
+- `components/FtpQueueView.tsx`
 - `gas/Code.gs`
 - `gas/Index.html`
 - `gas/README.md`
@@ -50,3 +55,4 @@ Peningkatan Local FTP Bridge & Integrasi ExifTool untuk Penyematan Metadata IPTC
 - `components/ProviderCard.tsx`
 - `components/StudioPanel.tsx`
 - `.agents/memory/current.md`
+
