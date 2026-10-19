@@ -420,10 +420,58 @@ if (isMetaGenTab) {
   window.postMessage(
     {
       type: 'METAGEN_EXTENSION_CONNECTED',
-      version: '1.0.1',
+      version: '1.1.0',
     },
     '*'
   );
+
+  // Listen for Flow Generation trigger from Meta-Gen Web App
+  window.addEventListener('message', (event) => {
+    if (event.data?.type === 'METAGEN_TRIGGER_FLOW_GEN') {
+      const payload = event.data.payload;
+      try {
+        if (!chrome?.runtime?.id) {
+          throw new Error('Ekstensi telah di-reload. Silakan refresh (F5) tab Meta-Gen dan tab Flow.');
+        }
+
+        chrome.runtime.sendMessage(
+          {
+            type: 'EXECUTE_FLOW_GEN',
+            payload: payload,
+          },
+          (response) => {
+            if (chrome.runtime.lastError || !response) {
+              window.postMessage(
+                {
+                  type: 'METAGEN_FLOW_GEN_RESULT',
+                  payload: {
+                    cardId: payload?.cardId,
+                    success: false,
+                    error:
+                      chrome.runtime.lastError?.message ||
+                      'Tidak dapat berkomunikasi dengan background extension.',
+                  },
+                },
+                '*'
+              );
+            }
+          }
+        );
+      } catch (err) {
+        window.postMessage(
+          {
+            type: 'METAGEN_FLOW_GEN_RESULT',
+            payload: {
+              cardId: payload?.cardId,
+              success: false,
+              error: err.message || 'Konteks ekstensi tidak aktif. Silakan refresh halaman web ini (F5).',
+            },
+          },
+          '*'
+        );
+      }
+    }
+  });
 
   chrome.runtime.sendMessage({ type: 'CHECK_PENDING_QUEUE' }, (response) => {
     if (response?.pending && response.pending.length > 0) {

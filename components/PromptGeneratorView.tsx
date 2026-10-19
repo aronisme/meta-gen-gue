@@ -78,6 +78,7 @@ import type {
 
 export interface PromptGeneratorViewProps {
   onSwitchToMetadata?: () => void;
+  onSendImageToMetadata?: (file: File) => void;
 }
 
 const STORAGE_KEY_PROMPTS = 'vcpa_prompts_v1';
@@ -122,7 +123,7 @@ const ASPECT_RATIO_ITEMS: Array<{ id: AspectRatio; label: string; desc: string }
   { id: '9:16', label: '9:16', desc: 'Vertikal Story' },
 ];
 
-export function PromptGeneratorView({ onSwitchToMetadata }: PromptGeneratorViewProps) {
+export function PromptGeneratorView({ onSwitchToMetadata, onSendImageToMetadata }: PromptGeneratorViewProps) {
   // 1. Session & History State
   const [session, setSession] = useState<PromptGenerationSession>(() => createNewPromptSession());
   const [isSessionModalOpen, setIsSessionModalOpen] = useState<boolean>(false);
@@ -167,6 +168,7 @@ export function PromptGeneratorView({ onSwitchToMetadata }: PromptGeneratorViewP
   const [regeneratingId, setRegeneratingId] = useState<string | null>(null);
   const [copiedId, setCopiedId] = useState<string | null>(null);
   const [copiedAll, setCopiedAll] = useState<boolean>(false);
+  const [generatingFlowCardId, setGeneratingFlowCardId] = useState<string | null>(null);
 
   // 7. Inspirations & Brainstorm
   const [inspirations, setInspirations] = useState<InspirationIdea[]>(() => getRandomCuratedIdeas(10));
@@ -518,6 +520,24 @@ export function PromptGeneratorView({ onSwitchToMetadata }: PromptGeneratorViewP
     const handleWindowMessage = (event: MessageEvent) => {
       if (event.data?.type === 'METAGEN_ENQUEUE_PROMPT_IMAGE') {
         handleIncomingPayload(event.data.payload);
+      }
+      if (event.data?.type === 'METAGEN_FLOW_GEN_RESULT') {
+        const payload = event.data.payload;
+        setGeneratingFlowCardId((prev) => (prev === payload?.cardId ? null : prev));
+        if (payload?.success && payload?.imageDataUrl) {
+          setPrompts((prev) =>
+            prev.map((c) =>
+              c.id === payload.cardId
+                ? { ...c, generatedImageUrl: payload.imageDataUrl, flowStatus: 'completed' }
+                : c
+            )
+          );
+          toast.success('✓ Gambar Google Flow berhasil di-render!', {
+            description: 'Hasil render siap dipratinjau langsung di kartu prompt.',
+          });
+        } else if (payload?.error) {
+          toast.error(`Google Flow: ${payload.error}`);
+        }
       }
     };
 
@@ -943,6 +963,65 @@ export function PromptGeneratorView({ onSwitchToMetadata }: PromptGeneratorViewP
     setCopiedId(card.id);
     toast.success(`Prompt #${card.ordinal} disalin!`);
     setTimeout(() => setCopiedId(null), 2000);
+  };
+
+  // Generate Single Image on Google Flow via Extension
+  const handleGenerateImageWithFlow = (card: PromptCardItem) => {
+    setGeneratingFlowCardId(card.id);
+    window.postMessage(
+      {
+        type: 'METAGEN_TRIGGER_FLOW_GEN',
+        payload: {
+          cardId: card.id,
+          prompt: card.prompt,
+          ratio: settings.aspectRatio || '16:9',
+          model: settings.engine === 'nanobanana' ? 'Nano Banana 2' : 'Imagen 3',
+        },
+      },
+      '*'
+    );
+    toast.info(`Mengirim prompt #${card.ordinal} ke Google Flow...`, {
+      description: 'Ekstensi sedang mengarahkan input ke tab Google Flow.',
+      duration: 5000,
+    });
+  };
+
+  // Push generated image into Metadata Studio queue
+  const handleSendCardImageToMetadata = (card: PromptCardItem) => {
+    if (!card.generatedImageUrl) return;
+    try {
+      const arr = card.generatedImageUrl.split(',');
+      const mime = arr[0].match(/:(.*?);/)?.[1] || 'image/jpeg';
+      const bstr = atob(arr[1]);
+      let n = bstr.length;
+      const u8arr = new Uint8Array(n);
+      while (n--) {
+        u8arr[n] = bstr.charCodeAt(n);
+      }
+      const ext = mime.includes('png') ? 'png' : 'jpg';
+      const cleanTitle = (card.title || 'Flow_Image').replace(/[^a-zA-Z0-9_\-]/g, '_').slice(0, 24);
+      const filename = `${cleanTitle}_${card.id.slice(0, 6)}.${ext}`;
+      const file = new File([u8arr], filename, { type: mime });
+
+      if (onSendImageToMetadata) {
+        onSendImageToMetadata(file);
+      } else if (onSwitchToMetadata) {
+        onSwitchToMetadata();
+        toast.info('Beralih ke tab Metadata Studio.');
+      }
+    } catch {
+      toast.error('Gagal menyiapkan file gambar untuk Metadata Studio.');
+    }
+  };
+
+  // Download generated image directly
+  const handleDownloadCardImage = (card: PromptCardItem) => {
+    if (!card.generatedImageUrl) return;
+    const a = document.createElement('a');
+    a.href = card.generatedImageUrl;
+    a.download = `Flow_${card.id.slice(0, 6)}_${Date.now()}.jpg`;
+    a.click();
+    toast.success('Gambar berhasil diunduh ke komputer!');
   };
 
   // Copy All Prompts
@@ -2321,6 +2400,27 @@ export function PromptGeneratorView({ onSwitchToMetadata }: PromptGeneratorViewP
                         <Button
                           type="button"
                           size="sm"
+                          disabled={generatingFlowCardId === card.id}
+                          onClick={() => handleGenerateImageWithFlow(card)}
+                          className="h-7 px-2.5 bg-gradient-to-r from-amber-500 to-orange-500 hover:from-amber-600 hover:to-orange-600 text-white font-bold text-xs border border-[#2c1810] shadow-[1px_1px_0_#2c1810] cursor-pointer"
+                          title="Generate gambar langsung di Google Flow menggunakan prompt ini"
+                        >
+                          {generatingFlowCardId === card.id ? (
+                            <>
+                              <Loader2 className="w-3.5 h-3.5 animate-spin" />
+                              <span className="ml-1">Gen Flow...</span>
+                            </>
+                          ) : (
+                            <>
+                              <Sparkles className="w-3.5 h-3.5 text-yellow-200" />
+                              <span className="ml-1">Gen Img</span>
+                            </>
+                          )}
+                        </Button>
+
+                        <Button
+                          type="button"
+                          size="sm"
                           onClick={() => handleCopyCard(card)}
                           className="h-7 px-2.5 bg-[#ff6b35] hover:bg-[#e55a2b] text-white font-bold text-xs border border-[#2c1810] shadow-[1px_1px_0_#2c1810] cursor-pointer"
                         >
@@ -2353,6 +2453,50 @@ export function PromptGeneratorView({ onSwitchToMetadata }: PromptGeneratorViewP
                         </span>
                       )}
                     </div>
+
+                    {/* Generated Flow Image Preview */}
+                    {card.generatedImageUrl && (
+                      <div className="p-3 bg-gradient-to-r from-amber-50/80 to-orange-50/80 border-2 border-amber-300 rounded-xl space-y-2">
+                        <div className="flex items-center justify-between text-xs">
+                          <span className="font-bold text-amber-950 flex items-center gap-1.5">
+                            <Sparkles className="w-3.5 h-3.5 text-amber-600" />
+                            Hasil Render Google Flow:
+                          </span>
+                          <span className="text-[10px] bg-emerald-100 text-emerald-800 font-bold px-2 py-0.5 rounded-full border border-emerald-300">
+                            ✓ Siap
+                          </span>
+                        </div>
+                        <div className="relative group rounded-lg overflow-hidden border border-amber-200 bg-black/5 aspect-video flex items-center justify-center max-h-60">
+                          {/* eslint-disable-next-line @next/next/no-img-element */}
+                          <img
+                            src={card.generatedImageUrl}
+                            alt={card.title}
+                            className="w-full h-full object-contain"
+                          />
+                        </div>
+                        <div className="flex items-center gap-2 pt-0.5">
+                          <Button
+                            type="button"
+                            size="sm"
+                            onClick={() => handleSendCardImageToMetadata(card)}
+                            className="flex-1 h-7 text-xs bg-[#ff6b35] hover:bg-[#e55a2b] text-white font-bold cursor-pointer"
+                          >
+                            <Sparkles className="w-3.5 h-3.5 mr-1" />
+                            Kirim ke Metadata Studio
+                          </Button>
+                          <Button
+                            type="button"
+                            size="sm"
+                            variant="outline"
+                            onClick={() => handleDownloadCardImage(card)}
+                            className="h-7 text-xs border-stone-300 hover:bg-stone-100 text-[#2c1810] cursor-pointer"
+                          >
+                            <Download className="w-3.5 h-3.5 mr-1" />
+                            Unduh
+                          </Button>
+                        </div>
+                      </div>
+                    )}
 
                     {/* Negative Prompt (SDXL Mode) */}
                     {card.negativePrompt && (

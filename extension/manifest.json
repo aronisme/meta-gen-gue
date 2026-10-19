@@ -1,16 +1,20 @@
 {
   "manifest_version": 3,
   "name": "Meta-Gen VCPA - AI Image to Prompt Assistant",
-  "version": "1.0.1",
-  "description": "Deteksi gambar di semua halaman web dan generate prompt AI langsung dengan Visual Concept Prompt Agent (VCPA).",
+  "version": "1.1.0",
+  "description": "Deteksi gambar di semua web, generate prompt AI (VCPA), dan kirim prompt ke Google Flow untuk auto-gen gambar.",
   "permissions": [
     "contextMenus",
     "activeTab",
     "storage",
-    "scripting"
+    "scripting",
+    "tabs",
+    "debugger"
   ],
   "host_permissions": [
-    "<all_urls>"
+    "<all_urls>",
+    "https://labs.google/*",
+    "https://flow.google.com/*"
   ],
   "background": {
     "service_worker": "background.js"
@@ -22,6 +26,14 @@
       "run_at": "document_end",
       "all_frames": true,
       "match_about_blank": true
+    },
+    {
+      "matches": [
+        "https://labs.google/fx/*",
+        "https://flow.google.com/*"
+      ],
+      "js": ["flow-bridge.js"],
+      "run_at": "document_idle"
     }
   ],
   "action": {

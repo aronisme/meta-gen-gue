@@ -39,6 +39,10 @@ interface StudioPanelProps {
 const MODEL_LABELS: Record<string, string> = {
   auto: 'Auto: Tercepat & Auto-Failover',
   'gemini-2.5-flash': 'Google Gemini (gemini-2.5-flash)',
+  'deepseek-v4.1-flash:free': 'TokenHarbor (DeepSeek V4.1 Flash)',
+  'mimo-v2.6-flash:free': 'TokenHarbor (MiMo V2.6 Flash)',
+  'google/gemini-2.0-flash-001': 'OpenRouter (Gemini 2.0 Flash)',
+  'openrouter/auto': 'OpenRouter (Auto Router)',
   'qwen/qwen3.8-27b': 'Groq (qwen/qwen3.8-27b)',
   'pixtral-12b-2409': 'Mistral AI (pixtral-12b-2409)',
   'mistralai/mistral-large-3-675b-instruct-2512': 'Nvidia NIM (mistral-large-3-675b)',

@@ -66,8 +66,75 @@ interface LocalQueueItem {
   error?: string;
   thumbDataUrl?: string;
   metadataEmbedded?: boolean;
+  metadataEngine?: string;
   hasValidMeta?: boolean;
   metaError?: string;
+  bytesUploaded?: number;
+  speed?: string;
+  phaseText?: string;
+}
+
+interface UploadResult {
+  ok?: boolean;
+  error?: string;
+  metadataEmbedded?: boolean;
+  metadataEngine?: string;
+  remotePath?: string;
+  uploadId?: string;
+}
+
+function uploadWithXhr(
+  url: string,
+  formData: FormData,
+  onClientProgress: (loaded: number, total: number) => void,
+  registerAbort: (abortFn: () => void) => void
+): Promise<UploadResult> {
+  return new Promise((resolve, reject) => {
+    const xhr = new XMLHttpRequest();
+    xhr.open('POST', url, true);
+
+    registerAbort(() => {
+      xhr.abort();
+    });
+
+    xhr.upload.onprogress = (event) => {
+      if (event.lengthComputable) {
+        onClientProgress(event.loaded, event.total);
+      }
+    };
+
+    xhr.onload = () => {
+      if (xhr.status >= 200 && xhr.status < 300) {
+        try {
+          const json = JSON.parse(xhr.responseText);
+          resolve(json);
+        } catch {
+          resolve({ ok: true });
+        }
+      } else {
+        try {
+          const errJson = JSON.parse(xhr.responseText);
+          reject(new Error(errJson.error || `HTTP ${xhr.status}: ${xhr.statusText}`));
+        } catch {
+          reject(new Error(`Upload gagal dengan status ${xhr.status}`));
+        }
+      }
+    };
+
+    xhr.onerror = () => {
+      reject(new Error('Koneksi jaringan terputus saat menghubungi server bridge'));
+    };
+
+    xhr.ontimeout = () => {
+      reject(new Error('Waktu pengunggahan habis (Timeout)'));
+    };
+
+    xhr.onabort = () => {
+      reject(new Error('Upload dibatalkan oleh pengguna'));
+    };
+
+    xhr.send(formData);
+  });
 }
 
 export function FtpQueueView({
@@ -98,6 +165,7 @@ export function FtpQueueView({
   const isUploadingRef = useRef(false);
   const abortUploadRef = useRef(false);
   const activeAbortControllersRef = useRef<Map<string, AbortController>>(new Map());
+  const activeCancelFnsRef = useRef<Map<string, () => void>>(new Map());
   const activeFilenamesRef = useRef<Set<string>>(new Set());
   const [currentUploadingFilename, setCurrentUploadingFilename] = useState<string>('');
 
@@ -417,7 +485,13 @@ export function FtpQueueView({
         controller.abort();
       } catch {}
     });
+    activeCancelFnsRef.current.forEach((fn) => {
+      try {
+        fn();
+      } catch {}
+    });
     activeAbortControllersRef.current.clear();
+    activeCancelFnsRef.current.clear();
     activeFilenamesRef.current.clear();
     setIsUploading(false);
     isUploadingRef.current = false;
@@ -571,14 +645,83 @@ export function FtpQueueView({
       updateActiveFilenames();
 
       setQueue((prev) =>
-        prev.map((item) => (item.id === qItem.id ? { ...item, status: 'uploading', progress: 30 } : item))
+        prev.map((item) =>
+          item.id === qItem.id
+            ? {
+                ...item,
+                status: 'uploading',
+                progress: 0,
+                bytesUploaded: 0,
+                speed: 'Mempersiapkan...',
+                phaseText: 'Mempersiapkan...',
+              }
+            : item
+        )
       );
 
       const abortController = new AbortController();
+      let abortXhr: (() => void) | null = null;
       activeAbortControllersRef.current.set(qItem.id, abortController);
+      activeCancelFnsRef.current.set(qItem.id, () => {
+        try {
+          abortController.abort();
+        } catch {}
+        try {
+          abortXhr?.();
+        } catch {}
+      });
+
+      let pollTimer: ReturnType<typeof setInterval> | null = null;
+      const progressUrl = getFtpApiUrl('progress', bridgeStatus);
+
+      if (bridgeStatus.endpointType === 'local-bridge') {
+        pollTimer = setInterval(async () => {
+          if (abortUploadRef.current) return;
+          try {
+            const pollRes = await fetch(`${progressUrl}?id=${encodeURIComponent(qItem.id)}`, {
+              signal: abortController.signal,
+            });
+            if (pollRes.ok) {
+              const pollData = await pollRes.json();
+              if (pollData?.progress) {
+                const p = pollData.progress;
+                const transferred = p.bytesUploaded || 0;
+                const pct = p.percent || 0;
+                const spd = p.speed || '';
+
+                setQueue((prev) =>
+                  prev.map((item) =>
+                    item.id === qItem.id && item.status === 'uploading'
+                      ? {
+                          ...item,
+                          progress: Math.max(item.progress, pct),
+                          bytesUploaded: transferred,
+                          speed: spd,
+                          phaseText: p.phase === 'completed' ? 'Selesai' : 'Mentransfer ke remote server...',
+                        }
+                      : item
+                  )
+                );
+
+                const elapsedSecs = Math.max(0.5, (Date.now() - startTime) / 1000);
+                const currentTotalBytes = cumulativeBytes + transferred;
+                const speedKB = currentTotalBytes / 1024 / elapsedSecs;
+                const speedStr = speedKB > 1024 ? `${(speedKB / 1024).toFixed(1)} MB/s` : `${Math.round(speedKB)} KB/s`;
+
+                setUploadStats((prev) => ({
+                  ...prev,
+                  speed: speedStr,
+                  bytesUploaded: Math.min(prev.totalBytes, currentTotalBytes),
+                }));
+              }
+            }
+          } catch {}
+        }, 400);
+      }
 
       try {
         const formData = new FormData();
+        formData.append('uploadId', qItem.id);
         formData.append('file', qItem.file);
         formData.append(
           'config',
@@ -611,15 +754,51 @@ export function FtpQueueView({
         }
 
         const uploadUrl = getFtpApiUrl('upload', bridgeStatus);
-        const res = await fetch(uploadUrl, {
-          method: 'POST',
-          body: formData,
-          signal: abortController.signal,
-        });
+        const data = await uploadWithXhr(
+          uploadUrl,
+          formData,
+          (loaded, total) => {
+            if (bridgeStatus.endpointType !== 'local-bridge') {
+              const pct = Math.min(99, Math.round((loaded / total) * 100));
+              setQueue((prev) =>
+                prev.map((item) =>
+                  item.id === qItem.id && item.status === 'uploading'
+                    ? {
+                        ...item,
+                        progress: pct,
+                        bytesUploaded: loaded,
+                        phaseText: 'Mengunggah...',
+                      }
+                    : item
+                )
+              );
+            } else if (loaded < total) {
+              const pct = Math.min(30, Math.round((loaded / total) * 30));
+              setQueue((prev) =>
+                prev.map((item) =>
+                  item.id === qItem.id && item.status === 'uploading'
+                    ? {
+                        ...item,
+                        progress: Math.max(item.progress, pct),
+                        bytesUploaded: loaded,
+                        phaseText: 'Mengirim ke bridge lokal...',
+                      }
+                    : item
+                )
+              );
+            }
+          },
+          (abortFn) => {
+            abortXhr = abortFn;
+          }
+        );
 
-        const data = await res.json();
-        if (!res.ok || !data.ok) {
-          throw new Error(data.error || 'Gagal mengirim file ke remote server');
+        if (pollTimer) clearInterval(pollTimer);
+        activeAbortControllersRef.current.delete(qItem.id);
+        activeCancelFnsRef.current.delete(qItem.id);
+
+        if (!data || !data.ok) {
+          throw new Error(data?.error || 'Gagal mengirim file ke remote server');
         }
 
         cumulativeBytes += qItem.fileSize;
@@ -642,7 +821,11 @@ export function FtpQueueView({
                   ...item,
                   status: 'success',
                   progress: 100,
+                  bytesUploaded: qItem.fileSize,
+                  speed: speedStr,
+                  phaseText: 'Selesai',
                   metadataEmbedded: Boolean(data.metadataEmbedded),
+                  metadataEngine: data.metadataEngine,
                 }
               : item
           )
@@ -661,18 +844,27 @@ export function FtpQueueView({
           remotePath: data.remotePath,
         });
       } catch (err: unknown) {
+        if (pollTimer) clearInterval(pollTimer);
+        activeAbortControllersRef.current.delete(qItem.id);
+        activeCancelFnsRef.current.delete(qItem.id);
+
         if (abortUploadRef.current) {
           setQueue((prev) =>
-            prev.map((item) => (item.id === qItem.id ? { ...item, status: 'pending', progress: 0 } : item))
+            prev.map((item) =>
+              item.id === qItem.id ? { ...item, status: 'pending', progress: 0, bytesUploaded: 0 } : item
+            )
           );
           return;
         }
         const msg = err instanceof Error ? err.message : String(err);
         setQueue((prev) =>
-          prev.map((item) => (item.id === qItem.id ? { ...item, status: 'error', error: msg } : item))
+          prev.map((item) =>
+            item.id === qItem.id
+              ? { ...item, status: 'error', error: msg, progress: 0, bytesUploaded: 0, phaseText: 'Gagal' }
+              : item
+          )
         );
       } finally {
-        activeAbortControllersRef.current.delete(qItem.id);
         activeFilenamesRef.current.delete(qItem.filename);
         updateActiveFilenames();
       }
@@ -1036,12 +1228,32 @@ export function FtpQueueView({
 
               {/* Upload Stats / Speed */}
               {isUploading && (
-                <div className="flex items-center gap-2 text-xs font-mono font-bold text-[#6b5344]">
-                  <span>{uploadStats.speed}</span>
-                  <span>
-                    {(uploadStats.bytesUploaded / (1024 * 1024)).toFixed(1)} /{' '}
-                    {(uploadStats.totalBytes / (1024 * 1024)).toFixed(1)} MB
-                  </span>
+                <div className="flex flex-col sm:flex-row sm:items-center gap-1.5 sm:gap-3 text-xs font-mono font-bold text-[#6b5344] bg-stone-100 border border-[#2c1810]/30 px-3 py-1.5 rounded-xl shadow-[1px_1px_0_#2c1810]">
+                  <div className="flex items-center gap-2">
+                    <span className="text-[#ff6b35] flex items-center gap-1">
+                      <span className="relative flex h-2 w-2">
+                        <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-[#ff6b35] opacity-75"></span>
+                        <span className="relative inline-flex rounded-full h-2 w-2 bg-[#ff6b35]"></span>
+                      </span>
+                      {uploadStats.speed}
+                    </span>
+                    <span>•</span>
+                    <span>
+                      {(uploadStats.bytesUploaded / (1024 * 1024)).toFixed(1)} /{' '}
+                      {(uploadStats.totalBytes / (1024 * 1024)).toFixed(1)} MB
+                    </span>
+                  </div>
+                  <div className="w-24 sm:w-28 h-2 bg-stone-200 rounded-full overflow-hidden border border-[#2c1810]/20">
+                    <div
+                      className="h-full bg-gradient-to-r from-[#ff6b35] to-emerald-500 rounded-full transition-all duration-300"
+                      style={{
+                        width: `${Math.min(
+                          100,
+                          Math.round((uploadStats.bytesUploaded / Math.max(1, uploadStats.totalBytes)) * 100)
+                        )}%`,
+                      }}
+                    />
+                  </div>
                 </div>
               )}
 
@@ -1310,21 +1522,47 @@ export function FtpQueueView({
                           <span className="text-[#6b5344] font-bold">Antrean</span>
                         )}
                         {qItem.status === 'uploading' && (
-                          <span className="text-[#ff6b35] font-black flex items-center justify-end gap-1">
-                            <RefreshCw className="w-3.5 h-3.5 animate-spin" />
-                            <span>Mengunggah...</span>
-                          </span>
+                          <div className="w-full min-w-[140px] max-w-[210px] flex flex-col gap-1 items-end ml-auto">
+                            <div className="flex items-center justify-between w-full text-[10px] font-mono">
+                              <span className="text-[#ff6b35] font-black flex items-center gap-1">
+                                <RefreshCw className="w-2.5 h-2.5 animate-spin" />
+                                {qItem.progress || 0}%
+                              </span>
+                              <span className="text-[#6b5344] font-bold">
+                                {(qItem.bytesUploaded ? qItem.bytesUploaded / (1024 * 1024) : 0).toFixed(1)} / {(qItem.fileSize / (1024 * 1024)).toFixed(1)} MB
+                              </span>
+                            </div>
+                            <div className="w-full h-1.5 bg-stone-200 rounded-full overflow-hidden border border-[#2c1810]/20">
+                              <div
+                                className="h-full bg-gradient-to-r from-[#ff6b35] to-amber-500 rounded-full transition-all duration-300 ease-out"
+                                style={{ width: `${Math.max(4, Math.min(100, qItem.progress || 0))}%` }}
+                              />
+                            </div>
+                            <div className="flex items-center justify-between w-full text-[9px] text-[#8c6f5a] truncate font-sans">
+                              <span className="font-mono font-bold text-[#ff6b35] shrink-0">
+                                {qItem.speed || 'Transfer'}
+                              </span>
+                              <span className="truncate text-right ml-1" title={qItem.phaseText}>
+                                {qItem.phaseText || 'Mengunggah...'}
+                              </span>
+                            </div>
+                          </div>
                         )}
                         {qItem.status === 'success' && (
-                          <div className="flex flex-col items-end">
-                            <span className="text-emerald-700 font-bold flex items-center gap-1">
-                              <CheckCircle2 className="w-3.5 h-3.5" />
-                              <span>Berhasil</span>
+                          <div className="flex flex-col items-end gap-0.5">
+                            <span className="text-emerald-700 font-bold flex items-center gap-1 text-xs">
+                              <CheckCircle2 className="w-3.5 h-3.5 text-emerald-600" />
+                              <span>Berhasil (100%)</span>
                             </span>
                             {qItem.metadataEmbedded && (
-                              <span className="text-[10px] text-sky-800 font-semibold">
-                                ✓ Metadata Tertanam
-                              </span>
+                              <div className="inline-flex items-center gap-1 text-[10px] text-sky-800 font-semibold">
+                                <span>✓ Metadata Tertanam</span>
+                                {qItem.metadataEngine === 'exiftool' && (
+                                  <span className="text-[9px] bg-purple-100 text-purple-700 border border-purple-300 px-1 py-0.2 rounded font-mono font-bold">
+                                    ExifTool
+                                  </span>
+                                )}
+                              </div>
                             )}
                           </div>
                         )}

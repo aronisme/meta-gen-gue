@@ -10,8 +10,8 @@ const GEMINI_KEY = 'gemini_key';
 const GAS_PROXY_KEY = 'gas_proxy_key';
 const LEGACY_SETTINGS_KEY = 'gen_settings';
 
-export const DEFAULT_GAS_TOKEN = process.env.NEXT_PUBLIC_GAS_PROXY_TOKEN || 'gas_live_8b84dd959b764b4296669623';
-export const DEFAULT_GAS_URL = 'https://script.google.com/macros/s/AKfycbzB-MWqSfCXRbolr5yFkS33jkRrDw7Y9mjViluIeYJ5_-PJTbyZynrz1gl1K1UW5dKm/exec';
+export const DEFAULT_GAS_TOKEN = process.env.NEXT_PUBLIC_GAS_PROXY_TOKEN || 'sk-gas-default-token133';
+export const DEFAULT_GAS_URL = 'https://script.google.com/macros/s/AKfycbz0TfjsTcaMF6WvXqf8SIfHCHVqkHQjB8I8O5l_zfKmoqeqDdh0IyHvg0PJlg8kWzXKwA/exec';
 
 export interface SavedSettings {
   provider: Provider;

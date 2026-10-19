@@ -49,8 +49,13 @@ export function FtpBridgeStatusBanner({
           </span>
           <Laptop className="w-3.5 h-3.5" />
           <span>Local Bridge Aktif ({status.baseUrl.replace(/^https?:\/\//, '')})</span>
+          {status.exiftool?.available ? (
+            <span className="text-[10px] font-mono px-1.5 py-0.5 rounded bg-purple-500/20 text-purple-300 border border-purple-500/30">
+              ExifTool
+            </span>
+          ) : null}
           <button
-            onClick={onRefresh}
+            onClick={() => onRefresh()}
             disabled={isChecking}
             title="Cek ulang koneksi bridge"
             className="hover:text-emerald-300 ml-1 transition-transform active:rotate-180"
@@ -76,7 +81,7 @@ export function FtpBridgeStatusBanner({
         <WifiOff className="w-3.5 h-3.5" />
         <span>Local Bridge Offline</span>
         <button
-          onClick={onRefresh}
+          onClick={() => onRefresh()}
           disabled={isChecking}
           className="hover:text-amber-300 ml-1 inline-flex items-center gap-1 font-semibold underline underline-offset-2"
         >
@@ -97,7 +102,7 @@ export function FtpBridgeStatusBanner({
               <Laptop className="w-5 h-5" />
             </div>
             <div>
-              <div className="flex items-center gap-2 font-semibold text-emerald-300 text-sm">
+              <div className="flex flex-wrap items-center gap-2 font-semibold text-emerald-300 text-sm">
                 <span className="relative flex h-2 w-2">
                   <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-emerald-400 opacity-75"></span>
                   <span className="relative inline-flex rounded-full h-2 w-2 bg-emerald-500"></span>
@@ -106,16 +111,31 @@ export function FtpBridgeStatusBanner({
                 <span className="text-[11px] font-mono px-2 py-0.5 rounded bg-emerald-500/20 text-emerald-300 border border-emerald-500/30">
                   v{status.version || '1.0.0'}
                 </span>
+                {status.exiftool?.available ? (
+                  <span className="text-[11px] font-medium px-2 py-0.5 rounded bg-purple-500/20 text-purple-300 border border-purple-500/30 flex items-center gap-1">
+                    <span>✨ ExifTool Active</span>
+                    <span className="text-purple-400/80 font-mono text-[10px]">v{status.exiftool.version}</span>
+                  </span>
+                ) : (
+                  <span className="text-[11px] font-medium px-2 py-0.5 rounded bg-amber-500/15 text-amber-300 border border-amber-500/25 flex items-center gap-1" title="Metadata video &amp; vektor memerlukan ExifTool">
+                    <span>⚡ JS Engine (JPG/PNG)</span>
+                  </span>
+                )}
               </div>
               <p className="text-xs text-emerald-400/80 mt-0.5">
-                Koneksi lokal siap. File footage &amp; batch gambar akan dikirim langsung dari komputer Anda ke server microstock tanpa batas 100MB Cloudflare.
+                Koneksi lokal siap. File footage &amp; batch gambar akan dikirim langsung ke server microstock.{' '}
+                {status.exiftool?.available ? (
+                  <span className="text-emerald-300 font-medium">Metadata IPTC/XMP/QuickTime aktif untuk Foto &amp; Video.</span>
+                ) : (
+                  <span className="text-amber-300/90 font-medium">Metadata aktif untuk JPG/PNG.</span>
+                )}
               </p>
             </div>
           </div>
           <Button
             size="sm"
             variant="outline"
-            onClick={onRefresh}
+            onClick={() => onRefresh()}
             disabled={isChecking}
             className="border-emerald-500/40 text-emerald-300 hover:bg-emerald-500/20 text-xs shrink-0 h-8"
           >
@@ -141,7 +161,7 @@ export function FtpBridgeStatusBanner({
           <Button
             size="sm"
             variant="ghost"
-            onClick={onRefresh}
+            onClick={() => onRefresh()}
             disabled={isChecking}
             className="text-blue-400 hover:bg-blue-500/15 text-xs h-7 px-2 shrink-0"
           >
@@ -210,7 +230,7 @@ export function FtpBridgeStatusBanner({
           <div className="flex flex-wrap items-center gap-2 pt-1">
             <Button
               size="sm"
-              onClick={onRefresh}
+              onClick={() => onRefresh()}
               disabled={isChecking}
               className="bg-amber-600 hover:bg-amber-500 text-white font-medium text-xs h-8 px-4 shadow-md"
             >

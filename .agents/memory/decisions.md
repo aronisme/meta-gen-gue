@@ -289,3 +289,41 @@
      - Pergantian engine AI atau aspect ratio secara reaktif memformat ulang sintaks seluruh kartu prompt di canvas.
 - **Rationale & Consequences**: Menghadirkan alur kerja kurasi microstock berkecepatan tinggi, bebas friksi klik, bebas kontradiksi status UI, serta terisolasi aman antar akun pengguna.
 
+## [2026-10-18] Google Flow Automation: Chrome DevTools Protocol (CDP) Hardware-Level Dispatch & Stop Icon Render Lifecycle Monitoring
+- **Context**: Pada integrasi pembuatan gambar otomatis dari Meta-Gen Studio ke Google Flow (`flow.google.com` / `labs.google/fx/tools/flow`):
+  1. Pengguna menginginkan kontrol per kartu prompt via tombol `✨ Gen Img` (bukan render otomatis massal sekaligus).
+  2. Google Flow menggunakan ProseMirror (`contenteditable`) dan Angular Ivy / Zone.js. Ekstensi browser biasa yang menginjeksikan event JavaScript sintetis (`btn.click()`, `new KeyboardEvent('keydown', { key: 'Enter' })`) selalu gagal karena browser menandai event tersebut dengan `isTrusted: false`. ProseMirror dan Angular secara otomatis mengabaikan event tidak tepercaya (`isTrusted: false`).
+  3. Perlu mendeteksi kapan proses render Flow sedang berjalan vs selesai secara presisi untuk menarik gambar hasil generasi.
+- **Decision**:
+  1. **CDP Hardware-Level Dispatch (`chrome.debugger`)**:
+     - Menambahkan permission `"debugger"` pada `extension/manifest.json`.
+     - Pada `extension/background.js`, mengimplementasikan `executeCdpSubmission` yang menempelkan debugger sementara (`chrome.debugger.attach`) ke tab Flow.
+     - Mengirim `Input.dispatchKeyEvent` (tombol Enter) dan `Input.dispatchMouseEvent` (klik tombol submit pada koordinat tombol yang dihitung oleh content script).
+     - Seluruh event dari CDP dieksekusi di level engine Chromium/OS dan memiliki status **`isTrusted: true`**, sehingga berhasil melewati filter keamanan Angular Ivy & ProseMirror.
+  2. **Visual Lifecycle Monitoring via `<mat-icon>stop</mat-icon>`**:
+     - Saat Flow mulai merender, ikon tombol submit berganti dari `arrow_forward` menjadi `stop` (`<mat-icon>stop</mat-icon>`).
+     - Membuat helper `isFlowGenerating()` di `extension/flow-bridge.js` yang melacak ikon `stop` secara real-time.
+     - Selama ikon `stop` aktif, ekstensi menampilkan notifikasi waktu nyata dan menunggu.
+     - Begitu ikon `stop` hilang / berganti kembali, ekstensi mengetahui secara pasti bahwa render selesai, mendeteksi elemen gambar terbaru, mengonversi ke Base64, dan mengirimkan kembali ke card prompt di Meta-Gen.
+     - Batas waktu polling diperpanjang menjadi 180 detik.
+- **Rationale & Consequences**: Menjamin 100% keandalan submit tanpa terhalang isolasi Zone.js/ProseMirror, memberikan feedback status visual yang jelas kepada pengguna, dan mencegah penarikan gambar prematur saat render masih berlangsung.
+
+## [2026-10-19] Local FTP Bridge v1.2.0: Phil Harvey's ExifTool Lossless Multi-Format Engine & Real-Time Byte-Level Stream Tracking
+- **Context**:
+  1. Pengunggahan metadata microstock sebelumnya hanya mendukung injeksi biner buffer native JS untuk `.jpg` dan `.png` ([ftp-bridge/embed.mjs](file:///c:/App%20Tools/meta-gen-gue/ftp-bridge/embed.mjs)). File footage video (`.mp4`, `.mov`) dan vektor (`.eps`, `.svg`) terunggah tanpa metadata tertanam, sehingga kontributor harus mengisi ulang title dan keywords secara manual di dashboard agensi (Adobe Stock, Shutterstock, Dreamstime).
+  2. Pada UI antrean ([components/FtpQueueView.tsx](file:///c:/App%20Tools/meta-gen-gue/components/FtpQueueView.tsx)), upload menggunakan pemanggilan `fetch()` standar yang tidak memiliki event progress. Selama proses pengiriman file video berukuran 50MB - 300MB, progress bar tertahan di 30% dan tampak macet (*frozen*) sebelum melonjak langsung ke 100%.
+- **Decision**:
+  1. **Smart Dual-Engine ExifTool & Fallback ([ftp-bridge/exiftool-wrapper.mjs](file:///c:/App%20Tools/meta-gen-gue/ftp-bridge/exiftool-wrapper.mjs))**:
+     - Mengintegrasikan Phil Harvey's ExifTool (terdeteksi v13.59 resmi) sebagai engine utama penyematan metadata multi-format lossless untuk foto (`.jpg`, `.jpeg`, `.png`, `.tif`, `.webp`, `.psd`), vektor (`.eps`, `.svg`), dan video footage (`.mp4`, `.mov`, `.m4v`).
+     - Injeksi otomatis tag QuickTime (`DisplayName`, `Description`, `Keywords`) dan XMP pada file video MP4/MOV agar diakui langsung oleh bot Adobe Stock Video dan Shutterstock.
+     - Eksekusi menggunakan file argumen temporary (`-@ argfile`) ber-encoding UTF-8 untuk menjamin integritas karakter khusus, tanda kutip ganda, dan karakter non-ASCII di Windows.
+     - Transparent Fallback: Jika ExifTool offline/tidak ditemukan, bridge secara transparan melakukan fallback ke native JS buffer injector ([ftp-bridge/embed.mjs](file:///c:/App%20Tools/meta-gen-gue/ftp-bridge/embed.mjs)) untuk file JPEG & PNG tanpa throw error.
+  2. **Byte-Level Stream Tracking & Polling Endpoint ([ftp-bridge/server.mjs](file:///c:/App%20Tools/meta-gen-gue/ftp-bridge/server.mjs))**:
+     - Mengimplementasikan `Transform` stream pada upload SFTP dan `trackProgress` pada FTP (`basic-ftp`) untuk menghitung byte aktual yang diterima server remote per `uploadId`.
+     - Menyediakan endpoint `GET /api/ftp/progress?id=...` yang menyiarkan byte terunggah, persentase, dan kecepatan transfer.
+     - Menyediakan endpoint `POST /api/metadata/embed` untuk injeksi metadata standalone langsung ke file tanpa upload.
+  3. **Real-time UI Progress Bar & Monitoring ([components/FtpQueueView.tsx](file:///c:/App%20Tools/meta-gen-gue/components/FtpQueueView.tsx))**:
+     - Mengganti `fetch()` statis dengan `uploadWithXhr` (`XMLHttpRequest.upload.onprogress`) dikombinasikan dengan polling berkala ke `/api/ftp/progress`.
+     - Menampilkan progress bar halus (0–100%), counter byte aktual (`14.2 / 48.0 MB`), kecepatan instan (`⚡ 3.4 MB/s`), status fase transfer, dan badge verifikasi engine metadata (`ExifTool` / `IPTC & XMP`).
+     - Memperbarui `FtpBridgeStatusBanner` dengan badge `✨ ExifTool Active (v13.59)` dan menambahkan script `pnpm bridge:status` & `pnpm bridge:exiftool` di `package.json`.
+- **Rationale & Consequences**: Memberikan transparansi transfer 100% tanpa efek *freezing*, menjamin penanaman metadata otomatis pada file footage video, dan menjaga kompatibilitas penuh dengan sistem lama berkat arsitektur fallback cerdas.

@@ -9,12 +9,20 @@ export const BRIDGE_URL_STORAGE_KEY = 'metagen_ftp_bridge_url_v1';
 
 export type BridgeEndpointType = 'local-bridge' | 'same-origin' | 'none';
 
+export interface BridgeExifStatus {
+  available: boolean;
+  version?: string | null;
+  engine?: string;
+  supportedFormats?: string[];
+}
+
 export interface BridgeHealthStatus {
   isAvailable: boolean;
   endpointType: BridgeEndpointType;
   baseUrl: string;
   version?: string;
   message: string;
+  exiftool?: BridgeExifStatus;
 }
 
 /**
@@ -43,8 +51,11 @@ export function setStoredBridgeUrl(url: string): void {
  * Memeriksa apakah Local FTP Bridge (port 45678) aktif,
  * atau apakah saat ini sedang berjalan di localhost (Dev Server / Electron).
  */
-export async function checkBridgeHealth(targetUrl?: string): Promise<BridgeHealthStatus> {
-  const bridgeUrl = (targetUrl || getStoredBridgeUrl()).trim().replace(/\/+$/, '');
+export async function checkBridgeHealth(targetUrl?: string | unknown): Promise<BridgeHealthStatus> {
+  const urlCandidate = typeof targetUrl === 'string' && targetUrl.trim() ? targetUrl : getStoredBridgeUrl();
+  const bridgeUrl = (typeof urlCandidate === 'string' && urlCandidate.trim() ? urlCandidate : DEFAULT_BRIDGE_URL)
+    .trim()
+    .replace(/\/+$/, '');
 
   // 1. Coba ping Local FTP Bridge
   try {
@@ -68,6 +79,7 @@ export async function checkBridgeHealth(targetUrl?: string): Promise<BridgeHealt
           baseUrl: bridgeUrl,
           version: data.version || '1.0.0',
           message: `Local FTP Bridge terhubung di port ${bridgeUrl.split(':').pop() || '45678'}`,
+          exiftool: data.exiftool,
         };
       }
     }
@@ -101,7 +113,7 @@ export async function checkBridgeHealth(targetUrl?: string): Promise<BridgeHealt
 /**
  * Mengembalikan URL endpoint FTP yang efektif (mengarahkan ke bridge atau same-origin).
  */
-export function getFtpApiUrl(action: 'test' | 'upload' | 'disconnect-all', status: BridgeHealthStatus): string {
+export function getFtpApiUrl(action: 'test' | 'upload' | 'disconnect-all' | 'progress', status: BridgeHealthStatus): string {
   if (status.endpointType === 'local-bridge' && status.baseUrl) {
     return `${status.baseUrl}/api/ftp/${action}`;
   }
@@ -120,10 +132,11 @@ export function useFtpBridgeStatus() {
   });
   const [isChecking, setIsChecking] = useState<boolean>(true);
 
-  const checkStatus = useCallback(async (customUrl?: string) => {
+  const checkStatus = useCallback(async (customUrl?: unknown) => {
     setIsChecking(true);
     try {
-      const result = await checkBridgeHealth(customUrl);
+      const urlStr = typeof customUrl === 'string' && customUrl.trim() ? customUrl.trim() : undefined;
+      const result = await checkBridgeHealth(urlStr);
       setStatus(result);
       return result;
     } finally {

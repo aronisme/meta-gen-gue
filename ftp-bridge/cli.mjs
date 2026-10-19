@@ -11,6 +11,7 @@
  *   metagen-bridge uninstall    - Hapus auto-start permanen
  *   metagen-bridge status       - Cek apakah bridge sedang aktif di port 45678
  *   metagen-bridge stop         - Hentikan bridge yang sedang berjalan
+ *   metagen-bridge install-exiftool - Pasang ExifTool (Phil Harvey) via Winget
  */
 
 import fs from 'fs';
@@ -18,6 +19,7 @@ import path from 'path';
 import { fileURLToPath } from 'url';
 import http from 'http';
 import { execSync, spawn } from 'child_process';
+import { getExifToolStatus } from './exiftool-wrapper.mjs';
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
@@ -80,6 +82,11 @@ function stopRunningProcess() {
 
 async function handleStatus() {
   const health = await checkHealth();
+  const exif = health.data?.exiftool || getExifToolStatus();
+  const exifDisplay = exif?.available
+    ? `${c.green}Terpasang (v${exif.version}) - Full Image, Vector, & Video Support${c.reset}`
+    : `${c.yellow}Belum terpasang (Fallback JS Buffer untuk JPG/PNG)${c.reset}\n              ${c.gray}Ketik ${c.cyan}metagen-bridge install-exiftool${c.gray} untuk aktifkan video/vektor metadata${c.reset}`;
+
   if (health.ok) {
     const uptime = health.data?.uptimeSec || 0;
     const mins = Math.floor(uptime / 60);
@@ -88,6 +95,7 @@ async function handleStatus() {
 ${c.green}${c.bright}● MetaGen Local FTP Bridge AKTIF${c.reset}
   ${c.gray}Status:${c.reset}     Ready di port ${c.cyan}${PORT}${c.reset}
   ${c.gray}Uptime:${c.reset}     ${mins} menit ${secs} detik
+  ${c.gray}Exif Engine:${c.reset} ${exifDisplay}
   ${c.gray}Health:${c.reset}     http://127.0.0.1:${PORT}/health
   ${c.gray}Auto-Start:${c.reset} ${fs.existsSync(VBS_TARGET) ? c.green + 'Terpasang di Startup Windows' + c.reset : c.yellow + 'Belum dipasang (opsional: metagen-bridge install)' + c.reset}
 `);
@@ -95,9 +103,37 @@ ${c.green}${c.bright}● MetaGen Local FTP Bridge AKTIF${c.reset}
     console.log(`
 ${c.red}${c.bright}○ MetaGen Local FTP Bridge TIDAK AKTIF (Offline)${c.reset}
   Port ${PORT} belum mendengarkan.
-  - Untuk menjalankan:  ${c.cyan}metagen-bridge start${c.reset}
-  - Untuk auto-start:   ${c.cyan}metagen-bridge install${c.reset}
+  ${c.gray}Exif Engine:${c.reset} ${exifDisplay}
+  - Untuk menjalankan:         ${c.cyan}metagen-bridge start${c.reset}
+  - Untuk auto-start:          ${c.cyan}metagen-bridge install${c.reset}
+  - Untuk pasang ExifTool:     ${c.cyan}metagen-bridge install-exiftool${c.reset}
 `);
+  }
+}
+
+async function handleInstallExifTool() {
+  console.log(`\n${c.cyan}Mengecek dan memasang ExifTool (Phil Harvey) via Winget...${c.reset}`);
+  try {
+    const checkWinget = execSync('where.exe winget', { stdio: ['ignore', 'pipe', 'ignore'], encoding: 'utf-8' });
+    if (!checkWinget) {
+      console.log(`${c.red}Winget tidak ditemukan. Silakan unduh manual dari https://exiftool.org${c.reset}`);
+      return;
+    }
+    console.log(`${c.yellow}Menjalankan: winget install --id OliverBetz.ExifTool -e --accept-source-agreements --accept-package-agreements...${c.reset}`);
+    const proc = spawn('winget', ['install', '--id', 'OliverBetz.ExifTool', '-e', '--accept-source-agreements', '--accept-package-agreements'], {
+      stdio: 'inherit',
+      shell: true,
+    });
+    proc.on('close', (code) => {
+      if (code === 0) {
+        console.log(`\n${c.green}✔ ExifTool berhasil dipasang! Buka kembali terminal baru agar PATH tersegarkan.${c.reset}`);
+      } else {
+        console.log(`\n${c.yellow}Pemasangan selesai dengan kode ${code}.${c.reset}`);
+      }
+    });
+  } catch (err) {
+    console.log(`${c.red}Gagal menjalankan instalasi otomatis: ${err.message}${c.reset}`);
+    console.log(`Rekomendasi manual: Jalankan ${c.cyan}winget install OliverBetz.ExifTool${c.reset} di PowerShell/Terminal.`);
   }
 }
 
@@ -202,6 +238,11 @@ async function main() {
       await handleStatus();
       break;
 
+    case 'install-exiftool':
+    case 'exiftool':
+      await handleInstallExifTool();
+      break;
+
     case 'help':
     case '--help':
     case '-h':
@@ -212,12 +253,13 @@ ${c.yellow}Penggunaan:${c.reset}
   metagen-bridge [perintah]
 
 ${c.yellow}Daftar Perintah:${c.reset}
-  ${c.green}install${c.reset}      Pasang auto-start permanen (otomatis aktif saat Windows dinyalakan)
-  ${c.green}status${c.reset}       Cek status koneksi dan port 45678
-  ${c.green}start${c.reset}        Jalankan bridge di terminal dengan log live
-  ${c.green}stop${c.reset}         Hentikan proses bridge yang sedang berjalan
-  ${c.green}uninstall${c.reset}    Hapus auto-start permanen dari Windows
-  ${c.green}help${c.reset}         Tampilkan panduan bantuan ini
+  ${c.green}install${c.reset}           Pasang auto-start permanen (otomatis aktif saat Windows dinyalakan)
+  ${c.green}status${c.reset}            Cek status koneksi, port 45678, dan Exif Engine
+  ${c.green}start${c.reset}             Jalankan bridge di terminal dengan log live
+  ${c.green}stop${c.reset}              Hentikan proses bridge yang sedang berjalan
+  ${c.green}uninstall${c.reset}         Hapus auto-start permanen dari Windows
+  ${c.green}install-exiftool${c.reset}  Pasang ExifTool (Phil Harvey) resmi via Winget
+  ${c.green}help${c.reset}              Tampilkan panduan bantuan ini
 `);
       break;
 

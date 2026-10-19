@@ -91,3 +91,24 @@ Terapkan standar keahlian (Craftsmanship Standard C-1 s/d C-5):
 - Larangan keras (Hard Gate): Tidak ada elemen interaktif/tombol mati (R-26), teks tidak kontras (R-25), link tanpa tujuan (R-24), atau data/klaim palsu (R-17/R-36).
 - Verifikasi interaksi satu per satu sebelum menyelesaikan tugas (R-35).
 <!-- antislop:end -->
+
+## Google Flow Automation Integration (VCPA Extension)
+- **Feature**: On-demand image generation via `✨ Gen Img` button on each prompt card in `PromptGeneratorView.tsx`.
+- **Extension Bridge**:
+  - `extension/manifest.json`: Includes `"debugger"`, `"tabs"`, `"scripting"`, `"storage"`, and host permissions for `flow.google.com` & `labs.google/fx/*`.
+  - `extension/background.js`: Uses `chrome.debugger` (CDP) to dispatch native hardware-level Enter key (`Input.dispatchKeyEvent`) and mouse click (`Input.dispatchMouseEvent`) with `isTrusted: true` to bypass Angular/ProseMirror synthetic event blockers.
+  - `extension/flow-bridge.js`: Injects prompt into ProseMirror editor, calculates submit button coordinates, triggers CDP submit, monitors render progress via `<mat-icon>stop</mat-icon>` (`isFlowGenerating()`), and captures completed images back to the Meta-Gen prompt card.
+- **Project Reference**: `C:\App Tools\Flow Automation V2` and `flow ext Rj.zip` (CDP pattern for Flow).
+
+## Local FTP Bridge & ExifTool Lossless Metadata Engine (v1.2.0)
+- **Port Target**: `127.0.0.1:45678` (Node.js daemon backend dengan Keep-Alive Session Pool).
+- **Core Modules**:
+  - `ftp-bridge/exiftool-wrapper.mjs`: Multi-format lossless metadata injector (JPG, PNG, TIFF, WebP, PSD, EPS, SVG, MP4, MOV, M4V) dengan fallback transparan ke `ftp-bridge/embed.mjs`.
+  - `ftp-bridge/server.mjs`: Local Bridge server dengan pooling SFTP/FTPS, real-time byte stream tracking, serta endpoint `/health`, `/api/ftp/upload`, `/api/ftp/progress`, dan `/api/metadata/embed`.
+  - `ftp-bridge/cli.mjs`: Global CLI manager (`metagen-bridge status`, `install`, `start`, `stop`, `install-exiftool`).
+- **Real-Time Progress Tracking**:
+  - `components/FtpQueueView.tsx`: Menggunakan `uploadWithXhr` + progress polling ke `/api/ftp/progress` untuk menampilkan live percent bar (0–100%), counter byte terunggah (`MB/MB`), kecepatan instan (`MB/s`), dan status fase transfer.
+- **Commands**:
+  - `pnpm bridge` - Jalankan bridge di foreground.
+  - `pnpm bridge:status` - Cek status koneksi, port 45678, dan ExifTool engine.
+  - `pnpm bridge:exiftool` - Pasang/perbarui ExifTool via WinGet.

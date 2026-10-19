@@ -6,6 +6,7 @@ import {
   sanitizeFtpHost,
 } from '../ftp/store';
 import { getAgencyRemoteFolder } from '../ftp/client';
+import { checkBridgeHealth } from '../ftp/bridge-client';
 import type { UploadLedgerRecord } from '../types';
 
 describe('Microstock Multi-Account FTP Engine & Anti-Duplicate Verification', () => {
@@ -218,6 +219,24 @@ describe('Microstock Multi-Account FTP Engine & Anti-Duplicate Verification', ()
       const resShutterstockVector = getAgencyRemoteFolder('graphic.eps', 'shutterstock');
       expect(resShutterstockVector.remoteDir).toBe('/');
       expect(resShutterstockVector.remotePath).toBe('/graphic.eps');
+    });
+  });
+
+  describe('checkBridgeHealth defensive URL handling', () => {
+    it('handles SyntheticEvent object without throwing TypeError', async () => {
+      // Mensimulasikan pemanggilan onClick={onRefresh} di mana React meneruskan objek SyntheticEvent
+      const mockEvent = { nativeEvent: {}, target: {}, currentTarget: {}, type: 'click' };
+      const res = await checkBridgeHealth(mockEvent as unknown as string);
+      expect(res).toBeDefined();
+      expect(typeof res.isAvailable).toBe('boolean');
+    });
+
+    it('handles undefined and empty string properly without throwing', async () => {
+      const res1 = await checkBridgeHealth(undefined);
+      expect(res1).toBeDefined();
+
+      const res2 = await checkBridgeHealth('');
+      expect(res2).toBeDefined();
     });
   });
 });

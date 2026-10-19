@@ -7,9 +7,9 @@
  *    - Key yang terkena 429 (Rate Limit / Kuota Habis) otomatis diistirahatkan 60 detik.
  *    - Request berikutnya langsung MELEWATI (SKIP) key yang sedang limit tanpa buang waktu.
  *    - Key yang invalid (401) otomatis di-blacklist sementara (24 jam) tanpa menghentikan key lain.
- * 2. ⚡ Multi-Provider & Multi-Key Load Balancing (Groq, Gemini, Mistral, Nvidia NIM, xKiro).
+ * 2. ⚡ Multi-Provider & Multi-Key Load Balancing (Groq, Gemini, TokenHarbor, OpenRouter, Mistral, Nvidia NIM, xKiro).
  * 3. 🌐 100% Kompatibel Standar OpenAI (/v1/chat/completions & /v1/models).
- * 4. 🖼️ Multimodal Vision Support (Base64 data URL).
+ * 4. 🖼️ Multimodal Vision Support (Base64 data URL & URL).
  * 5. 🛡️ Thread-Safe Database dengan LockService di Google Sheets.
  * ============================================================================
  */
@@ -22,29 +22,29 @@ const SHEET_NAMES = {
   AI_KEYS: "AI_Keys",
   CONFIG: "Config",
   EXT_KEYS: "ExtensionKeys",
-  LOGS: "Logs",
-  USERS: "Users"
+  LOGS: "Logs"
 };
 
 const DEFAULT_CONFIGS = [
-  ["PROVIDER_ORDER", "groq,gemini,mistral,nvidia,xkiro", "Urutan prioritas rotasi provider"],
+  ["PROVIDER_ORDER", "groq,gemini,tokenharbor,openrouter,mistral,nvidia,xkiro", "Urutan prioritas rotasi provider"],
   ["DEFAULT_GROQ_MODEL", "llama-3.3-70b-versatile", "Model default untuk Groq"],
   ["DEFAULT_GEMINI_MODEL", "gemini-2.5-flash", "Model default untuk Google Gemini"],
+  ["DEFAULT_TOKENHARBOR_MODEL", "deepseek-v4.1-flash:free", "Model default untuk TokenHarbor (Vision Free)"],
+  ["DEFAULT_OPENROUTER_MODEL", "google/gemini-2.0-flash-001", "Model default untuk OpenRouter"],
   ["DEFAULT_MISTRAL_MODEL", "mistral-large-latest", "Model default untuk Mistral"],
   ["DEFAULT_NVIDIA_MODEL", "mistralai/mistral-large-3-675b-instruct-2512", "Model default untuk Nvidia NIM"],
   ["DEFAULT_XKIRO_MODEL", "mistralai/ministral-14b", "Model default untuk xKiro"],
   ["KEY_COOLDOWN_SECONDS", "60", "Durasi istirahat key saat kena 429 (detik)"],
   ["MAX_LOG_ROWS", "1000", "Batas maksimal baris log di sheet Logs"],
   ["REQUIRE_AUTH", "false", "Wajibkan token otentikasi? (true/false)"],
-  ["ENABLE_LOGS", "true", "Catat riwayat request ke tab Logs? (true/false)"],
-  ["AUTH_MODE", "whitelist", "Mode akses: 'whitelist' (hanya user aktif), 'quota' (auto-register kuota harian), 'open' (bebas)"],
-  ["DEFAULT_DAILY_QUOTA", "100", "Batas kuota generasi harian untuk member/user baru"],
-  ["GOOGLE_CLIENT_ID", "61908502532-85bvlf6i8safupsefop9n3hflbodrthe.apps.googleusercontent.com", "Google OAuth 2.0 Web Client ID"]
+  ["ENABLE_LOGS", "true", "Catat riwayat request ke tab Logs? (true/false)"]
 ];
 
 const DEFAULT_AI_KEYS = [
   ["groq", "gsk_contoh_paste_key_disini", "llama-3.3-70b-versatile", "TRUE", ""],
   ["gemini", "AIzaSy_contoh_paste_key_disini", "gemini-2.5-flash", "TRUE", ""],
+  ["tokenharbor", "thk_live_contoh_paste_key_disini", "deepseek-v4.1-flash:free", "TRUE", ""],
+  ["openrouter", "sk-or-v1-contoh_paste_key_disini", "google/gemini-2.0-flash-001", "TRUE", ""],
   ["mistral", "contoh_mistral_key_disini", "mistral-large-latest", "TRUE", ""],
   ["nvidia", "nvapi-contoh_key_disini", "mistralai/mistral-large-3-675b-instruct-2512", "TRUE", ""],
   ["xkiro", "xkiro_contoh_key_disini", "mistralai/ministral-14b", "TRUE", ""]
@@ -59,17 +59,14 @@ function setupDatabase() {
   ]);
   initSheet(ss, SHEET_NAMES.CONFIG, ["SettingKey", "SettingValue", "Description"], ["#3730a3", "#ffffff"], DEFAULT_CONFIGS);
   initSheet(ss, SHEET_NAMES.LOGS, ["Timestamp", "Provider", "Model", "Status", "LatencyMs", "Message"], ["#334155", "#ffffff"], []);
-  initSheet(ss, SHEET_NAMES.USERS, ["Email", "Name", "Role", "Status", "DailyQuota", "UsageCount", "LastLogin", "CreatedAt"], ["#4338ca", "#ffffff"], [
-    ["aronisme.mail@gmail.com", "Admin Aron", "admin", "active", 1000, 0, new Date().toISOString(), new Date().toISOString()]
-  ]);
 
   const defaultSheet = ss.getSheetByName("Sheet1") || ss.getSheetByName("Sheet 1");
   if (defaultSheet && ss.getSheets().length > 1) {
     try { ss.deleteSheet(defaultSheet); } catch (e) {}
   }
 
-  CacheService.getScriptCache().removeAll(["config_cache", "keys_cache", "ext_keys_cache", "users_cache"]);
-  return { ok: true, message: "Database & Whitelist Users berhasil dibuat & diinisialisasi otomatis!" };
+  CacheService.getScriptCache().removeAll(["config_cache", "keys_cache", "ext_keys_cache"]);
+  return { ok: true, message: "Database AI Proxy berhasil dibuat & diinisialisasi otomatis!" };
 }
 
 function initSheet(ss, name, headers, colors, sampleRows) {
@@ -220,275 +217,8 @@ function logApiRequest(provider, model, status, latencyMs, message) {
   }
 }
 
-// ════════════════════════════════════════════════════════════════════════════
-// 1.B GOOGLE OAUTH & USER WHITELIST MANAGEMENT
-// ════════════════════════════════════════════════════════════════════════════
+// (Catatan: Autentikasi Pengguna & Kuota telah dialihkan sepenuhnya ke Cloudflare D1 SQL DB)
 
-function verifyGoogleIdToken(idToken) {
-  if (!idToken) throw new Error("ID Token Google tidak ditemukan");
-
-  const cleanToken = String(idToken).trim();
-  const url = "https://oauth2.googleapis.com/tokeninfo?id_token=" + encodeURIComponent(cleanToken);
-  const response = UrlFetchApp.fetch(url, { muteHttpExceptions: true });
-  const code = response.getResponseCode();
-  const text = response.getContentText();
-
-  if (code !== 200) {
-    let errMsg = "Token Google tidak valid";
-    try {
-      const parsed = JSON.parse(text);
-      if (parsed.error_description) errMsg = parsed.error_description;
-    } catch (e) {}
-    throw new Error(errMsg);
-  }
-
-  const payload = JSON.parse(text);
-  const config = getConfig();
-  const expectedClientId = config["GOOGLE_CLIENT_ID"] || "61908502532-85bvlf6i8safupsefop9n3hflbodrthe.apps.googleusercontent.com";
-
-  if (expectedClientId && payload.aud !== expectedClientId) {
-    throw new Error("Client ID Google tidak sesuai (aud mismatch)");
-  }
-
-  if (String(payload.email_verified).toLowerCase() !== "true") {
-    throw new Error("Email Google belum terverifikasi oleh Google");
-  }
-
-  return {
-    sub: payload.sub,
-    email: String(payload.email || "").trim().toLowerCase(),
-    name: payload.name || payload.email || "Pengguna Google",
-    picture: payload.picture || ""
-  };
-}
-
-function getUserProfileByEmail(email) {
-  if (!email) return null;
-  const cleanEmail = String(email).trim().toLowerCase();
-
-  const ss = SpreadsheetApp.getActiveSpreadsheet();
-  let sheet = ss.getSheetByName(SHEET_NAMES.USERS);
-  if (!sheet) {
-    setupDatabase();
-    sheet = ss.getSheetByName(SHEET_NAMES.USERS);
-  }
-
-  const rows = sheet.getDataRange().getValues();
-  for (let i = 1; i < rows.length; i++) {
-    const rowEmail = String(rows[i][0] || "").trim().toLowerCase();
-    if (rowEmail === cleanEmail) {
-      const dailyQuota = parseInt(rows[i][4], 10) || 100;
-      const usageCount = parseInt(rows[i][5], 10) || 0;
-      return {
-        rowIndex: i + 1,
-        email: rowEmail,
-        name: String(rows[i][1] || ""),
-        role: String(rows[i][2] || "user").toLowerCase(),
-        status: String(rows[i][3] || "pending").toLowerCase(),
-        dailyQuota: dailyQuota,
-        usageCount: usageCount,
-        remainingQuota: Math.max(0, dailyQuota - usageCount),
-        lastLogin: rows[i][6] ? new Date(rows[i][6]).toISOString() : "",
-        createdAt: rows[i][7] ? new Date(rows[i][7]).toISOString() : ""
-      };
-    }
-  }
-  return null;
-}
-
-function syncGoogleUser(idToken) {
-  const googleData = verifyGoogleIdToken(idToken);
-  const config = getConfig();
-  const authMode = (config["AUTH_MODE"] || "whitelist").toLowerCase();
-  const defaultQuota = parseInt(config["DEFAULT_DAILY_QUOTA"], 10) || 100;
-
-  const lock = LockService.getScriptLock();
-  lock.waitLock(10000);
-
-  try {
-    const ss = SpreadsheetApp.getActiveSpreadsheet();
-    let sheet = ss.getSheetByName(SHEET_NAMES.USERS);
-    if (!sheet) {
-      setupDatabase();
-      sheet = ss.getSheetByName(SHEET_NAMES.USERS);
-    }
-
-    const rows = sheet.getDataRange().getValues();
-    let userRowIndex = -1;
-    let existingUser = null;
-
-    for (let i = 1; i < rows.length; i++) {
-      const rowEmail = String(rows[i][0] || "").trim().toLowerCase();
-      if (rowEmail === googleData.email) {
-        userRowIndex = i + 1;
-        existingUser = {
-          name: rows[i][1],
-          role: String(rows[i][2] || "user").toLowerCase(),
-          status: String(rows[i][3] || "pending").toLowerCase(),
-          dailyQuota: parseInt(rows[i][4], 10) || defaultQuota,
-          usageCount: parseInt(rows[i][5], 10) || 0,
-          lastLogin: rows[i][6]
-        };
-        break;
-      }
-    }
-
-    const now = new Date();
-    const nowIso = now.toISOString();
-
-    if (existingUser) {
-      let currentUsage = existingUser.usageCount;
-      if (existingUser.lastLogin) {
-        const lastDate = new Date(existingUser.lastLogin);
-        if (lastDate.toDateString() !== now.toDateString()) {
-          currentUsage = 0;
-          sheet.getRange(userRowIndex, 6).setValue(0);
-        }
-      }
-
-      sheet.getRange(userRowIndex, 2).setValue(googleData.name);
-      sheet.getRange(userRowIndex, 7).setValue(nowIso);
-
-      return {
-        ok: true,
-        user: {
-          email: googleData.email,
-          name: googleData.name,
-          picture: googleData.picture,
-          role: existingUser.role,
-          status: existingUser.status,
-          dailyQuota: existingUser.dailyQuota,
-          usageCount: currentUsage,
-          remainingQuota: Math.max(0, existingUser.dailyQuota - currentUsage),
-          lastLogin: nowIso
-        }
-      };
-    }
-
-    const isFirstUser = rows.length <= 1;
-    const initialRole = isFirstUser ? "admin" : "user";
-    const initialStatus = isFirstUser ? "active" : (authMode === "whitelist" ? "pending" : "active");
-    const initialQuota = isFirstUser ? 1000 : defaultQuota;
-
-    sheet.appendRow([
-      googleData.email,
-      googleData.name,
-      initialRole,
-      initialStatus,
-      initialQuota,
-      0,
-      nowIso,
-      nowIso
-    ]);
-
-    return {
-      ok: true,
-      user: {
-        email: googleData.email,
-        name: googleData.name,
-        picture: googleData.picture,
-        role: initialRole,
-        status: initialStatus,
-        dailyQuota: initialQuota,
-        usageCount: 0,
-        remainingQuota: initialQuota,
-        lastLogin: nowIso
-      }
-    };
-  } finally {
-    lock.releaseLock();
-  }
-}
-
-function checkAndDeductQuota(userEmail, idToken) {
-  const config = getConfig();
-  const authMode = (config["AUTH_MODE"] || "whitelist").toLowerCase();
-  if (authMode === "open") return { allowed: true };
-
-  let email = userEmail;
-  if (!email && idToken) {
-    try {
-      const g = verifyGoogleIdToken(idToken);
-      email = g.email;
-    } catch (e) {
-      return { allowed: false, reason: "Verifikasi Google Auth gagal: " + e.message };
-    }
-  }
-
-  if (!email) {
-    return { allowed: false, reason: "Akses AI mewajibkan autentikasi login Google Account." };
-  }
-
-  const cleanEmail = String(email).trim().toLowerCase();
-  const lock = LockService.getScriptLock();
-  lock.waitLock(10000);
-
-  try {
-    const ss = SpreadsheetApp.getActiveSpreadsheet();
-    let sheet = ss.getSheetByName(SHEET_NAMES.USERS);
-    if (!sheet) {
-      setupDatabase();
-      sheet = ss.getSheetByName(SHEET_NAMES.USERS);
-    }
-
-    const rows = sheet.getDataRange().getValues();
-    for (let i = 1; i < rows.length; i++) {
-      const rowEmail = String(rows[i][0] || "").trim().toLowerCase();
-      if (rowEmail === cleanEmail) {
-        const role = String(rows[i][2] || "user").toLowerCase();
-        const status = String(rows[i][3] || "pending").toLowerCase();
-        const dailyQuota = parseInt(rows[i][4], 10) || 100;
-        let usageCount = parseInt(rows[i][5], 10) || 0;
-        const lastLogin = rows[i][6];
-
-        if (status === "blocked") {
-          return { allowed: false, reason: "Akun Anda dinonaktifkan oleh administrator." };
-        }
-
-        if (authMode === "whitelist" && status !== "active" && role !== "admin") {
-          return {
-            allowed: false,
-            reason: "Akun (" + cleanEmail + ") belum diaktifkan dalam whitelist. Silakan hubungi administrator."
-          };
-        }
-
-        const now = new Date();
-        if (lastLogin) {
-          const lastDate = new Date(lastLogin);
-          if (lastDate.toDateString() !== now.toDateString()) {
-            usageCount = 0;
-          }
-        }
-
-        if (role !== "admin" && usageCount >= dailyQuota) {
-          return {
-            allowed: false,
-            reason: "Kuota harian Anda (" + dailyQuota + " generasi) telah habis. Kuota akan di-reset besok."
-          };
-        }
-
-        const newUsage = usageCount + 1;
-        sheet.getRange(i + 1, 6).setValue(newUsage);
-        sheet.getRange(i + 1, 7).setValue(now.toISOString());
-
-        return {
-          allowed: true,
-          email: cleanEmail,
-          remaining: Math.max(0, dailyQuota - newUsage),
-          dailyQuota: dailyQuota,
-          usageCount: newUsage
-        };
-      }
-    }
-
-    return {
-      allowed: false,
-      reason: "Akun (" + cleanEmail + ") belum terdaftar di whitelist. Silakan login akun Google Anda."
-    };
-  } finally {
-    lock.releaseLock();
-  }
-}
 
 // ════════════════════════════════════════════════════════════════════════════
 // 2. SMART KEY COOLDOWN (CIRCUIT BREAKER HELPER)
@@ -539,7 +269,7 @@ function resolveProviderAndModel(requestedModel) {
   }
   const raw = requestedModel.trim();
 
-  const match = raw.match(/^(groq|gemini|mistral|nvidia|xkiro)[\/:](.+)$/i);
+  const match = raw.match(/^(groq|gemini|tokenharbor|openrouter|mistral|nvidia|xkiro)[\/:](.+)$/i);
   if (match) {
     return { provider: match[1].toLowerCase(), targetModel: match[2].trim() };
   }
@@ -554,6 +284,12 @@ function resolveProviderAndModel(requestedModel) {
   }
 
   const lower = raw.toLowerCase();
+  if (lower.startsWith("thk_") || lower.includes("tokenharbor") || lower.includes(":free") || lower.includes("mimo-") || lower.includes("deepseek-v4")) {
+    return { provider: "tokenharbor", targetModel: raw };
+  }
+  if (lower.startsWith("sk-or-") || lower.includes("openrouter") || lower.startsWith("google/") || lower.startsWith("meta-llama/") || lower.startsWith("anthropic/")) {
+    return { provider: "openrouter", targetModel: raw };
+  }
   if (lower.includes("gemini")) return { provider: "gemini", targetModel: raw };
   if (lower.includes("qwen") || lower.includes("llama") || lower.includes("deepseek") || lower.includes("gemma")) {
     return { provider: "groq", targetModel: raw };
@@ -575,6 +311,8 @@ function resolveProviderAndModel(requestedModel) {
 const PROVIDER_CALLERS = {
   groq: callGroq,
   gemini: callGemini,
+  tokenharbor: callTokenHarbor,
+  openrouter: callOpenRouter,
   mistral: callMistral,
   nvidia: callNvidia,
   xkiro: callXKiro
@@ -862,6 +600,52 @@ function callXKiro(options) {
   return parseOpenAiResponse(response, "xKiro");
 }
 
+function callTokenHarbor(options) {
+  const msgs = normalizeMessages(options);
+  const payload = {
+    model: options.model || "deepseek-v4.1-flash:free",
+    temperature: options.temperature ?? 0.2,
+    max_tokens: options.max_tokens || 2048,
+    messages: msgs
+  };
+  if (options.response_format) payload.response_format = options.response_format;
+
+  const response = UrlFetchApp.fetch("https://tokenharbor.ai/v1/chat/completions", {
+    method: "post",
+    contentType: "application/json",
+    headers: { Authorization: "Bearer " + options.key },
+    payload: JSON.stringify(payload),
+    muteHttpExceptions: true
+  });
+
+  return parseOpenAiResponse(response, "TokenHarbor");
+}
+
+function callOpenRouter(options) {
+  const msgs = normalizeMessages(options);
+  const payload = {
+    model: options.model || "google/gemini-2.0-flash-001",
+    temperature: options.temperature ?? 0.2,
+    max_tokens: options.max_tokens || 2048,
+    messages: msgs
+  };
+  if (options.response_format) payload.response_format = options.response_format;
+
+  const response = UrlFetchApp.fetch("https://openrouter.ai/api/v1/chat/completions", {
+    method: "post",
+    contentType: "application/json",
+    headers: {
+      Authorization: "Bearer " + options.key,
+      "HTTP-Referer": "https://meta-gen.app",
+      "X-Title": "MetaGen Microstock"
+    },
+    payload: JSON.stringify(payload),
+    muteHttpExceptions: true
+  });
+
+  return parseOpenAiResponse(response, "OpenRouter");
+}
+
 function normalizeMessages(options) {
   if (options.messages && Array.isArray(options.messages)) {
     return options.messages;
@@ -1004,16 +788,12 @@ function doGet(e) {
     return openAiJsonResponse(getOpenAiModelsList());
   }
 
-  if (params.action === "user_status" && params.email) {
-    return openAiJsonResponse({ ok: true, user: getUserProfileByEmail(params.email) });
-  }
-
   return openAiJsonResponse({
     object: "service",
-    service: "GAS AI Proxy (OpenAI Compliant & Google Auth Whitelist Edition)",
+    service: "GAS AI Proxy (OpenAI Compliant High-Performance Edition)",
     status: "online",
-    version: "3.2.0",
-    features: ["openai_chat_completions", "smart_key_cooldown", "multi_key_rotation", "failover", "google_auth_whitelist"],
+    version: "3.3.0",
+    features: ["openai_chat_completions", "smart_key_cooldown", "multi_key_rotation", "failover", "vision_multimodal"],
     models: getOpenAiModelsList().data.map(m => m.id)
   });
 }
@@ -1033,43 +813,11 @@ function doPost(e) {
       return openAiErrorResponse("Invalid JSON payload", "invalid_request_error", 400);
     }
 
-    // 0. AUTH / GOOGLE SIGN-IN ENDPOINTS (Diproses tanpa wajib Bearer token)
-    if (body.action === "google_login" || body.action === "auth_verify") {
-      const idToken = body.idToken || body.token;
-      if (!idToken) {
-        return openAiErrorResponse("Missing Google ID token", "invalid_request_error", 400);
-      }
-      try {
-        const syncResult = syncGoogleUser(idToken);
-        return openAiJsonResponse(syncResult);
-      } catch (authErr) {
-        return openAiErrorResponse(authErr.message || "Google auth verification failed", "authentication_error", 401);
-      }
-    }
-
-    if (body.action === "get_user_status") {
-      const email = body.email;
-      if (!email) return openAiErrorResponse("Missing email parameter", "invalid_request_error", 400);
-      const user = getUserProfileByEmail(email);
-      return openAiJsonResponse({ ok: true, user: user });
-    }
-
     const authHeader = (e.headers && (e.headers["authorization"] || e.headers["Authorization"])) || "";
     const token = authHeader || body.token || body.apiKey || (e.parameter && (e.parameter.key || e.parameter.token)) || "";
 
     if (!validateAuthToken(token)) {
       return openAiErrorResponse("Incorrect or missing API key (Bearer token invalid)", "authentication_error", 401);
-    }
-
-    // Verifikasi Whitelist & Kuota Pengguna jika mode bukan 'open'
-    const userEmail = body.userEmail || (e.headers && (e.headers["x-user-email"] || e.headers["X-User-Email"]));
-    const googleIdToken = body.googleIdToken || body.idToken;
-    const config = getConfig();
-    if (config["AUTH_MODE"] !== "open" && (userEmail || googleIdToken)) {
-      const quotaCheck = checkAndDeductQuota(userEmail, googleIdToken);
-      if (!quotaCheck.allowed) {
-        return openAiErrorResponse(quotaCheck.reason, "permission_denied", 403);
-      }
     }
 
     // 1. OPENAI CHAT COMPLETIONS
@@ -1164,20 +912,8 @@ function onOpen() {
     .addItem("✨ Buka Panel Kontrol", "openControlPanel")
     .addSeparator()
     .addItem("🔄 Bersihkan Cache & Reset Cooldown", "clearAllCachesWithToast")
-    .addItem("👥 Kelola Whitelist Pengguna", "openUsersSheet")
     .addItem("🛠️ Setup / Reset Database", "setupDatabase")
     .addToUi();
-}
-
-function openUsersSheet() {
-  const ss = SpreadsheetApp.getActiveSpreadsheet();
-  let sheet = ss.getSheetByName(SHEET_NAMES.USERS);
-  if (!sheet) {
-    setupDatabase();
-    sheet = ss.getSheetByName(SHEET_NAMES.USERS);
-  }
-  ss.setActiveSheet(sheet);
-  ss.toast("Menampilkan tab Whitelist Pengguna (Users).", "👥 Whitelist Users", 3);
 }
 
 function openControlPanel() {
@@ -1191,7 +927,7 @@ function openControlPanel() {
 function clearAllCachesWithToast() {
   CacheService.getScriptCache().removeAll([
     "config_cache", "keys_cache", "ext_keys_cache",
-    "cursor_groq", "cursor_gemini", "cursor_mistral", "cursor_nvidia", "cursor_xkiro"
+    "cursor_groq", "cursor_gemini", "cursor_tokenharbor", "cursor_openrouter", "cursor_mistral", "cursor_nvidia", "cursor_xkiro"
   ]);
   SpreadsheetApp.getActiveSpreadsheet().toast("Semua cache & masa jeda cooldown berhasil di-reset!", "🔄 Cache Flushed", 3);
 }

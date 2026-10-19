@@ -45,6 +45,10 @@ import type { FileType, GenerationSession, ItemMetaBox, MetaOutput, Provider } f
 const GAS_PROXY_MODELS = [
   'auto',
   'gemini-2.5-flash',
+  'deepseek-v4.1-flash:free',
+  'mimo-v2.6-flash:free',
+  'google/gemini-2.0-flash-001',
+  'openrouter/auto',
   'qwen/qwen3.8-27b',
   'pixtral-12b-2409',
   'mistralai/mistral-large-3-675b-instruct-2512',
@@ -1361,7 +1365,16 @@ export default function App() {
 
         {/* Module 2: AI Stock Prompt Generator */}
         <div className={activeModule === 'prompt-gen' ? 'block' : 'hidden'}>
-          <PromptGeneratorView onSwitchToMetadata={() => setActiveModule('metadata')} />
+          <PromptGeneratorView
+            onSwitchToMetadata={() => setActiveModule('metadata')}
+            onSendImageToMetadata={(file) => {
+              setFiles((prev) => [...prev, file]);
+              setActiveModule('metadata');
+              toast.success(`Gambar "${file.name}" ditambahkan ke Metadata Studio!`, {
+                description: 'File siap dianalisis untuk menghasilkan judul, deskripsi, dan keyword stock.',
+              });
+            }}
+          />
         </div>
 
         {/* Module 3: Microstock Keyword Research */}

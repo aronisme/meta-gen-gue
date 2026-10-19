@@ -120,11 +120,11 @@ export async function onRequestPost(context: { request: Request; env: Env }) {
       url:
         (env.GAS_PROXY_URL_1 as string) ||
         (env.GAS_PROXY_URL as string) ||
-        'https://script.google.com/macros/s/AKfycbzB-MWqSfCXRbolr5yFkS33jkRrDw7Y9mjViluIeYJ5_-PJTbyZynrz1gl1K1UW5dKm/exec',
+        'https://script.google.com/macros/s/AKfycbz0TfjsTcaMF6WvXqf8SIfHCHVqkHQjB8I8O5l_zfKmoqeqDdh0IyHvg0PJlg8kWzXKwA/exec',
       token:
         (env.GAS_PROXY_TOKEN_1 as string) ||
         (env.GAS_PROXY_TOKEN as string) ||
-        'gas_live_8b84dd959b764b4296669623',
+        'sk-gas-default-token133',
     },
     {
       name: 'Cluster-2',

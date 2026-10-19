@@ -11,6 +11,7 @@ import path from 'path';
 import { fileURLToPath } from 'url';
 import { Readable } from 'stream';
 import { embedMetadataInFile } from './embed.mjs';
+import { getExifToolStatus, embedMetadataSmart } from './exiftool-wrapper.mjs';
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
@@ -241,10 +242,13 @@ async function closeAllPoolSessions() {
   }
 }
 
+// Map pelacak progres byte transfer aktif per uploadId
+const activeTransfers = new Map();
+
 /**
- * Mengunggah file buffer ke FTP/SFTP dengan dukungan Persistent Session Pool & Concurrency Slot
+ * Mengunggah file buffer ke FTP/SFTP dengan dukungan Persistent Session Pool, Concurrency Slot, & Real-Time Byte Tracking
  */
-async function uploadFileToFtp(profile, buffer, remoteFilename, slotIndex = 0) {
+async function uploadFileToFtp(profile, buffer, remoteFilename, slotIndex = 0, uploadId = null) {
   const start = Date.now();
   const host = sanitizeFtpHost(profile.host);
   const port = Number(profile.port) || (profile.protocol === 'sftp' ? 22 : 21);
@@ -257,6 +261,39 @@ async function uploadFileToFtp(profile, buffer, remoteFilename, slotIndex = 0) {
     profile.agencyId,
     host
   );
+
+  const totalBytes = buffer.length;
+  let lastLogTime = Date.now();
+
+  const reportProgress = (transferred) => {
+    const pct = Math.min(99, Math.round((transferred / totalBytes) * 100));
+    const elapsed = Math.max(0.2, (Date.now() - start) / 1000);
+    const speedKBs = transferred / 1024 / elapsed;
+    const speedStr = speedKBs > 1024 ? `${(speedKBs / 1024).toFixed(1)} MB/s` : `${Math.round(speedKBs)} KB/s`;
+
+    if (uploadId) {
+      activeTransfers.set(uploadId, {
+        uploadId,
+        filename: cleanFilename,
+        bytesUploaded: transferred,
+        totalBytes,
+        percent: pct,
+        speed: speedStr,
+        slotIndex,
+        phase: 'remote-transfer',
+        lastUpdate: Date.now(),
+      });
+    }
+
+    if (Date.now() - lastLogTime > 2500) {
+      lastLogTime = Date.now();
+      log(
+        'TRANSFER',
+        `[Slot #${slotIndex}] ${cleanFilename}: ${pct}% (${(transferred / (1024 * 1024)).toFixed(1)} / ${(totalBytes / (1024 * 1024)).toFixed(1)} MB @ ${speedStr})`,
+        c.cyan
+      );
+    }
+  };
 
   const poolKey = getSessionPoolKey(profile, slotIndex);
   let entry = sessionPool.get(poolKey);
@@ -354,12 +391,40 @@ async function uploadFileToFtp(profile, buffer, remoteFilename, slotIndex = 0) {
             }
           }
 
-          // Transfer data buffer ke remote path dengan stream buffer teroptimasi 64KB
-          await entry.client.put(buffer, remotePath, {
+          // Transfer data buffer ke remote path dengan stream progress tracking
+          const { Transform } = await import('stream');
+          let sftpTransferred = 0;
+          const progressStream = new Transform({
+            transform(chunk, encoding, callback) {
+              sftpTransferred += chunk.length;
+              reportProgress(sftpTransferred);
+              callback(null, chunk);
+            },
+          });
+
+          const sourceStream = Readable.from(buffer);
+          sourceStream.pipe(progressStream);
+
+          await entry.client.put(progressStream, remotePath, {
             writeStreamOptions: {
               highWaterMark: 64 * 1024,
             },
           });
+
+          if (uploadId) {
+            activeTransfers.set(uploadId, {
+              uploadId,
+              filename: cleanFilename,
+              bytesUploaded: totalBytes,
+              totalBytes,
+              percent: 100,
+              speed: 'Selesai',
+              slotIndex,
+              phase: 'completed',
+              lastUpdate: Date.now(),
+            });
+            setTimeout(() => activeTransfers.delete(uploadId), 15000);
+          }
 
           // Jadwalkan idle timeout (60 detik) untuk menutup koneksi jika tidak ada aktivitas lanjutan
           entry.idleTimer = setTimeout(() => {
@@ -466,8 +531,27 @@ async function uploadFileToFtp(profile, buffer, remoteFilename, slotIndex = 0) {
             entry.currentDir = remoteDir;
           }
 
+          entry.client.trackProgress((info) => {
+            reportProgress(info.bytes);
+          });
           const stream = Readable.from(buffer);
           await entry.client.uploadFrom(stream, cleanFilename);
+          entry.client.trackProgress(); // unregister
+
+          if (uploadId) {
+            activeTransfers.set(uploadId, {
+              uploadId,
+              filename: cleanFilename,
+              bytesUploaded: totalBytes,
+              totalBytes,
+              percent: 100,
+              speed: 'Selesai',
+              slotIndex,
+              phase: 'completed',
+              lastUpdate: Date.now(),
+            });
+            setTimeout(() => activeTransfers.delete(uploadId), 15000);
+          }
 
           // Jadwalkan idle timeout
           entry.idleTimer = setTimeout(() => {
@@ -546,14 +630,21 @@ const server = http.createServer(async (req, res) => {
 
   // 1. Health check endpoint
   if (req.method === 'GET' && (pathname === '/' || pathname === '/health' || pathname === '/api/health')) {
+    const exifStatus = getExifToolStatus();
     const healthData = {
       ok: true,
       service: 'metagen-ftp-bridge',
-      version: '1.0.0',
+      version: '1.2.0',
       port: PORT,
       status: 'ready',
       uptimeSec: Math.floor(process.uptime()),
       timestamp: Date.now(),
+      exiftool: {
+        available: exifStatus.available,
+        version: exifStatus.version,
+        engine: exifStatus.engine,
+        supportedFormats: exifStatus.supportedFormats,
+      },
     };
     res.writeHead(200, { 'Content-Type': 'application/json' });
     res.end(JSON.stringify(healthData));
@@ -736,21 +827,27 @@ const server = http.createServer(async (req, res) => {
 
       let isEmbedded = false;
       let embeddedFormat = null;
+      let metadataEngine = 'none';
 
       if (shouldEmbed && metadataStr) {
         try {
           const metadata = JSON.parse(metadataStr);
-          const ext = remoteFilename.toLowerCase().slice(remoteFilename.lastIndexOf('.'));
-          if (ext === '.jpg' || ext === '.jpeg' || ext === '.png') {
-            const originalLen = buffer.length;
-            buffer = Buffer.from(embedMetadataInFile(buffer, remoteFilename, metadata));
-            isEmbedded = buffer.length !== originalLen;
+          const ext = (path.extname(remoteFilename || '') || '').toLowerCase();
+          const embedRes = await embedMetadataSmart(buffer, remoteFilename, metadata);
+          if (embedRes && embedRes.ok && embedRes.buffer) {
+            buffer = Buffer.from(embedRes.buffer);
+            isEmbedded = Boolean(embedRes.embedded);
+            metadataEngine = embedRes.engine || 'unknown';
             embeddedFormat = ext.replace('.', '').toUpperCase();
-            log(
-              'EMBED',
-              `[Slot #${slotIndex}] Metadata disematkan ke ${remoteFilename} (${embeddedFormat}): "${(metadata.title || '').slice(0, 30)}..."`,
-              c.magenta
-            );
+            if (isEmbedded) {
+              log(
+                'EMBED',
+                `[Slot #${slotIndex}] Metadata disematkan ke ${remoteFilename} via ${metadataEngine.toUpperCase()} (${embeddedFormat}): "${(metadata.title || '').slice(0, 30)}..."`,
+                c.magenta
+              );
+            } else if (embedRes.warning) {
+              log('EMBED NOTICE', `[Slot #${slotIndex}] ${embedRes.warning}`, c.yellow);
+            }
           }
         } catch (embedErr) {
           log('EMBED WARN', `[Slot #${slotIndex}] Gagal menyematkan metadata, mengunggah file original: ${embedErr}`, c.yellow);
@@ -764,6 +861,8 @@ const server = http.createServer(async (req, res) => {
         c.cyan
       );
 
+      const uploadId = formData.get('uploadId') || null;
+
       const result = await uploadFileToFtp(
         {
           host: config.host,
@@ -775,7 +874,8 @@ const server = http.createServer(async (req, res) => {
         },
         buffer,
         remoteFilename,
-        slotIndex
+        slotIndex,
+        uploadId
       );
 
       if (!result.ok) {
@@ -798,6 +898,7 @@ const server = http.createServer(async (req, res) => {
         JSON.stringify({
           ...result,
           metadataEmbedded: isEmbedded,
+          metadataEngine,
           embeddedFormat,
         })
       );
@@ -806,6 +907,73 @@ const server = http.createServer(async (req, res) => {
       log('UPLOAD ERROR', msg, c.red);
       res.writeHead(500, { 'Content-Type': 'application/json' });
       res.end(JSON.stringify({ ok: false, error: `Bridge upload error: ${msg}` }));
+    }
+    return;
+  }
+
+  // 3.5 Progress Query endpoint (Polling real-time transfer stats per uploadId)
+  if (req.method === 'GET' && (pathname === '/api/ftp/progress' || pathname === '/progress')) {
+    const qId = url.searchParams.get('id');
+    if (!qId) {
+      res.writeHead(200, { 'Content-Type': 'application/json' });
+      res.end(JSON.stringify({ ok: true, activeTransfers: Array.from(activeTransfers.values()) }));
+      return;
+    }
+    const item = activeTransfers.get(qId) || null;
+    res.writeHead(200, { 'Content-Type': 'application/json' });
+    res.end(JSON.stringify({ ok: true, progress: item }));
+    return;
+  }
+
+  // 4. Standalone Metadata Embed endpoint (Lossless ExifTool / JS injection tanpa upload)
+  if (req.method === 'POST' && (pathname === '/api/metadata/embed' || pathname === '/embed')) {
+    try {
+      const webReq = new Request(`http://127.0.0.1:${PORT}${req.url}`, {
+        method: req.method,
+        headers: req.headers,
+        body: req,
+        duplex: 'half',
+      });
+
+      const formData = await webReq.formData();
+      const file = formData.get('file');
+      const filename = formData.get('filename') || file?.name || 'asset.jpg';
+      const metadataStr = formData.get('metadata');
+
+      if (!file) {
+        res.writeHead(400, { 'Content-Type': 'application/json' });
+        res.end(JSON.stringify({ ok: false, error: 'Tidak ada file yang dikirim.' }));
+        return;
+      }
+
+      let metadata = {};
+      if (metadataStr) {
+        try {
+          metadata = JSON.parse(metadataStr);
+        } catch {}
+      }
+
+      const arrayBuf = await file.arrayBuffer();
+      const buffer = Buffer.from(arrayBuf);
+      const embedRes = await embedMetadataSmart(buffer, filename, metadata);
+
+      if (!embedRes.ok && embedRes.error) {
+        res.writeHead(500, { 'Content-Type': 'application/json' });
+        res.end(JSON.stringify({ ok: false, error: embedRes.error }));
+        return;
+      }
+
+      res.writeHead(200, {
+        'Content-Type': file.type || 'application/octet-stream',
+        'Content-Disposition': `attachment; filename="${encodeURIComponent(filename)}"`,
+        'X-Metadata-Engine': embedRes.engine || 'unknown',
+        'X-Metadata-Embedded': String(Boolean(embedRes.embedded)),
+      });
+      res.end(embedRes.buffer);
+    } catch (err) {
+      const msg = err instanceof Error ? err.message : String(err);
+      res.writeHead(500, { 'Content-Type': 'application/json' });
+      res.end(JSON.stringify({ ok: false, error: msg }));
     }
     return;
   }
@@ -826,19 +994,26 @@ server.on('error', (err) => {
 });
 
 server.listen(PORT, HOST, () => {
+  const exifStatus = getExifToolStatus();
+  const exifDisplay = exifStatus.available
+    ? `${c.green}● Ready (v${exifStatus.version}) - Full Image, Vector, & Video Support${c.reset}`
+    : `${c.yellow}○ Fallback Engine (Native JS Buffer untuk JPG/PNG saja)${c.reset}`;
+
   console.log(`
 ${c.cyan}================================================================${c.reset}
-  ${c.bright}${c.green}🚀 MetaGen Local FTP Bridge v1.1.0 (Session Pool Edition) is running!${c.reset}
+  ${c.bright}${c.green}🚀 MetaGen Local FTP Bridge v1.2.0 (ExifTool Edition) is running!${c.reset}
 ${c.cyan}================================================================${c.reset}
   ${c.bright}Port:${c.reset}        ${PORT}
   ${c.bright}Local URL:${c.reset}   http://127.0.0.1:${PORT}
   ${c.bright}Health:${c.reset}      http://127.0.0.1:${PORT}/health
   ${c.bright}Status:${c.reset}      ${c.green}● Ready & Listening with Keep-Alive Session Pool${c.reset}
+  ${c.bright}Exif Engine:${c.reset} ${exifDisplay}
 
   ${c.yellow}💡 Info:${c.reset}
   - Biarkan jendela terminal ini tetap terbuka saat mengunggah file.
   - Sesi koneksi SFTP/FTPS dipertahankan (Keep-Alive) untuk kecepatan maksimal.
   - Mendukung transfer multi-worker (paralel 2-3 stream) tanpa reconnect berulang.
+  - Metadata IPTC/XMP/QuickTime disematkan langsung sebelum file terunggah.
 ${c.cyan}================================================================${c.reset}
 `);
 });

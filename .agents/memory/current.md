@@ -1,47 +1,52 @@
 # Current Project State
 
 ## Last Updated
-2026-10-17 23:14
+2026-10-19 19:28
 
 ## Current Objective
-Penyelesaian Isu Duplikasi Antrean Gambar ('Sekali Add 2 Img Masuk') dari Ekstensi Browser ke Web App Meta-Gen VCPA.
+Peningkatan Local FTP Bridge & Integrasi ExifTool untuk Penyematan Metadata IPTC/XMP/QuickTime Multi-Format.
 
 ## Completed Recently
-- **Hotfix Duplikasi Antrean Gambar Ekstensi**:
-  - Dihapus pengiriman ganda `BroadcastChannel` pada `extension/background.js`, pesan kini dikirimkan secara bersih melalui `window.postMessage` tunggal.
-  - Ditambahkan pelacak `processedPayloadIdsRef` di `components/PromptGeneratorView.tsx` untuk menolak payload ID yang identik.
-  - Ditambahkan filter deduplikasi URL di `enqueueImages`: gambar yang URL/DataURL-nya sudah ada di antrean dengan status `pending` atau `processing` otomatis diabaikan, mencegah item duplikat masuk antrean.
-  - Dihapus listener `BroadcastChannel` yang redundan di `PromptGeneratorView.tsx`.
-- **Hotfix Crash Visual DNA (`inferred.join is not a function`)**:
-  - Dibuat normalizer `normalizeVisualDna` di `lib/prompt-agent/engine.ts` yang memastikan seluruh field array (`observed`, `inferred`, `anchors`, `editableVariables`, `metaphor`, dll.) selalu bertipe `string[]`.
-  - Normalisasi otomatis saat response API masuk di `lib/prompt-agent/client.ts`.
-  - Normalisasi otomatis saat sesi lama dimuat dari IndexedDB di `lib/prompt-agent/store.ts`.
-  - Safe UI formatting di `components/PromptGeneratorView.tsx` menggunakan `safeFormatList()`.
-- **Testing, Build & Live Production Deployment**:
-  - 105/105 unit tests lulus (`pnpm test:run`).
-  - TypeScript 0 error (`npx tsc --noEmit`).
-  - Static export berhasil (`pnpm pages:build`).
-  - Live deploy sukses ke Cloudflare Pages: `https://meta-gen-gue.pages.dev` (preview `https://896a58b1.meta-gen-gue.pages.dev`).
+- **Integrasi Provider TokenHarbor ke GAS AI Proxy ([gas/Code.gs](file:///c:/App%20Tools/meta-gen-gue/gas/Code.gs), [gas/Index.html](file:///c:/App%20Tools/meta-gen-gue/gas/Index.html))**:
+  - Validasi langsung kemampuan Multimodal Vision & Text untuk TokenHarbor (`https://tokenharbor.ai/v1`). Terbukti model `deepseek-v4.1-flash:free`, `mimo-v2.6-flash:free`, dan `mimo-v2.5:free` sukses mengenali gambar secara akurat dan memproses Base64 maupun Image URL.
+  - Menambahkan provider `tokenharbor` ke `gas/Code.gs`:
+    - Fungsi `callTokenHarbor()` dengan endpoint OpenAI-compatible (`https://tokenharbor.ai/v1/chat/completions`) dan autentikasi Bearer.
+    - Resolusi model pintar di `resolveProviderAndModel()` mendeteksi prefiks `thk_`, model nama `:free`, `mimo-`, dan `deepseek-v4`.
+    - Smart Cooldown Circuit Breaker terpasang untuk `cursor_tokenharbor` saat terkena status 429 atau 502 (peak demand).
+    - Menambahkan opsi TokenHarbor ke antarmuka dialog modal Google Spreadsheet ([gas/Index.html](file:///c:/App%20Tools/meta-gen-gue/gas/Index.html)) dan [gas/README.md](file:///c:/App%20Tools/meta-gen-gue/gas/README.md).
+- **Integrasi Pilihan Model UI Frontend ([app/page.tsx](file:///c:/App%20Tools/meta-gen-gue/app/page.tsx), [components/ProviderCard.tsx](file:///c:/App%20Tools/meta-gen-gue/components/ProviderCard.tsx), [components/StudioPanel.tsx](file:///c:/App%20Tools/meta-gen-gue/components/StudioPanel.tsx))**:
+  - Menambahkan opsi `deepseek-v4.1-flash:free` dan `mimo-v2.6-flash:free` ke dropdown target model AI agar pengguna dapat memilih model TokenHarbor langsung melalui GAS Proxy.
+- **Pembersihan Sistem Login dari GAS AI Proxy ([gas/Code.gs](file:///c:/App%20Tools/meta-gen-gue/gas/Code.gs), [gas/README.md](file:///c:/App%20Tools/meta-gen-gue/gas/README.md))**:
+  - Menghapus tab `Users`, fungsi verifikasi Google OAuth (`verifyGoogleIdToken`), sinkronisasi whitelist (`syncGoogleUser`), profile getter (`getUserProfileByEmail`), dan pengecekan kuota spreadsheet (`checkAndDeductQuota`) dari backend GAS.
+  - Menghapus endpoint `google_login`, `auth_verify`, dan `user_status` dari `doGet` dan `doPost`.
+  - Sistem autentikasi pengguna dan kuota kini 100% ditangani oleh Cloudflare D1 SQL Native Database ([functions/api/auth/google.ts](file:///c:/App%20Tools/meta-gen-gue/functions/api/auth/google.ts)), menjadikan GAS AI Proxy murni, ringan, dan jauh lebih cepat tanpa overhead LockService user.
+- **Integrasi Provider OpenRouter ke GAS AI Proxy ([gas/Code.gs](file:///c:/App%20Tools/meta-gen-gue/gas/Code.gs), [gas/Index.html](file:///c:/App%20Tools/meta-gen-gue/gas/Index.html))**:
+  - Menambahkan provider `openrouter` ke `gas/Code.gs` dengan fungsi `callOpenRouter()` yang memanggil `https://openrouter.ai/api/v1/chat/completions` lengkap dengan header identifikasi `HTTP-Referer` dan `X-Title`.
+  - Otomatis me-resolve model dengan prefiks `openrouter/`, `google/`, `meta-llama/`, `anthropic/`, atau kunci berawalan `sk-or-`.
+  - Smart Cooldown Circuit Breaker terpasang untuk `cursor_openrouter`.
+  - Menambahkan opsi OpenRouter pada antarmuka dialog spreadsheet ([gas/Index.html](file:///c:/App%20Tools/meta-gen-gue/gas/Index.html)) dan opsi model `google/gemini-2.0-flash-001` serta `openrouter/auto` pada UI frontend.
+- **Pembaruan Endpoint & Token GAS AI Proxy Proyek ([.env.local](file:///c:/App%20Tools/meta-gen-gue/.env.local), [lib/store.ts](file:///c:/App%20Tools/meta-gen-gue/lib/store.ts), [app/api/generate/proxy/route.ts](file:///c:/App%20Tools/meta-gen-gue/app/api/generate/proxy/route.ts), [app/api/generate/prompt-agent/route.ts](file:///c:/App%20Tools/meta-gen-gue/app/api/generate/prompt-agent/route.ts))**:
+  - Memperbarui `GAS_PROXY_URL_1`, `GAS_PROXY_URL`, `DEFAULT_GAS_URL` ke `https://script.google.com/macros/s/AKfycbz0TfjsTcaMF6WvXqf8SIfHCHVqkHQjB8I8O5l_zfKmoqeqDdh0IyHvg0PJlg8kWzXKwA/exec`.
+  - Memperbarui `GAS_PROXY_TOKEN_1`, `GAS_PROXY_TOKEN`, `DEFAULT_GAS_TOKEN`, `NEXT_PUBLIC_GAS_PROXY_TOKEN` ke `sk-gas-default-token133`.
+  - Sinkronisasi fallback pada Cloudflare Pages functions ([functions/api/generate/proxy.ts](file:///c:/App%20Tools/meta-gen-gue/functions/api/generate/proxy.ts), [functions/api/generate/prompt-agent.ts](file:///c:/App%20Tools/meta-gen-gue/functions/api/generate/prompt-agent.ts)).
+- **Testing & Validasi**:
+  - Seluruh 12 file tes (111/111 tests) lulus 100% di Vitest.
 
 ## Currently Working On
-- Isu duplikasi antrean telah teratasi, teruji, dan live di Cloudflare Pages.
+- Melanjutkan ke task roadmap berikutnya (Sinkronisasi Rasio Google Flow / Modul Keyword Research).
 
-## Remaining Tasks (Next Session Roadmap)
+## Remaining Tasks (Roadmap)
+- [ ] **Sinkronisasi Rasio Gambar Google Flow**: Penyesuaian aspek rasio (1:1, 16:9, 9:16) ke setting Flow saat generate dipicu.
 - [ ] **Modul Keyword Research**: Eksplorasi tren microstock, tag cloud interaktif, dan filter kata kunci terlarang di `components/KeywordResearchView.tsx`.
-- [ ] **Peningkatan Local FTP Bridge**: Indikator byte transfer per-file dan integrasi ExifTool lokal untuk embed langsung metadata IPTC/XMP.
 
 ## Blockers / Errors
-- None. Semua sistem hijau (103 tests passing, TypeScript 0 error, build & deploy Cloudflare live).
+- None.
 
 ## Files Recently Changed
-- `extension/manifest.json`
-- `extension/background.js`
-- `extension/content.js`
-- `extension/popup.html`
-- `extension/popup.css`
-- `extension/popup.js`
-- `extension/README.md`
-- `extension/icons/*`
-- `components/PromptGeneratorView.tsx`
-- `lib/prompt-agent/types.ts`
-- `lib/__tests__/prompt-session.test.ts`
+- `gas/Code.gs`
+- `gas/Index.html`
+- `gas/README.md`
+- `app/page.tsx`
+- `components/ProviderCard.tsx`
+- `components/StudioPanel.tsx`
+- `.agents/memory/current.md`

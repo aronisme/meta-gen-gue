@@ -1,0 +1,596 @@
+// Meta-Gen VCPA - Google Flow Bridge Content Script (Manifest V3)
+// Supports both https://flow.google.com/* and https://labs.google/fx/*
+
+console.log('[Meta-Gen Flow Bridge] Active on Google Flow tab:', window.location.href);
+
+// In-Page Toast notification for Google Flow tab
+function showFlowToast(title, subtitle = '', isSuccess = true) {
+  const existing = document.getElementById('metagen-flow-toast');
+  if (existing) existing.remove();
+
+  const toast = document.createElement('div');
+  toast.id = 'metagen-flow-toast';
+  toast.style.cssText = `
+    position: fixed;
+    bottom: 24px;
+    right: 24px;
+    z-index: 999999;
+    background: #1c1917;
+    color: #ffffff;
+    border: 2px solid ${isSuccess ? '#10b981' : '#f59e0b'};
+    border-radius: 12px;
+    padding: 12px 18px;
+    box-shadow: 0 10px 25px -5px rgba(0, 0, 0, 0.5);
+    font-family: ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+    font-size: 13px;
+    display: flex;
+    flex-direction: column;
+    gap: 4px;
+    animation: metagenSlideIn 0.3s cubic-bezier(0.16, 1, 0.3, 1);
+  `;
+
+  toast.innerHTML = `
+    <div style="display: flex; align-items: center; gap: 8px; font-weight: 700; color: ${isSuccess ? '#34d399' : '#fbbf24'};">
+      <span>${isSuccess ? '⚡' : '⏳'}</span>
+      <span>${title}</span>
+    </div>
+    ${subtitle ? `<div style="font-size: 11px; color: #a8a29e; margin-left: 20px;">${subtitle}</div>` : ''}
+  `;
+
+  document.body.appendChild(toast);
+
+  setTimeout(() => {
+    if (toast.parentNode) {
+      toast.style.opacity = '0';
+      toast.style.transition = 'opacity 0.5s ease';
+      setTimeout(() => toast.remove(), 500);
+    }
+  }, 4500);
+}
+
+// Inject CSS animation
+if (!document.getElementById('metagen-flow-styles')) {
+  const style = document.createElement('style');
+  style.id = 'metagen-flow-styles';
+  style.textContent = `
+    @keyframes metagenSlideIn {
+      from { transform: translateY(100px); opacity: 0; }
+      to { transform: translateY(0); opacity: 1; }
+    }
+  `;
+  document.head.appendChild(style);
+}
+
+// Dismiss Google Consent/Cookie Bar if blocking bottom controls
+function dismissGoogleCookieBar() {
+  const bar = document.querySelector('#glue-cookie-notification-bar-1, .glue-cookie-notification-bar');
+  if (bar) {
+    console.log('[Meta-Gen Flow Bridge] Cookie bar detected. Dismissing...');
+    const rejectBtn = bar.querySelector(
+      'button.glue-cookie-notification-bar__reject, button[aria-label*="reject" i], button'
+    );
+    if (rejectBtn) {
+      rejectBtn.click();
+    } else {
+      bar.remove();
+    }
+  }
+}
+
+// Helper: Extract unique identifier for any media element
+function getMediaToken(el) {
+  if (!el) return null;
+  const mediaId = el.getAttribute('data-media-id');
+  if (mediaId) return `media_${mediaId}`;
+  const src = el.src || el.currentSrc || el.getAttribute('poster') || '';
+  if (!src) return null;
+
+  // Pattern 1: labs.google trpc redirect
+  const m1 = src.match(/media\.getMediaUrlRedirect\?name=([a-f0-9-]+)/);
+  if (m1) return `uuid_${m1[1]}`;
+
+  // Pattern 2: flow.google.com /asb/ token
+  const m2 = src.match(/\/asb\/([A-Za-z0-9_-]+)/);
+  if (m2) return `asb_${m2[1]}`;
+
+  // Pattern 3: googleusercontent CDN ID
+  const m3 = src.match(/googleusercontent\.com\/([A-Za-z0-9_-]+)/);
+  if (m3) return `guc_${m3[1]}`;
+
+  return src.split('?')[0];
+}
+
+// Helper: Convert image to Data URL safely
+async function imageToDataUrl(imgEl, preferredDownloadUrl) {
+  // Strategy 1: in-page fetch with session cookies
+  if (preferredDownloadUrl && preferredDownloadUrl.startsWith('http')) {
+    try {
+      const response = await fetch(preferredDownloadUrl);
+      if (response.ok) {
+        const blob = await response.blob();
+        return await new Promise((resolve) => {
+          const reader = new FileReader();
+          reader.onloadend = () => resolve(reader.result);
+          reader.readAsDataURL(blob);
+        });
+      }
+    } catch (fetchErr) {
+      console.warn('[Meta-Gen Flow Bridge] Direct fetch failed, trying element source:', fetchErr);
+    }
+  }
+
+  // Strategy 2: fetch img.src directly
+  if (imgEl?.src && imgEl.src.startsWith('http')) {
+    try {
+      const response = await fetch(imgEl.src);
+      if (response.ok) {
+        const blob = await response.blob();
+        return await new Promise((resolve) => {
+          const reader = new FileReader();
+          reader.onloadend = () => resolve(reader.result);
+          reader.readAsDataURL(blob);
+        });
+      }
+    } catch (e) {}
+  }
+
+  // Strategy 3: Canvas rendering fallback
+  try {
+    const canvas = document.createElement('canvas');
+    canvas.width = imgEl.naturalWidth || imgEl.width || 1024;
+    canvas.height = imgEl.naturalHeight || imgEl.height || 1024;
+    const ctx = canvas.getContext('2d');
+    ctx.drawImage(imgEl, 0, 0);
+    return canvas.toDataURL('image/jpeg', 0.95);
+  } catch (canvasErr) {
+    console.error('[Meta-Gen Flow Bridge] Canvas export failed:', canvasErr);
+    return imgEl?.src || '';
+  }
+}
+
+// Helper: Check if a button is disabled
+function isButtonDisabled(btn) {
+  if (!btn) return true;
+  return (
+    btn.disabled ||
+    btn.hasAttribute('disabled') ||
+    btn.getAttribute('aria-disabled') === 'true' ||
+    btn.classList.contains('disabled') ||
+    btn.classList.contains('mat-button-disabled')
+  );
+}
+
+// Helper: Locate Flow Submit / Generate button
+function findFlowSubmitButton() {
+  // Strategy 1: Exact inspected selectors from flow.google.com
+  const exactCandidates = [
+    document.querySelector('flow-generate-icon-button button'),
+    document.querySelector('.submit-controls flow-generate-icon-button button'),
+    document.querySelector('button.generate-icon-button'),
+    document.querySelector('.submit-controls button[type="submit"]'),
+    document.querySelector('button[aria-label="Mulai pembuatan" i]'),
+    document.querySelector('button[aria-label*="pembuatan" i]'),
+    document.querySelector('button[aria-label*="generate" i]'),
+    document.querySelector('button[aria-label*="submit" i]'),
+  ];
+  for (const c of exactCandidates) {
+    if (c) return c;
+  }
+
+  // Strategy 2: Button inside flow-prompt-box or .submit-controls with mat-icon arrow_forward
+  const promptBox = document.querySelector('flow-prompt-box, div.prompt-box-container, .submit-controls');
+  if (promptBox) {
+    const boxButtons = Array.from(promptBox.querySelectorAll('button'));
+    const match = boxButtons.find((b) => {
+      const icons = Array.from(b.querySelectorAll('mat-icon, i, span, svg'));
+      return icons.some((i) =>
+        ['arrow_forward', 'send', 'arrow_upward', 'auto_awesome', 'sparkles'].includes(
+          (i.textContent || '').trim().toLowerCase()
+        )
+      );
+    });
+    if (match) return match;
+  }
+
+  // Strategy 3: Global search across visible buttons
+  const allButtons = Array.from(document.querySelectorAll('button')).filter((b) => b.offsetParent !== null);
+  return allButtons.find((b) => {
+    const icons = Array.from(b.querySelectorAll('mat-icon, i, span, svg'));
+    const hasIconMatch = icons.some((i) =>
+      ['arrow_forward', 'send', 'arrow_upward', 'auto_awesome', 'sparkles'].includes(
+        (i.textContent || '').trim().toLowerCase()
+      )
+    );
+    if (hasIconMatch) return true;
+
+    const btnText = (b.textContent || '').trim().toLowerCase();
+    if (['arrow_forward', 'send', 'arrow_upward'].includes(btnText)) return true;
+
+    const aria = (b.getAttribute('aria-label') || '').toLowerCase();
+    return (
+      aria.includes('pembuatan') ||
+      aria.includes('generate') ||
+      aria.includes('submit') ||
+      aria.includes('send') ||
+      aria.includes('kirim')
+    );
+  });
+}
+
+// Helper: Check if Flow is actively generating (icon is 'stop')
+function isFlowGenerating() {
+  const submitArea = document.querySelector('.submit-controls, flow-generate-icon-button, flow-prompt-box') || document;
+  const icons = Array.from(submitArea.querySelectorAll('mat-icon, [role="img"]')).filter((el) => {
+    const txt = (el.textContent || '').trim().toLowerCase();
+    const type = (el.getAttribute('data-mat-icon-type') || '').toLowerCase();
+    return (txt === 'stop' || type === 'stop') && el.offsetParent !== null;
+  });
+  return icons.length > 0;
+}
+
+// Full Pointer Click Event Sequence
+function clickSubmitButton(btn) {
+  try {
+    btn.scrollIntoView({ block: 'center', inline: 'center' });
+  } catch (e) {}
+
+  btn.focus();
+
+  // Full pointer & mouse simulation
+  btn.dispatchEvent(new PointerEvent('pointerover', { bubbles: true, cancelable: true }));
+  btn.dispatchEvent(new PointerEvent('pointerenter', { bubbles: true, cancelable: true }));
+  btn.dispatchEvent(new PointerEvent('pointerdown', { bubbles: true, cancelable: true, isPrimary: true, button: 0 }));
+  btn.dispatchEvent(new MouseEvent('mousedown', { bubbles: true, cancelable: true, button: 0 }));
+  btn.dispatchEvent(new PointerEvent('pointerup', { bubbles: true, cancelable: true, isPrimary: true, button: 0 }));
+  btn.dispatchEvent(new MouseEvent('mouseup', { bubbles: true, cancelable: true, button: 0 }));
+  btn.click();
+
+  // If inside a form, also invoke requestSubmit
+  if (btn.form) {
+    try {
+      btn.form.requestSubmit(btn);
+    } catch (e) {}
+  }
+}
+
+// Main Flow Generation Handler
+async function handleFlowGeneration(payload) {
+  const { cardId, prompt, ratio } = payload;
+  console.log('[Meta-Gen Flow Bridge] Starting generation task for card:', cardId, 'prompt length:', prompt?.length);
+  showFlowToast('Meta-Gen: Menerima Prompt...', 'Sedang mempersiapkan input di Google Flow...', false);
+
+  // 0. Dismiss any blocking cookie banner
+  dismissGoogleCookieBar();
+
+  // 1. Snapshot all existing media items (Baseline) before submitting
+  const baselineTokens = new Set();
+  document.querySelectorAll('img, video, flow-image-tile img').forEach((el) => {
+    const token = getMediaToken(el);
+    if (token) baselineTokens.add(token);
+  });
+  console.log('[Meta-Gen Flow Bridge] Baseline media count:', baselineTokens.size);
+
+  // 2. Locate prompt input (ProseMirror on flow.google.com, Angular flow-prompt-box, or ContentEditable)
+  const editorCandidates = [
+    document.querySelector('div.ProseMirror[contenteditable="true"]'),
+    document.querySelector('.ProseMirror[contenteditable="true"]'),
+    document.querySelector('.ProseMirror'),
+    document.querySelector('flow-prompt-box [contenteditable="true"]'),
+    document.querySelector('div[role="textbox"][data-slate-editor="true"]'),
+    document.querySelector('flow-prompt-box textarea'),
+    document.querySelector('[contenteditable="true"]:not([aria-hidden="true"])'),
+    document.querySelector('textarea:not([aria-hidden="true"])'),
+    document.querySelector('[contenteditable="true"]'),
+    document.querySelector('input[type="text"][placeholder*="prompt" i]'),
+  ];
+  const editor = editorCandidates.find((el) => el && el.offsetParent !== null) || editorCandidates.find(Boolean);
+
+  if (!editor) {
+    throw new Error('Kotak prompt Google Flow tidak ditemukan. Pastikan Anda berada di halaman project Flow.');
+  }
+
+  console.log('[Meta-Gen Flow Bridge] Located prompt editor:', editor);
+
+  // 3. Focus editor and clear previous contents
+  editor.focus();
+  try {
+    const sel = window.getSelection();
+    const range = document.createRange();
+    range.selectNodeContents(editor);
+    sel.removeAllRanges();
+    sel.addRange(range);
+  } catch (e) {}
+
+  try {
+    editor.dispatchEvent(
+      new InputEvent('beforeinput', {
+        bubbles: true,
+        cancelable: true,
+        composed: true,
+        inputType: 'deleteContentBackward',
+      })
+    );
+  } catch (e) {}
+  document.execCommand('delete', false, null);
+
+  // 4. Input Prompt with full Angular & Slate & ProseMirror event sequence
+  const targetPrompt = prompt.trim();
+  console.log('[Meta-Gen Flow Bridge] Typing prompt into editor...');
+
+  try {
+    editor.dispatchEvent(
+      new InputEvent('beforeinput', {
+        bubbles: true,
+        cancelable: true,
+        composed: true,
+        inputType: 'insertText',
+        data: targetPrompt,
+      })
+    );
+  } catch (e) {}
+
+  const inserted = document.execCommand('insertText', false, targetPrompt);
+  if (!inserted || !(editor.innerText || editor.textContent || '').trim()) {
+    if ('value' in editor) {
+      editor.value = targetPrompt;
+    } else {
+      editor.innerText = targetPrompt;
+    }
+  }
+
+  // Dispatch standard input & change events with composed: true
+  editor.dispatchEvent(
+    new InputEvent('input', {
+      bubbles: true,
+      cancelable: true,
+      composed: true,
+      inputType: 'insertText',
+      data: targetPrompt,
+    })
+  );
+  editor.dispatchEvent(new Event('input', { bubbles: true, composed: true }));
+  editor.dispatchEvent(new Event('change', { bubbles: true, composed: true }));
+
+  console.log(
+    '[Meta-Gen Flow Bridge] Prompt populated in isolated world. Current length:',
+    (editor.innerText || editor.value || '').length
+  );
+
+  // Trigger MAIN WORLD injection via background.js (runs inside Google Flow's native Zone.js)
+  try {
+    console.log('[Meta-Gen Flow Bridge] Requesting Main World submission from background...');
+    chrome.runtime.sendMessage({
+      type: 'TRIGGER_MAIN_WORLD_SUBMIT',
+      prompt: targetPrompt,
+    });
+  } catch (mainErr) {
+    console.warn('[Meta-Gen Flow Bridge] Main world submit request failed:', mainErr);
+  }
+
+  // 5. Locate Submit Button and wait for Angular to enable it
+  let generateBtn = findFlowSubmitButton();
+  console.log('[Meta-Gen Flow Bridge] Initial submit button lookup:', generateBtn, 'Disabled:', isButtonDisabled(generateBtn));
+
+  const enableWaitStart = Date.now();
+  while (generateBtn && isButtonDisabled(generateBtn) && Date.now() - enableWaitStart < 3500) {
+    await new Promise((r) => setTimeout(r, 120));
+    generateBtn = findFlowSubmitButton();
+  }
+
+  console.log(
+    '[Meta-Gen Flow Bridge] Submit button state after wait:',
+    generateBtn ? (isButtonDisabled(generateBtn) ? 'STILL DISABLED' : 'ENABLED') : 'NOT FOUND'
+  );
+
+  // 6. Submit via Button Click + CDP Hardware-level Dispatch
+  let buttonClicked = false;
+  let coords = null;
+
+  if (generateBtn) {
+    try {
+      const rect = generateBtn.getBoundingClientRect();
+      if (rect.width > 0 && rect.height > 0) {
+        coords = {
+          x: Math.round(rect.left + rect.width / 2),
+          y: Math.round(rect.top + rect.height / 2),
+        };
+        console.log('[Meta-Gen Flow Bridge] Submit button coordinates calculated:', coords);
+      }
+    } catch (e) {}
+
+    if (isButtonDisabled(generateBtn)) {
+      console.warn('[Meta-Gen Flow Bridge] Button remained disabled. Forcing attributes removal...');
+      generateBtn.removeAttribute('disabled');
+      generateBtn.removeAttribute('aria-disabled');
+      generateBtn.classList.remove('mat-button-disabled');
+    }
+
+    clickSubmitButton(generateBtn);
+    buttonClicked = true;
+    console.log('[Meta-Gen Flow Bridge] Button click event sequence fired.');
+  }
+
+  // 6.1 Trigger CDP (Chrome DevTools Protocol) hardware click & Enter (isTrusted: true)
+  editor.focus();
+  try {
+    console.log('[Meta-Gen Flow Bridge] Requesting CDP hardware-level submit (isTrusted: true)...');
+    chrome.runtime.sendMessage({
+      type: 'TRIGGER_CDP_SUBMIT',
+      prompt: targetPrompt,
+      coords: coords,
+    });
+  } catch (cdpErr) {
+    console.warn('[Meta-Gen Flow Bridge] CDP message dispatch error:', cdpErr);
+  }
+
+  // 7. Dual Submit: Also Dispatch ENTER key on the editor!
+  // In Google Flow, pressing Enter inside contenteditable directly triggers generation
+  await new Promise((r) => setTimeout(r, 200));
+  editor.focus();
+  const enterDown = new KeyboardEvent('keydown', {
+    key: 'Enter',
+    code: 'Enter',
+    keyCode: 13,
+    which: 13,
+    charCode: 13,
+    bubbles: true,
+    cancelable: true,
+  });
+  const enterPress = new KeyboardEvent('keypress', {
+    key: 'Enter',
+    code: 'Enter',
+    keyCode: 13,
+    which: 13,
+    charCode: 13,
+    bubbles: true,
+    cancelable: true,
+  });
+  const enterUp = new KeyboardEvent('keyup', {
+    key: 'Enter',
+    code: 'Enter',
+    keyCode: 13,
+    which: 13,
+    charCode: 13,
+    bubbles: true,
+    cancelable: true,
+  });
+
+  editor.dispatchEvent(enterDown);
+  editor.dispatchEvent(enterPress);
+  editor.dispatchEvent(enterUp);
+  console.log('[Meta-Gen Flow Bridge] Enter key sequence fired on editor.');
+
+  showFlowToast('Meta-Gen: Prompt Dikirim!', 'Menunggu proses render gambar Google Flow...', false);
+
+  // 8. Auto-approve any disclaimer/modal (e.g. "Approve", "Accepter", "Got it", "Setuju")
+  const acceptStart = Date.now();
+  while (Date.now() - acceptStart < 5000) {
+    const modalBtn = Array.from(document.querySelectorAll('button')).find((b) => {
+      const t = (b.textContent || '').trim();
+      return /Accepter|Approve|Setuju|Approva|Got it|Mengerti/i.test(t) && b.offsetParent !== null;
+    });
+    if (modalBtn) {
+      modalBtn.click();
+      console.log('[Meta-Gen Flow Bridge] Confirmation modal auto-approved:', modalBtn.textContent);
+      break;
+    }
+    await new Promise((r) => setTimeout(r, 400));
+  }
+
+  // 9. Monitor Generation State & Poll DOM for newly rendered media item (Timeout 180s)
+  let newImgElement = null;
+  let detectedToken = null;
+  const pollStart = Date.now();
+  const timeoutMs = 180000;
+  let pollIteration = 0;
+  let hasObservedStopIcon = false;
+
+  while (Date.now() - pollStart < timeoutMs) {
+    await new Promise((r) => setTimeout(r, 1200));
+    pollIteration++;
+
+    const currentlyGenerating = isFlowGenerating();
+    if (currentlyGenerating) {
+      hasObservedStopIcon = true;
+    }
+
+    const elapsedSec = Math.round((Date.now() - pollStart) / 1000);
+
+    // Live Toast feedback based on stop icon
+    if (currentlyGenerating) {
+      if (pollIteration % 3 === 0) {
+        showFlowToast('⏳ Sedang Merender...', `Google Flow sedang memproses (${elapsedSec}d)...`, false);
+      }
+    } else if (hasObservedStopIcon) {
+      console.log('[Meta-Gen Flow Bridge] Stop icon cleared! Generation has completed in Flow.');
+      showFlowToast('⚡ Render Selesai!', 'Mendeteksi hasil gambar terbaru di canvas...', true);
+    }
+
+    const candidateImgs = Array.from(
+      document.querySelectorAll(
+        'flow-image-tile img, flow-video-tile img, flow-asset-tile img, [class*="tile"] img, [class*="asset"] img, img'
+      )
+    ).filter((img) => {
+      if (img.offsetParent === null) return false;
+      const w = img.naturalWidth || img.width || 0;
+      const h = img.naturalHeight || img.height || 0;
+      if (w > 0 && w < 80 && h > 0 && h < 80) return false;
+      const src = img.src || '';
+      if (src.includes('profile') || src.includes('avatar') || src.includes('icon') || src.includes('logo')) return false;
+      return true;
+    });
+
+    for (const img of candidateImgs) {
+      const token = getMediaToken(img);
+      if (token && !baselineTokens.has(token)) {
+        const w = img.naturalWidth || img.width || 0;
+        const h = img.naturalHeight || img.height || 0;
+        // Accept image if Flow finished generating OR image is fully loaded with substantial size
+        if ((!currentlyGenerating && (w > 100 || h > 100 || img.complete)) || (w > 256 && h > 256 && img.complete)) {
+          newImgElement = img;
+          detectedToken = token;
+          console.log('[Meta-Gen Flow Bridge] New media element discovered!', token, w, h);
+          break;
+        }
+      }
+    }
+
+    if (newImgElement) break;
+  }
+
+  if (!newImgElement) {
+    throw new Error('Waktu habis (Timeout): Gambar tidak muncul di canvas Flow setelah 180 detik.');
+  }
+
+  // 10. Extract Image Data and Stream Back
+  showFlowToast('Meta-Gen: Gambar Selesai!', 'Mengambil binary gambar...', true);
+
+  const mediaId = newImgElement.getAttribute('data-media-id');
+  const matchRedirect = (newImgElement.src || '').match(/media\.getMediaUrlRedirect\?name=([a-f0-9-]+)/);
+  const preferredUrl = mediaId
+    ? `https://labs.google/fx/api/trpc/media.getMediaUrlRedirect?name=${mediaId}`
+    : matchRedirect
+    ? `https://labs.google/fx/api/trpc/media.getMediaUrlRedirect?name=${matchRedirect[1]}`
+    : newImgElement.src;
+
+  const base64Data = await imageToDataUrl(newImgElement, preferredUrl);
+
+  showFlowToast('✓ Meta-Gen: Selesai!', 'Gambar berhasil dikirim ke Meta-Gen Studio.', true);
+
+  return {
+    success: true,
+    cardId: cardId,
+    token: detectedToken,
+    imageDataUrl: base64Data,
+    filename: `Flow_${cardId ? cardId.slice(0, 8) : 'img'}_${Date.now().toString().slice(-4)}.jpg`,
+  };
+}
+
+// Listen for messages from background.js
+chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
+  if (message.action === 'FLOW_PING') {
+    sendResponse({ active: true, url: window.location.href });
+    return true;
+  }
+
+  if (message.action === 'FLOW_START_GENERATION') {
+    handleFlowGeneration(message.payload)
+      .then((res) => {
+        sendResponse(res);
+        try {
+          chrome.runtime.sendMessage({ type: 'FLOW_GENERATION_DONE', result: res });
+        } catch (e) {}
+      })
+      .catch((err) => {
+        console.error('[Meta-Gen Flow Bridge] Generation failed:', err);
+        showFlowToast('❌ Meta-Gen: Gagal', err.message, false);
+        const errResult = { success: false, error: err.message, cardId: message.payload?.cardId };
+        sendResponse(errResult);
+        try {
+          chrome.runtime.sendMessage({ type: 'FLOW_GENERATION_DONE', result: errResult });
+        } catch (e) {}
+      });
+    return true; // asynchronous response
+  }
+});
+

@@ -57,6 +57,8 @@ export interface PromptCardItem {
   rawBasePrompt?: string;
   createdAt?: number;
   batchId?: string;
+  generatedImageUrl?: string;
+  flowStatus?: 'idle' | 'generating' | 'completed' | 'error';
 }
 
 export interface PromptGenerationSession {
