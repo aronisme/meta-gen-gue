@@ -532,16 +532,26 @@ export function PromptGeneratorView({ onSwitchToMetadata, onSendImageToMetadata 
         const payload = event.data.payload;
         setGeneratingFlowCardId((prev) => (prev === payload?.cardId ? null : prev));
         setFlowQueueCardIds((prev) => prev.filter((id) => id !== payload?.cardId));
-        if (payload?.success && payload?.imageDataUrl) {
+        if (payload?.success && (payload?.imageDataUrl || payload?.variations?.length)) {
+          const variations = payload.variations || (payload.imageDataUrl ? [{ letter: 'A', dataUrl: payload.imageDataUrl, token: payload.token }] : []);
           setPrompts((prev) =>
             prev.map((c) =>
               c.id === payload.cardId
-                ? { ...c, generatedImageUrl: payload.imageDataUrl, flowStatus: 'completed' }
+                ? {
+                    ...c,
+                    generatedImageUrl: payload.imageDataUrl,
+                    variations: variations,
+                    selectedVariationIndex: 0,
+                    flowStatus: 'completed',
+                  }
                 : c
             )
           );
-          toast.success('✓ Gambar Google Flow berhasil di-render!', {
-            description: 'Hasil render siap dipratinjau langsung di kartu prompt.',
+          const varCount = variations.length;
+          toast.success(`✓ ${varCount > 1 ? `${varCount} variasi gambar` : 'Gambar'} Google Flow siap!`, {
+            description: varCount > 1
+              ? `Semua ${varCount} variasi gambar (A, B, C...) dapat dipratinjau langsung di kartu prompt.`
+              : 'Hasil render siap dipratinjau langsung di kartu prompt.',
           });
         } else if (payload?.error) {
           toast.error(`Google Flow: ${payload.error}`);
@@ -1060,9 +1070,44 @@ export function PromptGeneratorView({ onSwitchToMetadata, onSendImageToMetadata 
     if (!card.generatedImageUrl) return;
     const a = document.createElement('a');
     a.href = card.generatedImageUrl;
-    a.download = `Flow_${card.id.slice(0, 6)}_${Date.now()}.jpg`;
+    const cleanTitle = (card.title || 'Flow_Image').replace(/[^a-zA-Z0-9_\-]/g, '_').slice(0, 20);
+    const varLetter = card.variations && card.variations.length > 1
+      ? `_Var_${card.variations[card.selectedVariationIndex || 0]?.letter || 'A'}`
+      : '';
+    a.download = `${cleanTitle}${varLetter}_${card.id.slice(0, 6)}.jpg`;
     a.click();
     toast.success('Gambar berhasil diunduh ke komputer!');
+  };
+
+  // Switch selected variation preview on prompt card
+  const handleSelectCardVariation = (cardId: string, index: number) => {
+    setPrompts((prev) =>
+      prev.map((c) => {
+        if (c.id !== cardId) return c;
+        const currentVariations = c.variations || [];
+        const chosen = currentVariations[index];
+        return {
+          ...c,
+          selectedVariationIndex: index,
+          generatedImageUrl: chosen?.dataUrl || c.generatedImageUrl,
+        };
+      })
+    );
+  };
+
+  // Download all variations of a prompt card
+  const handleDownloadAllCardVariations = (card: PromptCardItem) => {
+    if (!card.variations || card.variations.length === 0) return;
+    card.variations.forEach((v, idx) => {
+      setTimeout(() => {
+        const a = document.createElement('a');
+        a.href = v.dataUrl;
+        const cleanTitle = (card.title || 'Flow_Image').replace(/[^a-zA-Z0-9_\-]/g, '_').slice(0, 20);
+        a.download = `${cleanTitle}_Var_${v.letter}_${card.id.slice(0, 4)}.jpg`;
+        a.click();
+      }, idx * 250);
+    });
+    toast.success(`Mengunduh semua (${card.variations.length}) variasi gambar...`);
   };
 
   // Copy All Prompts
@@ -2535,16 +2580,25 @@ export function PromptGeneratorView({ onSwitchToMetadata, onSendImageToMetadata 
 
                     {/* Generated Flow Image Preview */}
                     {card.generatedImageUrl && (
-                      <div className="p-3 bg-gradient-to-r from-amber-50/80 to-orange-50/80 border-2 border-amber-300 rounded-xl space-y-2">
+                      <div className="p-3 bg-gradient-to-r from-amber-50/80 to-orange-50/80 border-2 border-amber-300 rounded-xl space-y-2.5">
                         <div className="flex items-center justify-between text-xs">
                           <span className="font-bold text-amber-950 flex items-center gap-1.5">
                             <Sparkles className="w-3.5 h-3.5 text-amber-600" />
-                            Hasil Render Google Flow:
+                            Hasil Render Google Flow
+                            {card.variations && card.variations.length > 1 && (
+                              <span className="text-[#ff6b35] font-black">
+                                (Variasi {card.variations[card.selectedVariationIndex || 0]?.letter || 'A'})
+                              </span>
+                            )}:
                           </span>
                           <span className="text-[10px] bg-emerald-100 text-emerald-800 font-bold px-2 py-0.5 rounded-full border border-emerald-300">
-                            ✓ Siap
+                            {card.variations && card.variations.length > 1
+                              ? `✓ ${card.variations.length} Variasi Siap`
+                              : '✓ Siap'}
                           </span>
                         </div>
+
+                        {/* Large Preview */}
                         <div className="relative group rounded-lg overflow-hidden border border-amber-200 bg-black/5 aspect-video flex items-center justify-center max-h-60">
                           {/* eslint-disable-next-line @next/next/no-img-element */}
                           <img
@@ -2553,7 +2607,57 @@ export function PromptGeneratorView({ onSwitchToMetadata, onSendImageToMetadata 
                             className="w-full h-full object-contain"
                           />
                         </div>
-                        <div className="flex items-center gap-2 pt-0.5">
+
+                        {/* Multi-Variation Selector Strip (if > 1 variation, max 4) */}
+                        {card.variations && card.variations.length > 1 && (
+                          <div className="space-y-1">
+                            <div className="flex items-center justify-between">
+                              <span className="text-[10px] font-bold text-stone-600 block">
+                                Variasi Hasil Render ({card.variations.length} gambar):
+                              </span>
+                              <span className="text-[9px] text-[#ff6b35] font-bold">
+                                Klik untuk melihat / memilih
+                              </span>
+                            </div>
+                            <div className="grid grid-cols-2 sm:grid-cols-4 gap-1.5">
+                              {card.variations.map((v, vIdx) => {
+                                const isSelected = (card.selectedVariationIndex ?? 0) === vIdx;
+                                return (
+                                  <button
+                                    key={vIdx}
+                                    type="button"
+                                    onClick={() => handleSelectCardVariation(card.id, vIdx)}
+                                    className={`relative p-1 rounded-lg border text-left cursor-pointer transition-all flex items-center gap-2 ${
+                                      isSelected
+                                        ? 'bg-amber-100/90 border-[#ff6b35] shadow-[0_0_0_1.5px_#ff6b35]'
+                                        : 'bg-white hover:bg-stone-50 border-stone-200'
+                                    }`}
+                                  >
+                                    <div className="w-9 h-9 rounded overflow-hidden shrink-0 bg-stone-100 border border-stone-200">
+                                      {/* eslint-disable-next-line @next/next/no-img-element */}
+                                      <img
+                                        src={v.dataUrl}
+                                        alt={`Variasi ${v.letter}`}
+                                        className="w-full h-full object-cover"
+                                      />
+                                    </div>
+                                    <div className="min-w-0 flex-1">
+                                      <div className="text-[11px] font-black text-[#2c1810] flex items-center gap-1">
+                                        <span>Var {v.letter}</span>
+                                        {isSelected && <Check className="w-3 h-3 text-[#ff6b35]" />}
+                                      </div>
+                                      <span className="text-[9px] text-stone-500 block">
+                                        {isSelected ? 'Aktif' : 'Pilih'}
+                                      </span>
+                                    </div>
+                                  </button>
+                                );
+                              })}
+                            </div>
+                          </div>
+                        )}
+
+                        <div className="flex items-center gap-2 pt-0.5 flex-wrap">
                           <Button
                             type="button"
                             size="sm"
@@ -2561,7 +2665,7 @@ export function PromptGeneratorView({ onSwitchToMetadata, onSendImageToMetadata 
                             className="flex-1 h-7 text-xs bg-[#ff6b35] hover:bg-[#e55a2b] text-white font-bold cursor-pointer"
                           >
                             <Sparkles className="w-3.5 h-3.5 mr-1" />
-                            Kirim ke Metadata Studio
+                            Kirim {card.variations && card.variations.length > 1 ? `Var (${card.variations[card.selectedVariationIndex || 0]?.letter || 'A'})` : ''} ke Metadata
                           </Button>
                           <Button
                             type="button"
@@ -2571,8 +2675,21 @@ export function PromptGeneratorView({ onSwitchToMetadata, onSendImageToMetadata 
                             className="h-7 text-xs border-stone-300 hover:bg-stone-100 text-[#2c1810] cursor-pointer"
                           >
                             <Download className="w-3.5 h-3.5 mr-1" />
-                            Unduh
+                            Unduh {card.variations && card.variations.length > 1 ? `(${card.variations[card.selectedVariationIndex || 0]?.letter || 'A'})` : ''}
                           </Button>
+                          {card.variations && card.variations.length > 1 && (
+                            <Button
+                              type="button"
+                              size="sm"
+                              variant="outline"
+                              onClick={() => handleDownloadAllCardVariations(card)}
+                              className="h-7 text-xs border-amber-400 bg-amber-50 hover:bg-amber-100 text-amber-900 font-bold cursor-pointer"
+                              title="Unduh seluruh variasi gambar dari prompt ini"
+                            >
+                              <Download className="w-3.5 h-3.5 mr-1 text-amber-700" />
+                              Unduh Semua ({card.variations.length})
+                            </Button>
+                          )}
                         </div>
                       </div>
                     )}

@@ -941,22 +941,34 @@ async function handleFlowGeneration(payload) {
     baselineTokens.add(item.token);
   }
 
-  // 11. Extract Primary Image Data to Return to Meta-Gen Studio
-  showFlowToast('Meta-Gen: Gambar Selesai!', `Menyimpan gambar #${ordinal || 1} (${detectedBatchItems.length} variasi)...`, true);
+  // 11. Extract All Variations Data to Return to Meta-Gen Studio
+  showFlowToast('Meta-Gen: Gambar Selesai!', `Menyimpan ${detectedBatchItems.length} variasi gambar #${ordinal || 1}...`, true);
+
+  const variationsList = [];
+  for (let idx = 0; idx < detectedBatchItems.length; idx++) {
+    const it = detectedBatchItems[idx];
+    const itImg = it.img;
+    const itMediaId = it.mediaId;
+    const itRedirect = (itImg.src || '').match(/media\.getMediaUrlRedirect\?name=([a-f0-9-]+)/);
+    const prefUrl = itMediaId
+      ? `https://labs.google/fx/api/trpc/media.getMediaUrlRedirect?name=${itMediaId}`
+      : itRedirect
+      ? `https://labs.google/fx/api/trpc/media.getMediaUrlRedirect?name=${itRedirect[1]}`
+      : itImg.src;
+
+    const itBase64 = await imageToDataUrl(itImg, prefUrl);
+    variationsList.push({
+      letter: isMultiple ? (variationLetters[idx] || String(idx + 1)) : 'A',
+      token: it.token,
+      dataUrl: itBase64,
+      mediaId: itMediaId,
+    });
+  }
 
   const primaryItem = detectedBatchItems[0];
-  const primaryImg = primaryItem.img;
-  const primaryMediaId = primaryItem.mediaId;
-  const matchRedirect = (primaryImg.src || '').match(/media\.getMediaUrlRedirect\?name=([a-f0-9-]+)/);
-  const preferredUrl = primaryMediaId
-    ? `https://labs.google/fx/api/trpc/media.getMediaUrlRedirect?name=${primaryMediaId}`
-    : matchRedirect
-    ? `https://labs.google/fx/api/trpc/media.getMediaUrlRedirect?name=${matchRedirect[1]}`
-    : primaryImg.src;
+  const primaryDataUrl = variationsList[0]?.dataUrl || '';
 
-  const base64Data = await imageToDataUrl(primaryImg, preferredUrl);
-
-  showFlowToast('✓ Meta-Gen: Selesai!', `Prompt #${ordinal || 1} (${detectedBatchItems.length} variasi terverifikasi) siap di Studio.`, true);
+  showFlowToast('✓ Meta-Gen: Selesai!', `Prompt #${ordinal || 1} (${variationsList.length} variasi) siap di Studio.`, true);
 
   return {
     success: true,
@@ -964,8 +976,9 @@ async function handleFlowGeneration(payload) {
     ordinal: ordinal,
     title: title,
     token: primaryItem.token,
-    variationsCount: detectedBatchItems.length,
-    imageDataUrl: base64Data,
+    variationsCount: variationsList.length,
+    imageDataUrl: primaryDataUrl,
+    variations: variationsList,
     filename: `Flow_Prompt_${ordinal || '1'}_${Date.now().toString().slice(-4)}.jpg`,
   };
 }

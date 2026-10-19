@@ -59,6 +59,15 @@ export interface PromptCardItem {
   batchId?: string;
   generatedImageUrl?: string;
   flowStatus?: 'idle' | 'generating' | 'completed' | 'error';
+  variations?: FlowVariationItem[];
+  selectedVariationIndex?: number;
+}
+
+export interface FlowVariationItem {
+  letter: string;
+  dataUrl: string;
+  token?: string;
+  mediaId?: string;
 }
 
 export interface PromptGenerationSession {
