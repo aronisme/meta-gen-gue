@@ -279,13 +279,17 @@ async function ensureBatchViewMode() {
 function extractTilePromptText(tileElement) {
   if (!tileElement) return '';
 
+  // 0. If already tagged with prompt
+  const taggedPrompt = tileElement.getAttribute('data-metagen-prompt');
+  if (taggedPrompt && taggedPrompt.length > 5) return taggedPrompt;
+
   // 1. Check Batch Mode full prompt container in the same row
-  const row = tileElement.closest('.tile-row') || tileElement.parentElement;
+  const row = tileElement.closest('.tile-row') || tileElement.closest('flow-batch-row') || tileElement.parentElement;
   if (row) {
     const batchPromptEl = row.querySelector(
       '.prompt-text .text-part, flow-expandable-prompt .text-part, .prompt-text, flow-expandable-prompt'
     );
-    if (batchPromptEl && batchPromptEl.textContent.trim().length > 10) {
+    if (batchPromptEl && batchPromptEl.textContent.trim().length > 5) {
       return batchPromptEl.textContent.trim();
     }
   }
@@ -294,7 +298,7 @@ function extractTilePromptText(tileElement) {
   const directPrompt = tileElement.querySelector(
     '.prompt-text .text-part, flow-expandable-prompt .text-part, .prompt-text'
   );
-  if (directPrompt && directPrompt.textContent.trim().length > 10) {
+  if (directPrompt && directPrompt.textContent.trim().length > 5) {
     return directPrompt.textContent.trim();
   }
 
@@ -304,9 +308,16 @@ function extractTilePromptText(tileElement) {
     return footerTitle.textContent.trim();
   }
 
-  // 4. Grid Mode container aria-label
-  const ariaLabel = tileElement.getAttribute('aria-label');
-  if (ariaLabel && ariaLabel.trim().length > 5 && !ariaLabel.includes('Kartu yang menampilkan')) {
+  // 4. Grid Mode container aria-label (EXCLUDE hardcoded placeholder "Alpaca wearing" or generic labels)
+  const ariaLabel = tileElement.getAttribute('aria-label') || '';
+  if (
+    ariaLabel.trim().length > 5 &&
+    !ariaLabel.includes('Kartu yang menampilkan') &&
+    !ariaLabel.includes('Alpaca wearing') &&
+    !ariaLabel.toLowerCase().includes('alpaca') &&
+    !ariaLabel.includes('card') &&
+    !ariaLabel.includes('image')
+  ) {
     return ariaLabel.trim();
   }
 
@@ -316,13 +327,20 @@ function extractTilePromptText(tileElement) {
 // Helper: Check if a tile matches the target prompt using semantic keywords & substring
 function isTileMatchingTargetPrompt(tileElement, targetPrompt) {
   if (!targetPrompt) return true;
+  if (!tileElement) return true;
+
+  // If already tagged with a cardId
+  if (tileElement.getAttribute('data-metagen-card-id')) {
+    return true;
+  }
+
   const tileText = extractTilePromptText(tileElement).toLowerCase();
   if (!tileText) return true; // fallback if prompt text element is not yet populated
 
   const cleanTarget = targetPrompt.toLowerCase();
 
   // Substring match
-  if (cleanTarget.includes(tileText) || tileText.includes(cleanTarget.slice(0, 35))) {
+  if (cleanTarget.includes(tileText) || tileText.includes(cleanTarget.slice(0, 30))) {
     return true;
   }
 
@@ -334,7 +352,7 @@ function isTileMatchingTargetPrompt(tileElement, targetPrompt) {
   if (targetWords.length === 0) return true;
 
   const matchedWords = targetWords.filter((w) => tileText.includes(w));
-  return matchedWords.length / targetWords.length >= 0.28;
+  return matchedWords.length >= 2 || matchedWords.length / targetWords.length >= 0.15;
 }
 
 // Helper: Convert image to Data URL safely
@@ -721,6 +739,8 @@ async function handleFlowGeneration(payload) {
   const timeoutMs = 180000;
   let pollIteration = 0;
   let hasObservedStopIcon = false;
+  let hasAnnouncedRenderComplete = false;
+  let postStopChecks = 0;
 
   while (Date.now() - pollStart < timeoutMs) {
     await new Promise((r) => setTimeout(r, 1200));
@@ -738,59 +758,135 @@ async function handleFlowGeneration(payload) {
       if (pollIteration % 3 === 0) {
         showFlowToast('⏳ Sedang Merender...', `Google Flow sedang memproses (${elapsedSec}d)...`, false);
       }
-    } else if (hasObservedStopIcon) {
+    } else if (hasObservedStopIcon && !hasAnnouncedRenderComplete) {
+      hasAnnouncedRenderComplete = true;
       console.log('[Meta-Gen Flow Bridge] Stop icon cleared! Generation has completed in Flow.');
-      showFlowToast('⚡ Render Selesai!', 'Mendeteksi seluruh variasi gambar di canvas...', true);
+      showFlowToast('⚡ Render Selesai!', 'Mendeteksi variasi gambar di canvas...', true);
     }
 
-    // When rendering stops (or after generous time), scan for newly rendered matching images
-    if (!currentlyGenerating && hasObservedStopIcon) {
-      // Give DOM 1.5s to fully render all variation cards in the batch row
-      await new Promise((r) => setTimeout(r, 1500));
+    // When rendering stops (or after 25s elapsed without active generation), scan for newly rendered images
+    const readyToScan = (!currentlyGenerating && hasObservedStopIcon) || (!currentlyGenerating && elapsedSec > 25);
 
-      const candidateImgs = Array.from(
+    if (readyToScan) {
+      postStopChecks++;
+
+      // Give DOM 1.2s to fully settle
+      await new Promise((r) => setTimeout(r, 1200));
+
+      const candidateMedia = Array.from(
         document.querySelectorAll(
-          'flow-image-tile img, flow-video-tile img, flow-asset-tile img, [class*="tile"] img, [class*="asset"] img, img'
+          'flow-grid-tile-container img, flow-image-tile img, flow-video-tile img, flow-asset-tile img, .tile-row img, [class*="tile"] img, img, video'
         )
-      ).filter((img) => {
-        if (img.offsetParent === null) return false;
-        const w = img.naturalWidth || img.width || 0;
-        const h = img.naturalHeight || img.height || 0;
+      ).filter((el) => {
+        if (!el.isConnected) return false;
+        const src = el.src || el.currentSrc || el.getAttribute('poster') || '';
+        if (!src && !el.getAttribute('data-media-id')) return false;
+        if (
+          src.includes('profile') ||
+          src.includes('avatar') ||
+          src.includes('icon') ||
+          src.includes('logo') ||
+          src.includes('data:image/svg')
+        ) {
+          return false;
+        }
+        const w = el.naturalWidth || el.videoWidth || el.width || 0;
+        const h = el.naturalHeight || el.videoHeight || el.height || 0;
         if (w > 0 && w < 80 && h > 0 && h < 80) return false;
-        const src = img.src || '';
-        if (src.includes('profile') || src.includes('avatar') || src.includes('icon') || src.includes('logo')) return false;
         return true;
       });
 
-      for (const img of candidateImgs) {
-        const token = getMediaToken(img);
+      const matchedBatch = [];
+      const anyNewBatch = [];
+
+      for (const el of candidateMedia) {
+        const token = getMediaToken(el);
         if (token && !baselineTokens.has(token)) {
           const tileContainer =
-            img.closest('flow-grid-tile-container') ||
-            img.closest('flow-tile-container') ||
-            img.closest('flow-image-tile') ||
-            img.closest('.tile-row') ||
-            img.closest('[data-tile-id]') ||
-            img.parentElement;
+            el.closest('flow-grid-tile-container') ||
+            el.closest('flow-tile-container') ||
+            el.closest('flow-image-tile') ||
+            el.closest('.tile-row') ||
+            el.closest('[data-tile-id]') ||
+            el.parentElement;
 
-          // Verify prompt matches our target prompt
-          if (isTileMatchingTargetPrompt(tileContainer, targetPrompt)) {
-            // Avoid duplicate entries if img query returned same token
-            if (!detectedBatchItems.some((item) => item.token === token)) {
-              detectedBatchItems.push({
-                img: img,
-                token: token,
-                tileContainer: tileContainer,
-                mediaId: img.getAttribute('data-media-id') || '',
-              });
-            }
+          const matchesPrompt = isTileMatchingTargetPrompt(tileContainer, targetPrompt);
+          const item = {
+            img: el,
+            token: token,
+            tileContainer: tileContainer,
+            mediaId: el.getAttribute('data-media-id') || '',
+          };
+
+          if (!anyNewBatch.some((x) => x.token === token)) {
+            anyNewBatch.push(item);
+          }
+          if (matchesPrompt && !matchedBatch.some((x) => x.token === token)) {
+            matchedBatch.push(item);
           }
         }
       }
 
-      if (detectedBatchItems.length > 0) {
-        console.log(`[Meta-Gen Flow Bridge] Discovered ${detectedBatchItems.length} matching variation card(s) for prompt!`);
+      // Priority 1: Semantic match with target prompt
+      if (matchedBatch.length > 0) {
+        detectedBatchItems = matchedBatch;
+        console.log(`[Meta-Gen Flow Bridge] Discovered ${detectedBatchItems.length} matching variation card(s) via prompt match!`);
         break;
+      }
+
+      // Priority 2: Fallback to ANY new media tokens rendered after stop icon (guaranteed by FIFO queue)
+      if (postStopChecks >= 2 && anyNewBatch.length > 0) {
+        detectedBatchItems = anyNewBatch;
+        console.log(`[Meta-Gen Flow Bridge] Discovered ${detectedBatchItems.length} variation card(s) via new token fallback!`);
+        break;
+      }
+
+      // Priority 3: Check if already tagged with this cardId in DOM
+      if (postStopChecks >= 3) {
+        const taggedTiles = Array.from(document.querySelectorAll(`[data-metagen-card-id="${cardId}"]`));
+        if (taggedTiles.length > 0) {
+          for (const tile of taggedTiles) {
+            const img = tile.querySelector('img, video');
+            if (img) {
+              const token = getMediaToken(img) || `tagged_${cardId}_${Date.now()}`;
+              detectedBatchItems.push({
+                img: img,
+                token: token,
+                tileContainer: tile,
+                mediaId: img.getAttribute('data-media-id') || '',
+              });
+            }
+          }
+          if (detectedBatchItems.length > 0) {
+            console.log(`[Meta-Gen Flow Bridge] Recovered ${detectedBatchItems.length} card(s) already tagged for cardId:`, cardId);
+            break;
+          }
+        }
+      }
+
+      // Priority 4: Emergency Canvas Fallback (newest untagged tile)
+      if (postStopChecks >= 5) {
+        console.warn('[Meta-Gen Flow Bridge] Attempting emergency fallback to newest canvas card...');
+        const allContainers = Array.from(
+          document.querySelectorAll('flow-grid-tile-container, flow-image-tile, .tile-row')
+        );
+        const untagged = allContainers.find((t) => {
+          const id = t.getAttribute('data-metagen-card-id');
+          return !id || id === cardId;
+        });
+        if (untagged) {
+          const img = untagged.querySelector('img, video');
+          if (img) {
+            const token = getMediaToken(img) || `emergency_${Date.now()}`;
+            detectedBatchItems.push({
+              img: img,
+              token: token,
+              tileContainer: untagged,
+              mediaId: img.getAttribute('data-media-id') || '',
+            });
+            break;
+          }
+        }
       }
     }
   }
