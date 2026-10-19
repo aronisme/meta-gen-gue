@@ -221,20 +221,35 @@ function hydrateFlowBadges() {
 }
 
 // Helper: Ensure Google Flow is in "Batch" view mode for clear per-image prompt visibility
+let isBatchModeConfirmed = false;
+
 async function ensureBatchViewMode() {
   try {
-    // 1. Cek apakah sudah dalam mode Batch
+    // 1. Cek apakah sudah terkonfirmasi di sesi ini (cukup sekali, jangan ulang-ulang)
+    if (isBatchModeConfirmed) {
+      return;
+    }
+
+    // 2. Cek apakah canvas sudah dalam tampilan Batch (ada .tile-row atau flow-expandable-prompt)
+    if (document.querySelector('.tile-row, flow-batch-row, flow-expandable-prompt')) {
+      isBatchModeConfirmed = true;
+      console.log('[Meta-Gen Flow Bridge] Mode tampilan Batch sudah aktif di canvas.');
+      return;
+    }
+
+    // 3. Cek apakah tombol toggle Batch sedang aktif di DOM
     const checkedToggle = document.querySelector(
       '.mat-button-toggle-checked .toggle-text, [aria-checked="true"] .toggle-text, button[role="radio"][aria-checked="true"]'
     );
     if (checkedToggle && (checkedToggle.textContent || '').trim().toLowerCase().includes('batch')) {
+      isBatchModeConfirmed = true;
       console.log('[Meta-Gen Flow Bridge] Mode tampilan Batch sudah aktif.');
       return;
     }
 
-    console.log('[Meta-Gen Flow Bridge] Memastikan Mode Tampilan Batch aktif...');
+    console.log('[Meta-Gen Flow Bridge] Mengaktifkan Mode Tampilan Batch (hanya sekali)...');
 
-    // 2. Cari tombol Setelan (icon settings_2 atau aria-label Setelan)
+    // 4. Cari tombol Setelan (icon settings_2 atau aria-label Setelan)
     let settingsBtn = document.querySelector(
       'button[aria-label="Setelan" i], button[mattooltip="Lihat setelan" i], button[aria-label*="setelan" i]'
     );
@@ -250,7 +265,7 @@ async function ensureBatchViewMode() {
       settingsBtn.click();
       await new Promise((r) => setTimeout(r, 450));
 
-      // 3. Cari tombol Batch dalam menu/popover yang muncul
+      // 5. Cari tombol Batch dalam menu/popover yang muncul
       const allToggleButtons = Array.from(
         document.querySelectorAll('.mat-button-toggle-button, [role="radio"], button')
       );
@@ -261,11 +276,12 @@ async function ensureBatchViewMode() {
 
       if (batchBtn) {
         batchBtn.click();
+        isBatchModeConfirmed = true;
         console.log('[Meta-Gen Flow Bridge] Pilihan Batch berhasil diaktifkan!');
         await new Promise((r) => setTimeout(r, 400));
       }
 
-      // 4. Tutup popover setelan dengan tombol Escape
+      // 6. Tutup popover setelan dengan tombol Escape
       document.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', code: 'Escape', keyCode: 27, bubbles: true }));
       document.dispatchEvent(new PointerEvent('pointerdown', { bubbles: true, clientX: 0, clientY: 0 }));
       await new Promise((r) => setTimeout(r, 250));
