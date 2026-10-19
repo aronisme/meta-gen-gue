@@ -171,6 +171,7 @@ export function PromptGeneratorView({ onSwitchToMetadata, onSendImageToMetadata 
   const [copiedAll, setCopiedAll] = useState<boolean>(false);
   const [generatingFlowCardId, setGeneratingFlowCardId] = useState<string | null>(null);
   const [flowQueueCardIds, setFlowQueueCardIds] = useState<string[]>([]);
+  const [flowBatchLimit, setFlowBatchLimit] = useState<number>(5);
 
   // 7. Inspirations & Brainstorm
   const [inspirations, setInspirations] = useState<InspirationIdea[]>(() => getRandomCuratedIdeas(10));
@@ -1006,15 +1007,19 @@ export function PromptGeneratorView({ onSwitchToMetadata, onSendImageToMetadata 
     });
   };
 
-  // Generate All Un-rendered Prompts via Google Flow Extension Queue
-  const handleGenerateAllFlow = () => {
+  // Generate Prompts in Safe Chunks via Google Flow Extension Queue (Rate-Limit Protected)
+  const handleGenerateBatchFlow = (overrideLimit?: number) => {
     const unrenderedPrompts = prompts.filter((p) => !p.generatedImageUrl);
     if (unrenderedPrompts.length === 0) {
       toast.info('Semua prompt pada sesi ini sudah memiliki gambar hasil render.');
       return;
     }
 
-    unrenderedPrompts.forEach((card) => {
+    const limit = overrideLimit || flowBatchLimit;
+    const targetCards = unrenderedPrompts.slice(0, limit);
+    const remainingCount = unrenderedPrompts.length - targetCards.length;
+
+    targetCards.forEach((card) => {
       window.postMessage(
         {
           type: 'METAGEN_TRIGGER_FLOW_GEN',
@@ -1031,8 +1036,39 @@ export function PromptGeneratorView({ onSwitchToMetadata, onSendImageToMetadata 
       );
     });
 
-    toast.success(`${unrenderedPrompts.length} prompt dimasukkan ke antrean Google Flow!`, {
-      description: 'Ekstensi akan mengeksekusi satu per satu secara otomatis tanpa tumpang tindih.',
+    toast.success(
+      `⚡ Batch Berjalan: ${targetCards.length} prompt dimasukkan ke antrean Google Flow!`,
+      {
+        description:
+          remainingCount > 0
+            ? `Sisa ${remainingCount} prompt belum dirender dapat dijalankan pada batch berikutnya agar aman.`
+            : 'Seluruh prompt yang belum memiliki gambar sedang diproses berurutan.',
+        duration: 5000,
+      }
+    );
+  };
+
+  // Copy formatted batch instruction for Google Flow Agent Mode (max 3-5 scenes)
+  const handleCopyFlowAgentBatch = () => {
+    const unrenderedPrompts = prompts.filter((p) => !p.generatedImageUrl);
+    if (unrenderedPrompts.length === 0) {
+      toast.info('Semua prompt pada sesi ini sudah memiliki gambar hasil render.');
+      return;
+    }
+
+    const limit = Math.min(flowBatchLimit, 5); // Flow Agent works best with 3-5 scenes
+    const targetCards = unrenderedPrompts.slice(0, limit);
+    const aspect = settings.aspectRatio && settings.aspectRatio !== 'none' ? settings.aspectRatio : '16:9';
+
+    const scenesText = targetCards
+      .map((c, i) => `Scene ${i + 1} (${c.title || `Concept #${c.ordinal}`}):\n${c.prompt.trim()}`)
+      .join('\n\n');
+
+    const agentPrompt = `Act in Agent Mode. I have ${targetCards.length} commercial microstock visual concepts. Batch generate an image for each scene sequentially in ${aspect} aspect ratio, keeping commercial stock photography quality:\n\n${scenesText}\n\nExecute and generate all ${targetCards.length} scenes now on the canvas.`;
+
+    void navigator.clipboard.writeText(agentPrompt);
+    toast.success(`📋 Master Prompt Flow Agent (${targetCards.length} adegan) disalin!`, {
+      description: 'Aktifkan tombol "Agent" di Google Flow lalu paste instruksi ini.',
       duration: 6000,
     });
   };
@@ -2388,16 +2424,60 @@ export function PromptGeneratorView({ onSwitchToMetadata, onSendImageToMetadata 
                     <span>{copiedAll ? 'Tersalin!' : 'Salin Semua'}</span>
                   </Button>
 
+                  {/* Flow Batch Generation with Safety Limit Controls */}
+                  <div className="flex items-center gap-1 bg-[#fff5e6] p-0.5 rounded-lg border-2 border-[#2c1810] shadow-[1px_1px_0_#2c1810]">
+                    <Button
+                      type="button"
+                      size="sm"
+                      onClick={() => handleGenerateBatchFlow()}
+                      disabled={prompts.every((p) => p.generatedImageUrl)}
+                      className="h-6.5 px-2.5 text-xs font-black bg-gradient-to-r from-amber-500 to-orange-500 hover:from-amber-600 hover:to-orange-600 text-white cursor-pointer disabled:opacity-50"
+                      title={`Antrekan batch aman (maksimal ${flowBatchLimit} prompt) ke Google Flow`}
+                    >
+                      <Sparkles className="w-3 h-3 mr-1 text-yellow-200" />
+                      <span>
+                        ⚡ Gen Batch ({Math.min(prompts.filter((p) => !p.generatedImageUrl).length, flowBatchLimit)}
+                        {prompts.filter((p) => !p.generatedImageUrl).length > flowBatchLimit
+                          ? `/${prompts.filter((p) => !p.generatedImageUrl).length}`
+                          : ''})
+                      </span>
+                    </Button>
+
+                    {/* Batch Limit Selector */}
+                    <div
+                      className="flex items-center gap-0.5 px-1 text-[10px] font-bold text-stone-600"
+                      title="Batas maksimal prompt per kirim agar tidak terkena limit atau membebani Google Flow"
+                    >
+                      <span className="text-[9px] uppercase tracking-tight text-stone-500">Max:</span>
+                      {[3, 5, 8].map((limitOption) => (
+                        <button
+                          key={limitOption}
+                          type="button"
+                          onClick={() => setFlowBatchLimit(limitOption)}
+                          className={`px-1.5 py-0.5 rounded text-[10px] font-black cursor-pointer transition-all ${
+                            flowBatchLimit === limitOption
+                              ? 'bg-[#2c1810] text-white'
+                              : 'bg-white hover:bg-amber-100 text-[#2c1810] border border-stone-300'
+                          }`}
+                        >
+                          {limitOption}
+                        </button>
+                      ))}
+                    </div>
+                  </div>
+
+                  {/* Flow Agent Master Prompt Copy */}
                   <Button
                     type="button"
                     size="sm"
-                    onClick={handleGenerateAllFlow}
+                    variant="outline"
+                    onClick={handleCopyFlowAgentBatch}
                     disabled={prompts.every((p) => p.generatedImageUrl)}
-                    className="h-7.5 px-2.5 text-xs font-black bg-gradient-to-r from-amber-500 to-orange-500 hover:from-amber-600 hover:to-orange-600 text-white border-2 border-[#2c1810] shadow-[1px_1px_0_#2c1810] cursor-pointer disabled:opacity-50"
-                    title="Antrekan dan generate semua prompt sesi ini yang belum memiliki gambar secara berurutan di Google Flow"
+                    className="h-7.5 px-2 text-xs font-bold border-2 border-purple-800 bg-purple-50 hover:bg-purple-100 text-purple-900 shadow-[1px_1px_0_#2c1810] cursor-pointer disabled:opacity-50"
+                    title={`Salin instruksi batch berstruktur khusus Google Flow Agent (maksimal ${Math.min(flowBatchLimit, 5)} adegan)`}
                   >
-                    <Sparkles className="w-3.5 h-3.5 mr-1 text-yellow-200" />
-                    <span>⚡ Gen All Flow ({prompts.filter((p) => !p.generatedImageUrl).length})</span>
+                    <Wand2 className="w-3.5 h-3.5 mr-1 text-purple-700" />
+                    <span>Agent Batch ({Math.min(prompts.filter((p) => !p.generatedImageUrl).length, Math.min(flowBatchLimit, 5))})</span>
                   </Button>
 
                   <Button
