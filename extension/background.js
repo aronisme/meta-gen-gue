@@ -60,11 +60,19 @@ async function getTargetAppUrl() {
 
 // Send Payload to Meta-Gen Tab SILENTLY in the background (DO NOT SWITCH TAB!)
 async function sendPayloadToMetaGenTabSilently(payload, targetAppUrl) {
-  const domainPattern = targetAppUrl.includes('localhost')
-    ? '*://localhost:*/*'
-    : '*://*.meta-gen-gue.pages.dev/*';
-
-  const tabs = await chrome.tabs.query({ url: domainPattern });
+  // Smart domain detection: check configured target first, then fallback to localhost or cloudflare
+  let tabs = [];
+  if (targetAppUrl.includes('localhost') || targetAppUrl.includes('127.0.0.1')) {
+    tabs = await chrome.tabs.query({ url: ['*://localhost:*/*', '*://127.0.0.1:*/*'] });
+    if (tabs.length === 0) {
+      tabs = await chrome.tabs.query({ url: '*://*.meta-gen-gue.pages.dev/*' });
+    }
+  } else {
+    tabs = await chrome.tabs.query({ url: '*://*.meta-gen-gue.pages.dev/*' });
+    if (tabs.length === 0) {
+      tabs = await chrome.tabs.query({ url: ['*://localhost:*/*', '*://127.0.0.1:*/*'] });
+    }
+  }
 
   if (tabs.length > 0) {
     const targetTab = tabs[0];
