@@ -7,6 +7,7 @@ import {
   CheckCircle2,
   ChevronDown,
   ChevronUp,
+  Clock,
   Copy,
   Download,
   Edit2,
@@ -169,6 +170,7 @@ export function PromptGeneratorView({ onSwitchToMetadata, onSendImageToMetadata 
   const [copiedId, setCopiedId] = useState<string | null>(null);
   const [copiedAll, setCopiedAll] = useState<boolean>(false);
   const [generatingFlowCardId, setGeneratingFlowCardId] = useState<string | null>(null);
+  const [flowQueueCardIds, setFlowQueueCardIds] = useState<string[]>([]);
 
   // 7. Inspirations & Brainstorm
   const [inspirations, setInspirations] = useState<InspirationIdea[]>(() => getRandomCuratedIdeas(10));
@@ -521,9 +523,15 @@ export function PromptGeneratorView({ onSwitchToMetadata, onSendImageToMetadata 
       if (event.data?.type === 'METAGEN_ENQUEUE_PROMPT_IMAGE') {
         handleIncomingPayload(event.data.payload);
       }
+      if (event.data?.type === 'METAGEN_FLOW_QUEUE_UPDATE') {
+        const qInfo = event.data.payload;
+        setGeneratingFlowCardId(qInfo?.activeCardId || null);
+        setFlowQueueCardIds(qInfo?.queuedCardIds || []);
+      }
       if (event.data?.type === 'METAGEN_FLOW_GEN_RESULT') {
         const payload = event.data.payload;
         setGeneratingFlowCardId((prev) => (prev === payload?.cardId ? null : prev));
+        setFlowQueueCardIds((prev) => prev.filter((id) => id !== payload?.cardId));
         if (payload?.success && payload?.imageDataUrl) {
           setPrompts((prev) =>
             prev.map((c) =>
@@ -985,6 +993,37 @@ export function PromptGeneratorView({ onSwitchToMetadata, onSendImageToMetadata 
     toast.info(`Mengirim prompt #${card.ordinal} ke Google Flow...`, {
       description: 'Ekstensi sedang mengarahkan input ke tab Google Flow.',
       duration: 5000,
+    });
+  };
+
+  // Generate All Un-rendered Prompts via Google Flow Extension Queue
+  const handleGenerateAllFlow = () => {
+    const unrenderedPrompts = prompts.filter((p) => !p.generatedImageUrl);
+    if (unrenderedPrompts.length === 0) {
+      toast.info('Semua prompt pada sesi ini sudah memiliki gambar hasil render.');
+      return;
+    }
+
+    unrenderedPrompts.forEach((card) => {
+      window.postMessage(
+        {
+          type: 'METAGEN_TRIGGER_FLOW_GEN',
+          payload: {
+            cardId: card.id,
+            ordinal: card.ordinal,
+            title: card.title,
+            prompt: card.prompt,
+            ratio: settings.aspectRatio || '16:9',
+            model: settings.engine === 'nanobanana' ? 'Nano Banana 2' : 'Imagen 3',
+          },
+        },
+        '*'
+      );
+    });
+
+    toast.success(`${unrenderedPrompts.length} prompt dimasukkan ke antrean Google Flow!`, {
+      description: 'Ekstensi akan mengeksekusi satu per satu secara otomatis tanpa tumpang tindih.',
+      duration: 6000,
     });
   };
 
@@ -2307,6 +2346,18 @@ export function PromptGeneratorView({ onSwitchToMetadata, onSendImageToMetadata 
                   <Button
                     type="button"
                     size="sm"
+                    onClick={handleGenerateAllFlow}
+                    disabled={prompts.every((p) => p.generatedImageUrl)}
+                    className="h-7.5 px-2.5 text-xs font-black bg-gradient-to-r from-amber-500 to-orange-500 hover:from-amber-600 hover:to-orange-600 text-white border-2 border-[#2c1810] shadow-[1px_1px_0_#2c1810] cursor-pointer disabled:opacity-50"
+                    title="Antrekan dan generate semua prompt sesi ini yang belum memiliki gambar secara berurutan di Google Flow"
+                  >
+                    <Sparkles className="w-3.5 h-3.5 mr-1 text-yellow-200" />
+                    <span>⚡ Gen All Flow ({prompts.filter((p) => !p.generatedImageUrl).length})</span>
+                  </Button>
+
+                  <Button
+                    type="button"
+                    size="sm"
                     variant="outline"
                     onClick={handleExportJson}
                     className="h-7.5 px-2 text-xs font-bold border-2 border-[#2c1810] bg-white hover:bg-[#fff5e6] shadow-[1px_1px_0_#2c1810] cursor-pointer"
@@ -2399,26 +2450,52 @@ export function PromptGeneratorView({ onSwitchToMetadata, onSendImageToMetadata 
                           <RefreshCw className={`w-3.5 h-3.5 ${isRegenerating ? 'animate-spin text-[#ff6b35]' : ''}`} />
                         </button>
 
-                        <Button
-                          type="button"
-                          size="sm"
-                          disabled={generatingFlowCardId === card.id}
-                          onClick={() => handleGenerateImageWithFlow(card)}
-                          className="h-7 px-2.5 bg-gradient-to-r from-amber-500 to-orange-500 hover:from-amber-600 hover:to-orange-600 text-white font-bold text-xs border border-[#2c1810] shadow-[1px_1px_0_#2c1810] cursor-pointer"
-                          title="Generate gambar langsung di Google Flow menggunakan prompt ini"
-                        >
-                          {generatingFlowCardId === card.id ? (
-                            <>
-                              <Loader2 className="w-3.5 h-3.5 animate-spin" />
-                              <span className="ml-1">Gen Flow...</span>
-                            </>
-                          ) : (
-                            <>
-                              <Sparkles className="w-3.5 h-3.5 text-yellow-200" />
-                              <span className="ml-1">Gen Img</span>
-                            </>
-                          )}
-                        </Button>
+                        {(() => {
+                          const isCurrentlyGenerating = generatingFlowCardId === card.id;
+                          const queueIdx = flowQueueCardIds.indexOf(card.id);
+                          const isQueued = queueIdx >= 0 && !isCurrentlyGenerating;
+                          const queueNumber = queueIdx + 1;
+
+                          return (
+                            <Button
+                              type="button"
+                              size="sm"
+                              disabled={isCurrentlyGenerating || isQueued}
+                              onClick={() => handleGenerateImageWithFlow(card)}
+                              className={`h-7 px-2.5 font-bold text-xs border border-[#2c1810] shadow-[1px_1px_0_#2c1810] cursor-pointer transition-all ${
+                                isCurrentlyGenerating
+                                  ? 'bg-amber-600 text-white'
+                                  : isQueued
+                                  ? 'bg-amber-100 text-amber-900 border-amber-500'
+                                  : 'bg-gradient-to-r from-amber-500 to-orange-500 hover:from-amber-600 hover:to-orange-600 text-white'
+                              }`}
+                              title={
+                                isCurrentlyGenerating
+                                  ? 'Sedang merender di Google Flow...'
+                                  : isQueued
+                                  ? `Dalam antrean Google Flow (Urutan ke-${queueNumber})`
+                                  : 'Generate gambar langsung di Google Flow menggunakan prompt ini'
+                              }
+                            >
+                              {isCurrentlyGenerating ? (
+                                <>
+                                  <Loader2 className="w-3.5 h-3.5 animate-spin" />
+                                  <span className="ml-1">Gen Flow...</span>
+                                </>
+                              ) : isQueued ? (
+                                <>
+                                  <Clock className="w-3.5 h-3.5 animate-pulse text-amber-700" />
+                                  <span className="ml-1">Antrean #{queueNumber}</span>
+                                </>
+                              ) : (
+                                <>
+                                  <Sparkles className="w-3.5 h-3.5 text-yellow-200" />
+                                  <span className="ml-1">Gen Img</span>
+                                </>
+                              )}
+                            </Button>
+                          );
+                        })()}
 
                         <Button
                           type="button"

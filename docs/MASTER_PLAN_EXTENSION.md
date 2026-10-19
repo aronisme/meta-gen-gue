@@ -75,9 +75,19 @@ Tujuan utama ekstensi ini adalah menciptakan **Zero-Friction AI Microstock Workf
 ### 🏷️ PILAR 2: Smart Card Tracking, Tagging, & Registry System
 *Fokus: Menghilangkan kebingungan "gambar ini dari prompt yang mana?" saat ratusan gambar selesai dibuat.*
 
-- **Metode Baseline Diffing (Presisi Tinggi)**:
-  - Mengambil snapshot seluruh ID media (`baselineTokens`) sesaat sebelum tombol generate ditekan.
-  - Mendeteksi selisih kemunculan media baru saat ikon *stop* (render) berganti normal.
+- **Otomasi Mode Tampilan Batch (Batch View Mode)**:
+  - Ekstensi secara otomatis mengaktifkan *Mode Tampilan: Batch* via menu setelan (`settings_2` -> `Batch`), sehingga teks prompt lengkap selalu terpampang jelas di samping setiap gambar (`.prompt-text .text-part`).
+- **Verifikasi Teks Prompt Semantik (Prompt Text Extraction)**:
+  - Membaca prompt langsung dari `.prompt-text .text-part`, `flow-expandable-prompt`, atau `.footer-title`.
+  - Melakukan pencocokan string / keyword similarity untuk menjamin 100% kepastian bahwa kartu yang lahir benar-benar milik prompt yang aktif.
+- **Penanganan Gambar Variasi Batch (Multi-Variation Tagging)**:
+  - Jika 1 prompt menghasilkan 2 atau 4 variasi gambar sekaligus:
+    - Seluruh kartu variasi diberi label pembeda yang jelas: `⚡ MetaGen #2 (A)`, `⚡ MetaGen #2 (B)`, dst.
+    - Semua token media dari variasi tersebut **langsung dikonsumsi ke dalam `baselineTokens`**, mencegah gambar variasi tertinggal dan salah diasosiasikan ke prompt berikutnya!
+- **Sistem Antrean Terpusat (FIFO Queue Execution Engine)**:
+  - Menghindari tumpang tindih prompt saat pengguna mengklik generate berurutan.
+  - Mengantrekan prompt di `extension/background.js` dan mengeksekusinya satu per satu setelah proses render sebelumnya tuntas.
+  - Dilengkapi indikator antrean live di UI (`Antrean #X`) dan tombol batch `⚡ Gen All Flow`.
 - **Visual Badge Mengambang di Galeri Flow**:
   - Menempelkan badge visual hijau elegan (`⚡ MetaGen #X`) langsung di pojok kiri atas kartu gambar di tab Google Flow.
   - **Interaktivitas Badge**:

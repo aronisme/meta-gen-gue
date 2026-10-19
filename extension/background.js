@@ -540,151 +540,230 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
     return true;
   }
 
-  // Handle Flow Generation from Meta-Gen Tab
+  // Handle Flow Generation from Meta-Gen Tab (FIFO Queue System)
   if (message.type === 'EXECUTE_FLOW_GEN') {
-    (async () => {
-      const metaGenTabId = sender.tab?.id;
-      lastMetaGenTabId = metaGenTabId || lastMetaGenTabId;
-      const payload = message.payload;
-
-      chrome.action.setBadgeText({ text: 'FLOW' });
-      chrome.action.setBadgeBackgroundColor({ color: '#f59e0b' });
-
-      try {
-        const flowUrlPatterns = [
-          '*://flow.google.com/project/*',
-          '*://flow.google.com/*',
-          '*://labs.google/fx/tools/flow*',
-          '*://labs.google/fx/*/tools/flow*',
-        ];
-
-        let tabs = await chrome.tabs.query({ url: flowUrlPatterns });
-        // Prioritize tab that currently has a project open (e.g. flow.google.com/project/...)
-        let flowTab =
-          tabs.find((t) => t.url && t.url.includes('/project/') && !t.discarded) ||
-          tabs.find((t) => !t.discarded) ||
-          tabs[0];
-
-        if (!flowTab) {
-          // Open Flow tab if not open yet
-          console.log('[Meta-Gen Extension] Opening Google Flow tab (flow.google.com)...');
-          flowTab = await chrome.tabs.create({
-            url: 'https://flow.google.com/',
-            active: true,
-          });
-
-          // Wait until page is completely loaded
-          await new Promise((resolve) => {
-            const listener = (tabId, info) => {
-              if (tabId === flowTab.id && info.status === 'complete') {
-                chrome.tabs.onUpdated.removeListener(listener);
-                resolve();
-              }
-            };
-            chrome.tabs.onUpdated.addListener(listener);
-            setTimeout(resolve, 20000); // 20s safety fallback
-          });
-
-          // Give Flow SPA 4 seconds to hydrate
-          await new Promise((r) => setTimeout(r, 4000));
-        } else {
-          // Focus existing Flow tab so user can see progress
-          await chrome.tabs.update(flowTab.id, { active: true });
-          await new Promise((r) => setTimeout(r, 800));
-        }
-
-        // Ensure flow-bridge.js is active on the target tab (handles tabs opened before extension reload)
-        let isBridgeReady = false;
-        try {
-          const ping = await chrome.tabs.sendMessage(flowTab.id, { action: 'FLOW_PING' });
-          if (ping?.active) isBridgeReady = true;
-        } catch (e) {
-          isBridgeReady = false;
-        }
-
-        if (!isBridgeReady) {
-          console.log('[Meta-Gen Extension] Injecting flow-bridge.js dynamically into Flow tab...');
-          try {
-            await chrome.scripting.executeScript({
-              target: { tabId: flowTab.id },
-              files: ['flow-bridge.js'],
-            });
-            await new Promise((r) => setTimeout(r, 400));
-          } catch (injectErr) {
-            console.warn('[Meta-Gen Extension] Script injection warning:', injectErr);
-          }
-        }
-
-        // Send task to flow-bridge.js
-        console.log('[Meta-Gen Extension] Sending generation task to Flow tab:', flowTab.id);
-        const flowResponse = await chrome.tabs.sendMessage(flowTab.id, {
-          action: 'FLOW_START_GENERATION',
-          payload: payload,
-        });
-
-        if (flowResponse && flowResponse.success) {
-          chrome.action.setBadgeText({ text: 'IMG✓' });
-          chrome.action.setBadgeBackgroundColor({ color: '#10b981' });
-          setTimeout(() => chrome.action.setBadgeText({ text: '' }), 4000);
-
-          // Return result to Meta-Gen web tab
-          if (metaGenTabId) {
-            try {
-              await chrome.scripting.executeScript({
-                target: { tabId: metaGenTabId },
-                func: (res) => {
-                  window.postMessage(
-                    {
-                      type: 'METAGEN_FLOW_GEN_RESULT',
-                      payload: res,
-                    },
-                    '*'
-                  );
-                },
-                args: [flowResponse],
-              });
-            } catch (postErr) {
-              console.warn('[Meta-Gen Extension] Could not post to Meta-Gen tab directly:', postErr);
-            }
-          }
-
-          sendResponse(flowResponse);
-        } else {
-          throw new Error(flowResponse?.error || 'Gagal generate gambar di Flow');
-        }
-      } catch (err) {
-        console.error('[Meta-Gen Extension] Flow generation error:', err);
-        chrome.action.setBadgeText({ text: 'ERR' });
-        chrome.action.setBadgeBackgroundColor({ color: '#ef4444' });
-        setTimeout(() => chrome.action.setBadgeText({ text: '' }), 3000);
-
-        const errorPayload = {
-          success: false,
-          cardId: payload?.cardId,
-          error: err.message,
-        };
-
-        if (metaGenTabId) {
-          try {
-            await chrome.scripting.executeScript({
-              target: { tabId: metaGenTabId },
-              func: (res) => {
-                window.postMessage(
-                  {
-                    type: 'METAGEN_FLOW_GEN_RESULT',
-                    payload: res,
-                  },
-                  '*'
-                );
-              },
-              args: [errorPayload],
-            });
-          } catch {}
-        }
-
-        sendResponse(errorPayload);
-      }
-    })();
-    return true;
+    const metaGenTabId = sender.tab?.id;
+    lastMetaGenTabId = metaGenTabId || lastMetaGenTabId;
+    enqueueFlowGeneration(message.payload, metaGenTabId, sendResponse);
+    return true; // asynchronous queue handling
   }
 });
+
+// FIFO Queue State & Storage
+const flowGenerationQueue = [];
+let isFlowQueueActive = false;
+
+// Enqueue Task and trigger Queue Worker
+function enqueueFlowGeneration(payload, metaGenTabId, sendResponse) {
+  const isDuplicate = flowGenerationQueue.some((item) => item.payload?.cardId === payload?.cardId);
+  if (!isDuplicate) {
+    flowGenerationQueue.push({ payload, metaGenTabId });
+  }
+
+  console.log(
+    '[Meta-Gen Flow Queue] Enqueued card:',
+    payload?.cardId,
+    'Ordinal:',
+    payload?.ordinal,
+    'Queue Length:',
+    flowGenerationQueue.length
+  );
+
+  // Send immediate ack to sender
+  sendResponse({ success: true, enqueued: true, queueLength: flowGenerationQueue.length });
+
+  // Broadcast updated queue state to Meta-Gen tab
+  notifyQueueState(metaGenTabId);
+
+  // Trigger processor
+  if (!isFlowQueueActive) {
+    processFlowQueue();
+  }
+}
+
+// Broadcast queue update to Meta-Gen Web App
+async function notifyQueueState(metaGenTabId) {
+  const targetId = metaGenTabId || lastMetaGenTabId;
+  if (!targetId) return;
+
+  const queueInfo = {
+    queueLength: flowGenerationQueue.length,
+    activeCardId: flowGenerationQueue[0]?.payload?.cardId || null,
+    queuedCardIds: flowGenerationQueue.map((item) => item.payload?.cardId).filter(Boolean),
+  };
+
+  try {
+    await chrome.scripting.executeScript({
+      target: { tabId: targetId },
+      func: (info) => {
+        window.postMessage(
+          {
+            type: 'METAGEN_FLOW_QUEUE_UPDATE',
+            payload: info,
+          },
+          '*'
+        );
+      },
+      args: [queueInfo],
+    });
+  } catch (err) {}
+}
+
+// Queue Worker Loop (Sequential FIFO)
+async function processFlowQueue() {
+  if (isFlowQueueActive || flowGenerationQueue.length === 0) return;
+  isFlowQueueActive = true;
+
+  while (flowGenerationQueue.length > 0) {
+    const currentTask = flowGenerationQueue[0];
+    const { payload, metaGenTabId } = currentTask;
+
+    console.log(
+      '[Meta-Gen Flow Queue] Processing task for card:',
+      payload?.cardId,
+      'Ordinal:',
+      payload?.ordinal,
+      'Remaining:',
+      flowGenerationQueue.length
+    );
+
+    chrome.action.setBadgeText({ text: `Q:${flowGenerationQueue.length}` });
+    chrome.action.setBadgeBackgroundColor({ color: '#f59e0b' });
+
+    // Notify tab of the currently active card
+    await notifyQueueState(metaGenTabId);
+
+    try {
+      await executeSingleFlowGeneration(payload, metaGenTabId);
+    } catch (err) {
+      console.error('[Meta-Gen Flow Queue] Task error for card:', payload?.cardId, err);
+      chrome.action.setBadgeText({ text: 'ERR' });
+      chrome.action.setBadgeBackgroundColor({ color: '#ef4444' });
+      setTimeout(() => chrome.action.setBadgeText({ text: '' }), 3000);
+
+      const errPayload = {
+        success: false,
+        cardId: payload?.cardId,
+        error: err.message,
+      };
+
+      if (metaGenTabId) {
+        try {
+          await chrome.scripting.executeScript({
+            target: { tabId: metaGenTabId },
+            func: (res) => {
+              window.postMessage({ type: 'METAGEN_FLOW_GEN_RESULT', payload: res }, '*');
+            },
+            args: [errPayload],
+          });
+        } catch (e) {}
+      }
+    } finally {
+      // Remove finished task from queue
+      flowGenerationQueue.shift();
+      await notifyQueueState(metaGenTabId);
+
+      // Safe cooling pause between prompt tasks (2.5s) to guarantee Flow editor is clean
+      if (flowGenerationQueue.length > 0) {
+        console.log('[Meta-Gen Flow Queue] Cooling 2.5s before next task in queue...');
+        await new Promise((r) => setTimeout(r, 2500));
+      }
+    }
+  }
+
+  isFlowQueueActive = false;
+  chrome.action.setBadgeText({ text: '' });
+  console.log('[Meta-Gen Flow Queue] All queue tasks have been processed.');
+}
+
+// Execute Single Generation Task on Google Flow Tab
+async function executeSingleFlowGeneration(payload, metaGenTabId) {
+  const flowUrlPatterns = [
+    '*://flow.google.com/project/*',
+    '*://flow.google.com/*',
+    '*://labs.google/fx/tools/flow*',
+    '*://labs.google/fx/*/tools/flow*',
+  ];
+
+  let tabs = await chrome.tabs.query({ url: flowUrlPatterns });
+  let flowTab =
+    tabs.find((t) => t.url && t.url.includes('/project/') && !t.discarded) ||
+    tabs.find((t) => !t.discarded) ||
+    tabs[0];
+
+  if (!flowTab) {
+    console.log('[Meta-Gen Extension] Opening Google Flow tab (flow.google.com)...');
+    flowTab = await chrome.tabs.create({
+      url: 'https://flow.google.com/',
+      active: true,
+    });
+
+    await new Promise((resolve) => {
+      const listener = (tabId, info) => {
+        if (tabId === flowTab.id && info.status === 'complete') {
+          chrome.tabs.onUpdated.removeListener(listener);
+          resolve();
+        }
+      };
+      chrome.tabs.onUpdated.addListener(listener);
+      setTimeout(resolve, 20000);
+    });
+
+    await new Promise((r) => setTimeout(r, 4000));
+  } else {
+    await chrome.tabs.update(flowTab.id, { active: true });
+    await new Promise((r) => setTimeout(r, 800));
+  }
+
+  // Ensure flow-bridge.js is active
+  let isBridgeReady = false;
+  try {
+    const ping = await chrome.tabs.sendMessage(flowTab.id, { action: 'FLOW_PING' });
+    if (ping?.active) isBridgeReady = true;
+  } catch (e) {
+    isBridgeReady = false;
+  }
+
+  if (!isBridgeReady) {
+    console.log('[Meta-Gen Extension] Injecting flow-bridge.js into Flow tab...');
+    try {
+      await chrome.scripting.executeScript({
+        target: { tabId: flowTab.id },
+        files: ['flow-bridge.js'],
+      });
+      await new Promise((r) => setTimeout(r, 400));
+    } catch (injectErr) {
+      console.warn('[Meta-Gen Extension] Script injection warning:', injectErr);
+    }
+  }
+
+  console.log('[Meta-Gen Extension] Dispatching generation to Flow tab:', flowTab.id, 'Card:', payload.cardId);
+  const flowResponse = await chrome.tabs.sendMessage(flowTab.id, {
+    action: 'FLOW_START_GENERATION',
+    payload: payload,
+  });
+
+  if (flowResponse && flowResponse.success) {
+    chrome.action.setBadgeText({ text: 'IMG✓' });
+    chrome.action.setBadgeBackgroundColor({ color: '#10b981' });
+    setTimeout(() => chrome.action.setBadgeText({ text: '' }), 4000);
+
+    if (metaGenTabId) {
+      try {
+        await chrome.scripting.executeScript({
+          target: { tabId: metaGenTabId },
+          func: (res) => {
+            window.postMessage({ type: 'METAGEN_FLOW_GEN_RESULT', payload: res }, '*');
+          },
+          args: [flowResponse],
+        });
+      } catch (postErr) {
+        console.warn('[Meta-Gen Extension] Could not post to Meta-Gen tab directly:', postErr);
+      }
+    }
+    return flowResponse;
+  } else {
+    throw new Error(flowResponse?.error || 'Gagal generate gambar di Flow');
+  }
+}
+

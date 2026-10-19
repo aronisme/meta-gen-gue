@@ -42,6 +42,13 @@ Peningkatan Local FTP Bridge & Integrasi ExifTool untuk Penyematan Metadata IPTC
 - **Penyusunan Master Plan Ekstensi ([docs/MASTER_PLAN_EXTENSION.md](file:///c:/App%20Tools/meta-gen-gue/docs/MASTER_PLAN_EXTENSION.md))**:
   - Dokumen arsitektur komprehensif 5 pilar (Bi-directional Automation, Smart Tagging, 2K/4K Downloader, Direct FTP & Metadata Pipeline, Multi-Account Shield) dan roadmap implementasi.
 
+- **Sistem Antrean (FIFO Queue) & Multi-Variation Batch Tagging ([extension/background.js](file:///c:/App%20Tools/meta-gen-gue/extension/background.js), [extension/flow-bridge.js](file:///c:/App%20Tools/meta-gen-gue/extension/flow-bridge.js), [components/PromptGeneratorView.tsx](file:///c:/App%20Tools/meta-gen-gue/components/PromptGeneratorView.tsx))**:
+  - **FIFO Queue Manager di `background.js`**: Menghilangkan tabrakan prompt saat user mengklik berurutan; task dieksekusi satu per satu secara sekuensial dengan jeda pendinginan aman (2.5s).
+  - **Indikator Status Antrean & Tombol Batch di UI**: Kartu yang mengantre menampilkan status live `⏳ Antrean #2`, `Antrean #3` dan tombol baru `⚡ Gen All Flow` untuk mengantrekan seluruh prompt sesi ini sekaligus.
+  - **Otomasi Mode Tampilan Batch di Flow**: `ensureBatchViewMode()` secara otomatis mengaktifkan mode tampilan *Batch* via tombol setelan (`settings_2` -> `Batch`).
+  - **Pencocokan Semantik Prompt**: `isTileMatchingTargetPrompt()` membaca teks prompt asli dari `.prompt-text .text-part`, `flow-expandable-prompt`, atau `.footer-title` dan memverifikasi kecocokannya dengan prompt aktif.
+  - **Multi-Variation Tagging**: Jika 1 prompt menghasilkan 2-4 variasi gambar, seluruh kartu variasi diberi badge (`⚡ MetaGen #X (A)`, `⚡ MetaGen #X (B)`), dan SELURUH tokennya langsung dikonsumsi ke `baselineTokens` sehingga tidak akan pernah salah diasosiasikan ke prompt berikutnya.
+
 ## Currently Working On
 - Melanjutkan ke roadmap berikutnya: Sinkronisasi Rasio Gambar Google Flow (1:1, 16:9, 9:16).
 
@@ -54,6 +61,7 @@ Peningkatan Local FTP Bridge & Integrasi ExifTool untuk Penyematan Metadata IPTC
 - None.
 
 ## Files Recently Changed
+- `extension/background.js`
 - `extension/flow-bridge.js`
 - `components/PromptGeneratorView.tsx`
 - `docs/MASTER_PLAN_EXTENSION.md`

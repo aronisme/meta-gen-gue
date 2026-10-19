@@ -153,17 +153,18 @@ function tagCardWithPromptData(tileContainer, data) {
   }
 
   const ordinalText = data.ordinal ? `#${data.ordinal}` : data.cardId ? `#${data.cardId.slice(0, 4)}` : '';
+  const variationText = data.variation ? ` (${data.variation})` : '';
   badge.innerHTML = `
     <span style="font-size: 13px;">⚡</span>
-    <span>MetaGen ${ordinalText}</span>
+    <span>MetaGen ${ordinalText}${variationText}</span>
   `;
-  badge.title = `Prompt MetaGen ${ordinalText}:\n"${data.prompt || ''}"\n(Klik untuk salin prompt)`;
+  badge.title = `Prompt MetaGen ${ordinalText}${variationText}:\n"${data.prompt || ''}"\n(Klik untuk salin prompt)`;
   badge.onclick = (e) => {
     e.stopPropagation();
     e.preventDefault();
     if (data.prompt) {
       navigator.clipboard.writeText(data.prompt);
-      showFlowToast(`Prompt ${ordinalText} Disalin!`, data.prompt.slice(0, 70) + '...', true);
+      showFlowToast(`Prompt ${ordinalText}${variationText} Disalin!`, data.prompt.slice(0, 70) + '...', true);
     }
   };
 }
@@ -217,6 +218,123 @@ function hydrateFlowBadges() {
       });
     });
   } catch (e) {}
+}
+
+// Helper: Ensure Google Flow is in "Batch" view mode for clear per-image prompt visibility
+async function ensureBatchViewMode() {
+  try {
+    // 1. Cek apakah sudah dalam mode Batch
+    const checkedToggle = document.querySelector(
+      '.mat-button-toggle-checked .toggle-text, [aria-checked="true"] .toggle-text, button[role="radio"][aria-checked="true"]'
+    );
+    if (checkedToggle && (checkedToggle.textContent || '').trim().toLowerCase().includes('batch')) {
+      console.log('[Meta-Gen Flow Bridge] Mode tampilan Batch sudah aktif.');
+      return;
+    }
+
+    console.log('[Meta-Gen Flow Bridge] Memastikan Mode Tampilan Batch aktif...');
+
+    // 2. Cari tombol Setelan (icon settings_2 atau aria-label Setelan)
+    let settingsBtn = document.querySelector(
+      'button[aria-label="Setelan" i], button[mattooltip="Lihat setelan" i], button[aria-label*="setelan" i]'
+    );
+    if (!settingsBtn) {
+      const allButtons = Array.from(document.querySelectorAll('button'));
+      settingsBtn = allButtons.find((b) => {
+        const ic = b.querySelector('mat-icon');
+        return ic && (ic.textContent || '').trim() === 'settings_2';
+      });
+    }
+
+    if (settingsBtn) {
+      settingsBtn.click();
+      await new Promise((r) => setTimeout(r, 450));
+
+      // 3. Cari tombol Batch dalam menu/popover yang muncul
+      const allToggleButtons = Array.from(
+        document.querySelectorAll('.mat-button-toggle-button, [role="radio"], button')
+      );
+      const batchBtn = allToggleButtons.find((b) => {
+        const txt = (b.textContent || '').trim().toLowerCase();
+        return txt === 'batch' || txt.includes('batch');
+      });
+
+      if (batchBtn) {
+        batchBtn.click();
+        console.log('[Meta-Gen Flow Bridge] Pilihan Batch berhasil diaktifkan!');
+        await new Promise((r) => setTimeout(r, 400));
+      }
+
+      // 4. Tutup popover setelan dengan tombol Escape
+      document.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', code: 'Escape', keyCode: 27, bubbles: true }));
+      document.dispatchEvent(new PointerEvent('pointerdown', { bubbles: true, clientX: 0, clientY: 0 }));
+      await new Promise((r) => setTimeout(r, 250));
+    }
+  } catch (err) {
+    console.warn('[Meta-Gen Flow Bridge] ensureBatchViewMode warning:', err);
+  }
+}
+
+// Helper: Extract prompt text from a tile or row in Google Flow
+function extractTilePromptText(tileElement) {
+  if (!tileElement) return '';
+
+  // 1. Check Batch Mode full prompt container in the same row
+  const row = tileElement.closest('.tile-row') || tileElement.parentElement;
+  if (row) {
+    const batchPromptEl = row.querySelector(
+      '.prompt-text .text-part, flow-expandable-prompt .text-part, .prompt-text, flow-expandable-prompt'
+    );
+    if (batchPromptEl && batchPromptEl.textContent.trim().length > 10) {
+      return batchPromptEl.textContent.trim();
+    }
+  }
+
+  // 2. Direct inside tileElement
+  const directPrompt = tileElement.querySelector(
+    '.prompt-text .text-part, flow-expandable-prompt .text-part, .prompt-text'
+  );
+  if (directPrompt && directPrompt.textContent.trim().length > 10) {
+    return directPrompt.textContent.trim();
+  }
+
+  // 3. Grid Mode footer title
+  const footerTitle = tileElement.querySelector('.footer-title');
+  if (footerTitle && footerTitle.textContent.trim().length > 5) {
+    return footerTitle.textContent.trim();
+  }
+
+  // 4. Grid Mode container aria-label
+  const ariaLabel = tileElement.getAttribute('aria-label');
+  if (ariaLabel && ariaLabel.trim().length > 5 && !ariaLabel.includes('Kartu yang menampilkan')) {
+    return ariaLabel.trim();
+  }
+
+  return '';
+}
+
+// Helper: Check if a tile matches the target prompt using semantic keywords & substring
+function isTileMatchingTargetPrompt(tileElement, targetPrompt) {
+  if (!targetPrompt) return true;
+  const tileText = extractTilePromptText(tileElement).toLowerCase();
+  if (!tileText) return true; // fallback if prompt text element is not yet populated
+
+  const cleanTarget = targetPrompt.toLowerCase();
+
+  // Substring match
+  if (cleanTarget.includes(tileText) || tileText.includes(cleanTarget.slice(0, 35))) {
+    return true;
+  }
+
+  // Compare keyword overlap
+  const targetWords = cleanTarget
+    .replace(/[^a-z0-9\s]/g, '')
+    .split(/\s+/)
+    .filter((w) => w.length > 3);
+  if (targetWords.length === 0) return true;
+
+  const matchedWords = targetWords.filter((w) => tileText.includes(w));
+  return matchedWords.length / targetWords.length >= 0.28;
 }
 
 // Helper: Convert image to Data URL safely
@@ -378,8 +496,9 @@ async function handleFlowGeneration(payload) {
   console.log('[Meta-Gen Flow Bridge] Starting generation task for card:', cardId, 'Ordinal:', ordinal, 'prompt length:', prompt?.length);
   showFlowToast('Meta-Gen: Menerima Prompt...', 'Sedang mempersiapkan input di Google Flow...', false);
 
-  // 0. Dismiss any blocking cookie banner
+  // 0. Dismiss any blocking cookie banner & Ensure Batch View Mode
   dismissGoogleCookieBar();
+  await ensureBatchViewMode();
 
   // 1. Snapshot all existing media items (Baseline) before submitting
   const baselineTokens = new Set();
@@ -596,9 +715,8 @@ async function handleFlowGeneration(payload) {
     await new Promise((r) => setTimeout(r, 400));
   }
 
-  // 9. Monitor Generation State & Poll DOM for newly rendered media item (Timeout 180s)
-  let newImgElement = null;
-  let detectedToken = null;
+  // 9. Monitor Generation State & Poll DOM for newly rendered media items (Timeout 180s)
+  let detectedBatchItems = [];
   const pollStart = Date.now();
   const timeoutMs = 180000;
   let pollIteration = 0;
@@ -622,97 +740,119 @@ async function handleFlowGeneration(payload) {
       }
     } else if (hasObservedStopIcon) {
       console.log('[Meta-Gen Flow Bridge] Stop icon cleared! Generation has completed in Flow.');
-      showFlowToast('⚡ Render Selesai!', 'Mendeteksi hasil gambar terbaru di canvas...', true);
+      showFlowToast('⚡ Render Selesai!', 'Mendeteksi seluruh variasi gambar di canvas...', true);
     }
 
-    const candidateImgs = Array.from(
-      document.querySelectorAll(
-        'flow-image-tile img, flow-video-tile img, flow-asset-tile img, [class*="tile"] img, [class*="asset"] img, img'
-      )
-    ).filter((img) => {
-      if (img.offsetParent === null) return false;
-      const w = img.naturalWidth || img.width || 0;
-      const h = img.naturalHeight || img.height || 0;
-      if (w > 0 && w < 80 && h > 0 && h < 80) return false;
-      const src = img.src || '';
-      if (src.includes('profile') || src.includes('avatar') || src.includes('icon') || src.includes('logo')) return false;
-      return true;
-    });
+    // When rendering stops (or after generous time), scan for newly rendered matching images
+    if (!currentlyGenerating && hasObservedStopIcon) {
+      // Give DOM 1.5s to fully render all variation cards in the batch row
+      await new Promise((r) => setTimeout(r, 1500));
 
-    for (const img of candidateImgs) {
-      const token = getMediaToken(img);
-      if (token && !baselineTokens.has(token)) {
+      const candidateImgs = Array.from(
+        document.querySelectorAll(
+          'flow-image-tile img, flow-video-tile img, flow-asset-tile img, [class*="tile"] img, [class*="asset"] img, img'
+        )
+      ).filter((img) => {
+        if (img.offsetParent === null) return false;
         const w = img.naturalWidth || img.width || 0;
         const h = img.naturalHeight || img.height || 0;
-        // Accept image if Flow finished generating OR image is fully loaded with substantial size
-        if ((!currentlyGenerating && (w > 100 || h > 100 || img.complete)) || (w > 256 && h > 256 && img.complete)) {
-          newImgElement = img;
-          detectedToken = token;
-          console.log('[Meta-Gen Flow Bridge] New media element discovered!', token, w, h);
-          break;
+        if (w > 0 && w < 80 && h > 0 && h < 80) return false;
+        const src = img.src || '';
+        if (src.includes('profile') || src.includes('avatar') || src.includes('icon') || src.includes('logo')) return false;
+        return true;
+      });
+
+      for (const img of candidateImgs) {
+        const token = getMediaToken(img);
+        if (token && !baselineTokens.has(token)) {
+          const tileContainer =
+            img.closest('flow-grid-tile-container') ||
+            img.closest('flow-tile-container') ||
+            img.closest('flow-image-tile') ||
+            img.closest('.tile-row') ||
+            img.closest('[data-tile-id]') ||
+            img.parentElement;
+
+          // Verify prompt matches our target prompt
+          if (isTileMatchingTargetPrompt(tileContainer, targetPrompt)) {
+            // Avoid duplicate entries if img query returned same token
+            if (!detectedBatchItems.some((item) => item.token === token)) {
+              detectedBatchItems.push({
+                img: img,
+                token: token,
+                tileContainer: tileContainer,
+                mediaId: img.getAttribute('data-media-id') || '',
+              });
+            }
+          }
         }
       }
-    }
 
-    if (newImgElement) break;
+      if (detectedBatchItems.length > 0) {
+        console.log(`[Meta-Gen Flow Bridge] Discovered ${detectedBatchItems.length} matching variation card(s) for prompt!`);
+        break;
+      }
+    }
   }
 
-  if (!newImgElement) {
+  if (detectedBatchItems.length === 0) {
     throw new Error('Waktu habis (Timeout): Gambar tidak muncul di canvas Flow setelah 180 detik.');
   }
 
-  // 10. Extract Image Data and Stream Back
-  showFlowToast('Meta-Gen: Gambar Selesai!', 'Mengambil binary gambar...', true);
+  // 10. Tag ALL Discovered Variations in Google Flow DOM & Add ALL to Baseline
+  const isMultiple = detectedBatchItems.length > 1;
+  const variationLetters = ['A', 'B', 'C', 'D', 'E', 'F'];
 
-  const mediaId = newImgElement.getAttribute('data-media-id');
-  const matchRedirect = (newImgElement.src || '').match(/media\.getMediaUrlRedirect\?name=([a-f0-9-]+)/);
-  const preferredUrl = mediaId
-    ? `https://labs.google/fx/api/trpc/media.getMediaUrlRedirect?name=${mediaId}`
-    : matchRedirect
-    ? `https://labs.google/fx/api/trpc/media.getMediaUrlRedirect?name=${matchRedirect[1]}`
-    : newImgElement.src;
-
-  const base64Data = await imageToDataUrl(newImgElement, preferredUrl);
-
-  // 11. Tag Card in Google Flow DOM & Inject Floating Visual Badge
-  try {
-    const tileContainer =
-      newImgElement.closest('flow-grid-tile-container') ||
-      newImgElement.closest('flow-tile-container') ||
-      newImgElement.closest('flow-image-tile') ||
-      newImgElement.closest('.tile-row') ||
-      newImgElement.closest('[data-tile-id]') ||
-      newImgElement.parentElement;
+  for (let idx = 0; idx < detectedBatchItems.length; idx++) {
+    const item = detectedBatchItems[idx];
+    const varLetter = isMultiple ? (variationLetters[idx] || String(idx + 1)) : '';
 
     const cardData = {
       cardId: cardId,
       ordinal: ordinal || 1,
+      variation: varLetter,
       title: title || '',
       prompt: prompt,
       ratio: ratio || '16:9',
-      token: detectedToken,
-      mediaId: mediaId || '',
-      preferredUrl: preferredUrl || '',
+      token: item.token,
+      mediaId: item.mediaId,
     };
 
-    if (tileContainer) {
-      tagCardWithPromptData(tileContainer, cardData);
-      console.log('[Meta-Gen Flow Bridge] Successfully tagged tile container with MetaGen badge:', cardData.ordinal);
+    if (item.tileContainer) {
+      tagCardWithPromptData(item.tileContainer, cardData);
+      console.log(`[Meta-Gen Flow Bridge] Tagged tile #${cardData.ordinal} (${varLetter || 'Single'}) with token: ${item.token}`);
     }
 
-    savePromptToRegistry(detectedToken, cardData);
-  } catch (tagErr) {
-    console.warn('[Meta-Gen Flow Bridge] Card visual tagging warning:', tagErr);
+    savePromptToRegistry(item.token, cardData);
+
+    // CRITICAL: Consume token into baselineTokens so next prompts will NEVER touch it!
+    baselineTokens.add(item.token);
   }
 
-  showFlowToast('✓ Meta-Gen: Selesai!', `Gambar #${ordinal || 1} berhasil dikirim ke Meta-Gen Studio.`, true);
+  // 11. Extract Primary Image Data to Return to Meta-Gen Studio
+  showFlowToast('Meta-Gen: Gambar Selesai!', `Menyimpan gambar #${ordinal || 1} (${detectedBatchItems.length} variasi)...`, true);
+
+  const primaryItem = detectedBatchItems[0];
+  const primaryImg = primaryItem.img;
+  const primaryMediaId = primaryItem.mediaId;
+  const matchRedirect = (primaryImg.src || '').match(/media\.getMediaUrlRedirect\?name=([a-f0-9-]+)/);
+  const preferredUrl = primaryMediaId
+    ? `https://labs.google/fx/api/trpc/media.getMediaUrlRedirect?name=${primaryMediaId}`
+    : matchRedirect
+    ? `https://labs.google/fx/api/trpc/media.getMediaUrlRedirect?name=${matchRedirect[1]}`
+    : primaryImg.src;
+
+  const base64Data = await imageToDataUrl(primaryImg, preferredUrl);
+
+  showFlowToast('✓ Meta-Gen: Selesai!', `Prompt #${ordinal || 1} (${detectedBatchItems.length} variasi terverifikasi) siap di Studio.`, true);
 
   return {
     success: true,
     cardId: cardId,
     ordinal: ordinal,
     title: title,
-    token: detectedToken,
+    token: primaryItem.token,
+    variationsCount: detectedBatchItems.length,
     imageDataUrl: base64Data,
     filename: `Flow_Prompt_${ordinal || '1'}_${Date.now().toString().slice(-4)}.jpg`,
   };
