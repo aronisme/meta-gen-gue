@@ -973,6 +973,8 @@ export function PromptGeneratorView({ onSwitchToMetadata, onSendImageToMetadata 
         type: 'METAGEN_TRIGGER_FLOW_GEN',
         payload: {
           cardId: card.id,
+          ordinal: card.ordinal,
+          title: card.title,
           prompt: card.prompt,
           ratio: settings.aspectRatio || '16:9',
           model: settings.engine === 'nanobanana' ? 'Nano Banana 2' : 'Imagen 3',

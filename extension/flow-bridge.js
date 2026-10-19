@@ -100,6 +100,125 @@ function getMediaToken(el) {
   return src.split('?')[0];
 }
 
+// Helper: Attach visual badge and DOM attributes to a tile element
+function tagCardWithPromptData(tileContainer, data) {
+  if (!tileContainer || !data) return;
+
+  tileContainer.setAttribute('data-metagen-card-id', data.cardId || '');
+  if (data.ordinal) tileContainer.setAttribute('data-metagen-ordinal', String(data.ordinal));
+  if (data.prompt) tileContainer.setAttribute('data-metagen-prompt', data.prompt);
+  if (data.token) tileContainer.setAttribute('data-metagen-token', data.token);
+
+  const computedPos = window.getComputedStyle(tileContainer).position;
+  if (computedPos === 'static') {
+    tileContainer.style.position = 'relative';
+  }
+
+  // Check if badge already exists
+  let badge = tileContainer.querySelector('.metagen-flow-badge');
+  if (!badge) {
+    badge = document.createElement('div');
+    badge.className = 'metagen-flow-badge';
+    badge.style.cssText = `
+      position: absolute;
+      top: 8px;
+      left: 8px;
+      z-index: 9999;
+      background: linear-gradient(135deg, #059669 0%, #10b981 100%);
+      color: #ffffff;
+      padding: 4px 10px;
+      border-radius: 8px;
+      font-family: ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+      font-size: 11px;
+      font-weight: 700;
+      letter-spacing: 0.3px;
+      box-shadow: 0 4px 14px rgba(0, 0, 0, 0.45), 0 0 0 1px rgba(255, 255, 255, 0.3);
+      display: inline-flex;
+      align-items: center;
+      gap: 5px;
+      cursor: pointer;
+      pointer-events: auto;
+      transition: transform 0.15s ease, box-shadow 0.15s ease;
+      user-select: none;
+    `;
+    badge.onmouseenter = () => {
+      badge.style.transform = 'scale(1.06)';
+      badge.style.boxShadow = '0 6px 20px rgba(16, 185, 129, 0.5), 0 0 0 1px #34d399';
+    };
+    badge.onmouseleave = () => {
+      badge.style.transform = 'scale(1)';
+      badge.style.boxShadow = '0 4px 14px rgba(0, 0, 0, 0.45), 0 0 0 1px rgba(255, 255, 255, 0.3)';
+    };
+    tileContainer.appendChild(badge);
+  }
+
+  const ordinalText = data.ordinal ? `#${data.ordinal}` : data.cardId ? `#${data.cardId.slice(0, 4)}` : '';
+  badge.innerHTML = `
+    <span style="font-size: 13px;">⚡</span>
+    <span>MetaGen ${ordinalText}</span>
+  `;
+  badge.title = `Prompt MetaGen ${ordinalText}:\n"${data.prompt || ''}"\n(Klik untuk salin prompt)`;
+  badge.onclick = (e) => {
+    e.stopPropagation();
+    e.preventDefault();
+    if (data.prompt) {
+      navigator.clipboard.writeText(data.prompt);
+      showFlowToast(`Prompt ${ordinalText} Disalin!`, data.prompt.slice(0, 70) + '...', true);
+    }
+  };
+}
+
+// Helper: Save prompt mapping to chrome.storage.local
+function savePromptToRegistry(token, data) {
+  if (!token || !chrome?.storage?.local) return;
+  try {
+    chrome.storage.local.get(['metagen_flow_registry'], (res) => {
+      const reg = res.metagen_flow_registry || {};
+      reg[token] = {
+        cardId: data.cardId,
+        ordinal: data.ordinal,
+        title: data.title,
+        prompt: data.prompt,
+        ratio: data.ratio,
+        mediaId: data.mediaId,
+        token: token,
+        timestamp: Date.now(),
+      };
+      chrome.storage.local.set({ metagen_flow_registry: reg });
+      console.log('[Meta-Gen Flow Bridge] Saved card to registry:', token, 'Ordinal:', data.ordinal);
+    });
+  } catch (err) {
+    console.warn('[Meta-Gen Flow Bridge] Registry save error:', err);
+  }
+}
+
+// Helper: Hydrate existing badges from registry for recycled virtual scroll tiles
+function hydrateFlowBadges() {
+  if (!chrome?.storage?.local) return;
+  try {
+    chrome.storage.local.get(['metagen_flow_registry'], (res) => {
+      const reg = res.metagen_flow_registry;
+      if (!reg || Object.keys(reg).length === 0) return;
+
+      document.querySelectorAll('img, video, flow-image-tile img').forEach((el) => {
+        const token = getMediaToken(el);
+        if (token && reg[token]) {
+          const tileContainer =
+            el.closest('flow-grid-tile-container') ||
+            el.closest('flow-tile-container') ||
+            el.closest('flow-image-tile') ||
+            el.closest('.tile-row') ||
+            el.closest('[data-tile-id]') ||
+            el.parentElement;
+          if (tileContainer && !tileContainer.querySelector('.metagen-flow-badge')) {
+            tagCardWithPromptData(tileContainer, reg[token]);
+          }
+        }
+      });
+    });
+  } catch (e) {}
+}
+
 // Helper: Convert image to Data URL safely
 async function imageToDataUrl(imgEl, preferredDownloadUrl) {
   // Strategy 1: in-page fetch with session cookies
@@ -255,8 +374,8 @@ function clickSubmitButton(btn) {
 
 // Main Flow Generation Handler
 async function handleFlowGeneration(payload) {
-  const { cardId, prompt, ratio } = payload;
-  console.log('[Meta-Gen Flow Bridge] Starting generation task for card:', cardId, 'prompt length:', prompt?.length);
+  const { cardId, prompt, ratio, ordinal, title } = payload;
+  console.log('[Meta-Gen Flow Bridge] Starting generation task for card:', cardId, 'Ordinal:', ordinal, 'prompt length:', prompt?.length);
   showFlowToast('Meta-Gen: Menerima Prompt...', 'Sedang mempersiapkan input di Google Flow...', false);
 
   // 0. Dismiss any blocking cookie banner
@@ -555,14 +674,47 @@ async function handleFlowGeneration(payload) {
 
   const base64Data = await imageToDataUrl(newImgElement, preferredUrl);
 
-  showFlowToast('✓ Meta-Gen: Selesai!', 'Gambar berhasil dikirim ke Meta-Gen Studio.', true);
+  // 11. Tag Card in Google Flow DOM & Inject Floating Visual Badge
+  try {
+    const tileContainer =
+      newImgElement.closest('flow-grid-tile-container') ||
+      newImgElement.closest('flow-tile-container') ||
+      newImgElement.closest('flow-image-tile') ||
+      newImgElement.closest('.tile-row') ||
+      newImgElement.closest('[data-tile-id]') ||
+      newImgElement.parentElement;
+
+    const cardData = {
+      cardId: cardId,
+      ordinal: ordinal || 1,
+      title: title || '',
+      prompt: prompt,
+      ratio: ratio || '16:9',
+      token: detectedToken,
+      mediaId: mediaId || '',
+      preferredUrl: preferredUrl || '',
+    };
+
+    if (tileContainer) {
+      tagCardWithPromptData(tileContainer, cardData);
+      console.log('[Meta-Gen Flow Bridge] Successfully tagged tile container with MetaGen badge:', cardData.ordinal);
+    }
+
+    savePromptToRegistry(detectedToken, cardData);
+  } catch (tagErr) {
+    console.warn('[Meta-Gen Flow Bridge] Card visual tagging warning:', tagErr);
+  }
+
+  showFlowToast('✓ Meta-Gen: Selesai!', `Gambar #${ordinal || 1} berhasil dikirim ke Meta-Gen Studio.`, true);
 
   return {
     success: true,
     cardId: cardId,
+    ordinal: ordinal,
+    title: title,
     token: detectedToken,
     imageDataUrl: base64Data,
-    filename: `Flow_${cardId ? cardId.slice(0, 8) : 'img'}_${Date.now().toString().slice(-4)}.jpg`,
+    filename: `Flow_Prompt_${ordinal || '1'}_${Date.now().toString().slice(-4)}.jpg`,
   };
 }
 
@@ -593,4 +745,9 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
     return true; // asynchronous response
   }
 });
+
+// Auto-hydrate badges on load & periodically for virtual scrolling
+hydrateFlowBadges();
+setInterval(hydrateFlowBadges, 3500);
+
 

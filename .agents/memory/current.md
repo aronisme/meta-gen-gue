@@ -34,25 +34,29 @@ Peningkatan Local FTP Bridge & Integrasi ExifTool untuk Penyematan Metadata IPTC
   - Berhasil men-deploy bundle static dan Cloudflare Functions API menggunakan `npx wrangler pages deploy out --project-name=meta-gen-gue`.
   - Deployment live dan aktif pada URL produksi: [https://meta-gen-gue.pages.dev](https://meta-gen-gue.pages.dev) (Deployment hash preview: [https://b059422d.meta-gen-gue.pages.dev](https://b059422d.meta-gen-gue.pages.dev)).
   - Semua perubahan telah di-commit dan di-push ke remote repository `origin/main` di GitHub.
+- **Smart Card Tracking, Tagging, & Visual Badge di Google Flow ([extension/flow-bridge.js](file:///c:/App%20Tools/meta-gen-gue/extension/flow-bridge.js), [components/PromptGeneratorView.tsx](file:///c:/App%20Tools/meta-gen-gue/components/PromptGeneratorView.tsx))**:
+  - Menyematkan atribut DOM semantik `data-metagen-card-id`, `data-metagen-ordinal`, `data-metagen-prompt`, dan `data-metagen-token` ke container kartu (`flow-grid-tile-container`).
+  - Menambahkan **Badge Visual Mengambang** (`⚡ MetaGen #X`) langsung di pojok kiri atas kartu di galeri Google Flow dengan hover tooltip dan event click-to-copy prompt ke clipboard.
+  - Menyimpan registri pemetaan permanen ke `chrome.storage.local` (`metagen_flow_registry`).
+  - Fitur `hydrateFlowBadges()` otomatis memulihkan dan menempelkan badge pada kartu galeri saat virtual scroll bergulir atau halaman dimuat ulang.
+- **Penyusunan Master Plan Ekstensi ([docs/MASTER_PLAN_EXTENSION.md](file:///c:/App%20Tools/meta-gen-gue/docs/MASTER_PLAN_EXTENSION.md))**:
+  - Dokumen arsitektur komprehensif 5 pilar (Bi-directional Automation, Smart Tagging, 2K/4K Downloader, Direct FTP & Metadata Pipeline, Multi-Account Shield) dan roadmap implementasi.
 
 ## Currently Working On
-- Menunggu instruksi berikutnya dari pengguna atau melanjutkan roadmap fitur berikutnya.
+- Melanjutkan ke roadmap berikutnya: Sinkronisasi Rasio Gambar Google Flow (1:1, 16:9, 9:16).
 
 ## Remaining Tasks (Roadmap)
 - [ ] **Sinkronisasi Rasio Gambar Google Flow**: Penyesuaian aspek rasio (1:1, 16:9, 9:16) ke setting Flow saat generate dipicu.
+- [ ] **Modul 2K/4K Mass Downloader**: Integrasi auto-click menu resolusi dan pre-scan zoom 50% ke extension.
 - [ ] **Modul Keyword Research**: Eksplorasi tren microstock, tag cloud interaktif, dan filter kata kunci terlarang di `components/KeywordResearchView.tsx`.
 
 ## Blockers / Errors
 - None.
 
 ## Files Recently Changed
-- `scripts/build-pages.mjs`
-- `components/FtpQueueView.tsx`
-- `gas/Code.gs`
-- `gas/Index.html`
-- `gas/README.md`
-- `app/page.tsx`
-- `components/ProviderCard.tsx`
-- `components/StudioPanel.tsx`
+- `extension/flow-bridge.js`
+- `components/PromptGeneratorView.tsx`
+- `docs/MASTER_PLAN_EXTENSION.md`
 - `.agents/memory/current.md`
+
 
