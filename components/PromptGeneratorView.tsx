@@ -204,6 +204,12 @@ export function PromptGeneratorView({ onSwitchToMetadata, onSendImageToMetadata 
   const [flowBatchLimit, setFlowBatchLimit] = useState<number>(5);
   const [flowOutputCount, setFlowOutputCount] = useState<'x1' | 'x2' | 'x3' | 'x4'>('x1');
   const [copiedAgentBatch, setCopiedAgentBatch] = useState<boolean>(false);
+  const [isFlowMassDownloading, setIsFlowMassDownloading] = useState<boolean>(false);
+  const [flowMassDownloadProgress, setFlowMassDownloadProgress] = useState<{
+    current: number;
+    total: number;
+    saved: number;
+  }>({ current: 0, total: 0, saved: 0 });
 
   // 7. Inspirations & Brainstorm
   const [inspirations, setInspirations] = useState<InspirationIdea[]>(() => getRandomCuratedIdeas(10));
@@ -640,6 +646,29 @@ export function PromptGeneratorView({ onSwitchToMetadata, onSendImageToMetadata 
           });
         } else if (payload?.error) {
           toast.error(`Google Flow: ${payload.error}`);
+        }
+      }
+
+      if (event.data?.type === 'METAGEN_FLOW_MASS_DOWNLOAD_PROGRESS') {
+        const p = event.data.payload;
+        if (p) {
+          setFlowMassDownloadProgress({
+            current: p.current || 0,
+            total: p.total || 0,
+            saved: p.saved || 0,
+          });
+        }
+      }
+
+      if (event.data?.type === 'METAGEN_FLOW_MASS_DOWNLOAD_RESPONSE') {
+        const res = event.data.payload;
+        setIsFlowMassDownloading(false);
+        if (res?.success) {
+          toast.success(
+            `✓ Unduh Massal Selesai! Berhasil menyimpan ${res.saved} aset 2K ke Downloads/MetaGen_Flow.`
+          );
+        } else if (res?.error) {
+          toast.error(`Gagal unduh massal: ${res.error}`);
         }
       }
     };
@@ -1212,6 +1241,37 @@ export function PromptGeneratorView({ onSwitchToMetadata, onSendImageToMetadata 
       description: 'Master prompt tersalin ke clipboard dan proses pembuatan otomatis dimulai di Google Flow.',
       duration: 5000,
     });
+  };
+
+  // Trigger 2K/4K Mass Downloader on Google Flow
+  const handleTriggerFlowMassDownload = () => {
+    setIsFlowMassDownloading(true);
+    setFlowMassDownloadProgress({ current: 0, total: 0, saved: 0 });
+
+    const cleanFolder = session.title?.replace(/[^a-zA-Z0-9_\-]/g, '_') || 'Session';
+    window.postMessage(
+      {
+        type: 'METAGEN_TRIGGER_FLOW_MASS_DOWNLOAD',
+        payload: {
+          resolution: '2K, 4K, 1K, Original',
+          batchDelaySeconds: 2,
+          skipDownloaded: true,
+        },
+        folder: `MetaGen_Flow/${cleanFolder}`,
+      },
+      '*'
+    );
+
+    toast.info('⚡ Memulai Mass Downloader 2K di Google Flow...', {
+      description: 'Ekstensi sedang beralih ke mode Petak dan memindai resolusi 2K/Original di galeri Flow.',
+      duration: 6000,
+    });
+  };
+
+  const handleStopFlowMassDownload = () => {
+    window.postMessage({ type: 'METAGEN_STOP_FLOW_MASS_DOWNLOAD' }, '*');
+    setIsFlowMassDownloading(false);
+    toast.info('Pengunduhan massal Google Flow dihentikan.');
   };
 
   // Push generated image into Metadata Studio queue
@@ -2662,6 +2722,40 @@ export function PromptGeneratorView({ onSwitchToMetadata, onSendImageToMetadata 
                       </Button>
                     );
                   })()}
+
+                  {/* Flow 2K/4K Mass Downloader */}
+                  <Button
+                    type="button"
+                    size="sm"
+                    variant="outline"
+                    onClick={isFlowMassDownloading ? handleStopFlowMassDownload : handleTriggerFlowMassDownload}
+                    className={`h-7.5 px-2 text-xs font-bold border-2 border-emerald-800 shadow-[1px_1px_0_#2c1810] cursor-pointer transition-all ${
+                      isFlowMassDownloading
+                        ? 'bg-emerald-100 text-emerald-950 hover:bg-red-50 hover:text-red-700 hover:border-red-600'
+                        : 'bg-emerald-50 hover:bg-emerald-100 text-emerald-900'
+                    }`}
+                    title={
+                      isFlowMassDownloading
+                        ? 'Klik untuk menghentikan unduh massal'
+                        : 'Beralih ke mode Petak dan unduh seluruh aset visual galeri Google Flow dalam resolusi tertinggi (2K/4K)'
+                    }
+                  >
+                    {isFlowMassDownloading ? (
+                      <>
+                        <Loader2 className="w-3.5 h-3.5 mr-1 animate-spin text-emerald-700" />
+                        <span>
+                          {flowMassDownloadProgress.total > 0
+                            ? `Unduh (${flowMassDownloadProgress.current}/${flowMassDownloadProgress.total})`
+                            : 'Memindai...'}
+                        </span>
+                      </>
+                    ) : (
+                      <>
+                        <Download className="w-3.5 h-3.5 mr-1 text-emerald-700" />
+                        <span>Unduh 2K</span>
+                      </>
+                    )}
+                  </Button>
 
                   <Button
                     type="button"

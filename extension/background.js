@@ -661,6 +661,74 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
     enqueueFlowGeneration(message.payload, metaGenTabId, sendResponse);
     return true; // asynchronous queue handling
   }
+
+  // Handle Mass Downloader 2K/4K Messages
+  if (message.type === 'SET_FLOW_DOWNLOAD_FOLDER') {
+    currentFlowDownloadFolder = message.folder || 'MetaGen_Flow';
+    sendResponse({ success: true, folder: currentFlowDownloadFolder });
+    return true;
+  }
+
+  if (message.type === 'TRIGGER_FLOW_MASS_DOWNLOAD') {
+    (async () => {
+      try {
+        const flowUrlPatterns = [
+          '*://flow.google.com/project/*',
+          '*://flow.google.com/*',
+          '*://labs.google/fx/tools/flow*',
+        ];
+        const tabs = await chrome.tabs.query({ url: flowUrlPatterns });
+        const flowTab = tabs.find((t) => t.url && t.url.includes('/project/') && !t.discarded) || tabs[0];
+        if (!flowTab) {
+          sendResponse({ success: false, error: 'Tab Google Flow tidak ditemukan. Pastikan halaman project terbuka.' });
+          return;
+        }
+
+        if (message.folder) {
+          currentFlowDownloadFolder = message.folder;
+        }
+
+        const res = await chrome.tabs.sendMessage(flowTab.id, {
+          action: 'FLOW_EXECUTE_MASS_DOWNLOAD',
+          payload: message.payload || {},
+        });
+        sendResponse(res);
+      } catch (err) {
+        sendResponse({ success: false, error: err.message });
+      }
+    })();
+    return true;
+  }
+
+  if (message.type === 'STOP_FLOW_MASS_DOWNLOAD') {
+    (async () => {
+      try {
+        const tabs = await chrome.tabs.query({ url: ['*://flow.google.com/*', '*://labs.google/fx/*'] });
+        for (const tab of tabs) {
+          chrome.tabs.sendMessage(tab.id, { action: 'FLOW_STOP_MASS_DOWNLOAD' }).catch(() => {});
+        }
+        sendResponse({ success: true });
+      } catch (e) {
+        sendResponse({ success: false, error: e.message });
+      }
+    })();
+    return true;
+  }
+
+  if (message.type === 'FLOW_MASS_DOWNLOAD_PROGRESS') {
+    if (lastMetaGenTabId) {
+      chrome.scripting
+        .executeScript({
+          target: { tabId: lastMetaGenTabId },
+          func: (data) => {
+            window.postMessage({ type: 'METAGEN_FLOW_MASS_DOWNLOAD_PROGRESS', payload: data }, '*');
+          },
+          args: [message.payload],
+        })
+        .catch(() => {});
+    }
+    return true;
+  }
 });
 
 // FIFO Queue State & Storage
@@ -880,4 +948,36 @@ async function executeSingleFlowGeneration(payload, metaGenTabId) {
     throw new Error(flowResponse?.error || 'Gagal generate gambar di Flow');
   }
 }
+
+// ==========================================
+// 2K/4K Mass Downloader Routing & Handshake
+// ==========================================
+let currentFlowDownloadFolder = 'MetaGen_Flow';
+
+chrome.downloads.onCreated.addListener((downloadItem) => {
+  // Broadcast download_started event to all active Flow tabs
+  chrome.tabs.query({}, (tabs) => {
+    for (const tab of tabs) {
+      chrome.tabs.sendMessage(tab.id, { action: 'FLOW_DOWNLOAD_STARTED', item: downloadItem }).catch(() => {});
+    }
+  });
+});
+
+chrome.downloads.onDeterminingFilename.addListener((item, suggest) => {
+  // Only route downloads initiated from Google Flow / Labs
+  const isGoogleFlow =
+    (item.referrer && (item.referrer.includes('labs.google') || item.referrer.includes('flow.google.com'))) ||
+    (item.url &&
+      (item.url.includes('labs.google') ||
+        item.url.includes('flow.google.com') ||
+        item.url.includes('googleusercontent.com') ||
+        item.url.includes('googleapis.com')));
+
+  if (isGoogleFlow && currentFlowDownloadFolder && currentFlowDownloadFolder.trim() !== '') {
+    const folder = currentFlowDownloadFolder.trim().replace(/^[\/\\]+|[\/\\]+$/g, '');
+    suggest({ filename: `${folder}/${item.filename}` });
+  } else {
+    suggest({ filename: item.filename });
+  }
+});
 

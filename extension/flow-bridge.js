@@ -881,6 +881,89 @@ async function ensureBatchViewMode() {
   }
 }
 
+// Helper: Ensure Google Flow is in "Petak" (Grid) view mode before mass downloading
+async function ensureGridViewMode() {
+  console.log('[Meta-Gen Flow Bridge] Memastikan mode tampilan canvas adalah "Petak" (Grid)...');
+
+  // 0. Direct check for user's explicit selector: id="mat-button-toggle-0" / id="mat-button-toggle-0-button"
+  const directIdToggle = document.querySelector('#mat-button-toggle-0, #mat-button-toggle-0-button');
+  if (directIdToggle) {
+    const isChecked =
+      directIdToggle.classList.contains('mat-button-toggle-checked') ||
+      directIdToggle.getAttribute('aria-checked') === 'true' ||
+      directIdToggle.querySelector('button')?.getAttribute('aria-checked') === 'true';
+    if (isChecked) {
+      console.log('[Meta-Gen Flow Bridge] Mode "Petak" (Grid) sudah aktif (#mat-button-toggle-0).');
+      return true;
+    }
+
+    console.log('[Meta-Gen Flow Bridge] Mengalihkan ke mode "Petak" (Grid) via #mat-button-toggle-0...');
+    clickMaterialToggle(directIdToggle);
+    await new Promise((r) => setTimeout(r, 600));
+    return true;
+  }
+
+  // 1. Direct check: look for Petak / Grid toggle in DOM (matching user snippet)
+  const allToggles = Array.from(document.querySelectorAll('.mat-button-toggle, flow-toggles mat-button-toggle'));
+  const petakToggle = allToggles.find((t) => {
+    const txt = (t.textContent || '').trim().toLowerCase();
+    const icon = t.querySelector('mat-icon')?.textContent?.trim() || '';
+    return txt.includes('petak') || txt.includes('grid') || icon === 'dashboard';
+  });
+
+  if (petakToggle) {
+    const isChecked =
+      petakToggle.classList.contains('mat-button-toggle-checked') ||
+      petakToggle.querySelector('button')?.getAttribute('aria-checked') === 'true';
+    if (isChecked) {
+      console.log('[Meta-Gen Flow Bridge] Mode "Petak" (Grid) sudah aktif.');
+      return true;
+    }
+
+    console.log('[Meta-Gen Flow Bridge] Mengalihkan ke mode "Petak" (Grid)...');
+    clickMaterialToggle(petakToggle);
+    await new Promise((r) => setTimeout(r, 600));
+    return true;
+  }
+
+  // 2. Fallback: Check if Settings menu needs to be clicked (e.g. icon settings_2)
+  let settingsBtn = document.querySelector(
+    'button[aria-label="Setelan" i], button[mattooltip="Lihat setelan" i], button[aria-label*="setelan" i]'
+  );
+  if (!settingsBtn) {
+    const allButtons = Array.from(document.querySelectorAll('button'));
+    settingsBtn = allButtons.find((b) => {
+      const ic = b.querySelector('mat-icon');
+      return ic && (ic.textContent || '').trim() === 'settings_2';
+    });
+  }
+
+  if (settingsBtn) {
+    settingsBtn.click();
+    await new Promise((r) => setTimeout(r, 450));
+
+    const popoverToggles = Array.from(
+      document.querySelectorAll('.mat-button-toggle, flow-toggles mat-button-toggle, button')
+    );
+    const pToggle = popoverToggles.find((t) => {
+      const txt = (t.textContent || '').trim().toLowerCase();
+      const icon = t.querySelector('mat-icon')?.textContent?.trim() || '';
+      return txt.includes('petak') || txt.includes('grid') || icon === 'dashboard';
+    });
+
+    if (pToggle) {
+      clickMaterialToggle(pToggle);
+      await new Promise((r) => setTimeout(r, 500));
+    }
+
+    document.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', code: 'Escape', keyCode: 27, bubbles: true }));
+    document.dispatchEvent(new PointerEvent('pointerdown', { bubbles: true, clientX: 0, clientY: 0 }));
+    await new Promise((r) => setTimeout(r, 200));
+  }
+
+  return true;
+}
+
 // Helper: Extract prompt text from a tile or row in Google Flow
 function extractTilePromptText(tileElement) {
   if (!tileElement) return '';
@@ -1741,8 +1824,512 @@ async function handleFlowGeneration(payload) {
   };
 }
 
+// ========================================================
+// ⚡ PILAR 3: Mass Downloader 2K/4K Engine
+// ========================================================
+let isMassDownloading = false;
+let downloadedIds = new Set();
+let massDownloaderOriginalZoom = '';
+
+// Load download history from local storage
+if (typeof chrome !== 'undefined' && chrome.storage?.local) {
+  chrome.storage.local.get(['metagen_downloaded_ids'], (res) => {
+    if (res.metagen_downloaded_ids && Array.isArray(res.metagen_downloaded_ids)) {
+      downloadedIds = new Set(res.metagen_downloaded_ids);
+      console.log('[Meta-Gen Flow Bridge] Loaded downloaded IDs count:', downloadedIds.size);
+    }
+  });
+}
+
+function saveDownloadHistory() {
+  if (typeof chrome !== 'undefined' && chrome.storage?.local) {
+    chrome.storage.local.set({ metagen_downloaded_ids: Array.from(downloadedIds) });
+  }
+}
+
+function closeAnyOpenMenus() {
+  document.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', code: 'Escape', keyCode: 27, which: 27, bubbles: true, cancelable: true }));
+  document.dispatchEvent(new PointerEvent('pointerdown', { bubbles: true, clientX: 0, clientY: 0 }));
+}
+
+function getScrollContainer() {
+  const cdkScroller = document.querySelector('cdk-virtual-scroll-viewport, .cdk-virtual-scroll-viewport, [cdkvirtualscrollingelement], .cdk-virtual-scrollable');
+  if (cdkScroller) return cdkScroller;
+
+  const virtuosoScroller = document.querySelector('[data-testid="virtuoso-scroller"], [data-virtuoso-scroller="true"], .virtuoso-grid-list');
+  if (virtuosoScroller) return virtuosoScroller;
+
+  const divs = Array.from(document.querySelectorAll('div, main, section'));
+  let best = null;
+  let maxDiff = -1;
+  for (const div of divs) {
+    const diff = div.scrollHeight - div.clientHeight;
+    if (diff > 150 && div.clientHeight < 2500 && diff > maxDiff) {
+      maxDiff = diff;
+      best = div;
+    }
+  }
+  return best || window;
+}
+
+function getScrollPos(container) {
+  if (!container || container === window) {
+    return window.scrollY || document.documentElement.scrollTop;
+  }
+  return container.scrollTop;
+}
+
+function scrollContainerDown(container, px) {
+  if (!container || container === window) {
+    window.scrollBy({ top: px });
+  } else {
+    container.scrollTop += px;
+  }
+}
+
+function filterTopLevelTiles(elements) {
+  const validEls = elements.filter((el) => el && el.nodeType === 1);
+  return validEls.filter((el) => !validEls.some((other) => other !== el && other.contains(el)));
+}
+
+function getAllTilesInDom() {
+  const ngTiles = Array.from(document.querySelectorAll('flow-grid-tile-container, flow-tile-container, flow-image-tile, [data-tile-id]'));
+  if (ngTiles.length > 0) return filterTopLevelTiles(ngTiles);
+
+  const images = Array.from(document.querySelectorAll('img[src*="flow.google.com/asb/"], img[src*="googleusercontent.com"], img[src*="googleapis.com"], img[data-media-id]'));
+  const cards = images.map((img) => img.closest('flow-grid-tile-container, flow-tile-container, flow-image-tile, .tile-row') || img.parentElement).filter(Boolean);
+  return filterTopLevelTiles(cards);
+}
+
+function getTileIdentifier(tile) {
+  if (!tile) return null;
+  const imgWithMediaId = tile.querySelector('img[data-media-id], [data-media-id]') || (tile.hasAttribute('data-media-id') ? tile : null);
+  if (imgWithMediaId?.getAttribute('data-media-id')) {
+    return 'media_' + imgWithMediaId.getAttribute('data-media-id');
+  }
+  if (tile.getAttribute('data-tile-id')) return tile.getAttribute('data-tile-id');
+  if (tile.getAttribute('data-fad-id')) return tile.getAttribute('data-fad-id');
+  if (tile.getAttribute('data-metagen-token')) return tile.getAttribute('data-metagen-token');
+
+  const img = tile.querySelector('img') || (tile.tagName === 'IMG' ? tile : null);
+  if (img?.src) {
+    const clean = img.src.split('?')[0].split('=')[0];
+    const segment = clean.split('/').filter(Boolean).pop();
+    if (segment && segment.length >= 6) return 'img_' + segment;
+  }
+  return null;
+}
+
+function markTileWithId(tile, id) {
+  if (tile && id && !tile.hasAttribute('data-fad-id')) {
+    tile.setAttribute('data-fad-id', id);
+  }
+}
+
+function findTileInDom(tileId) {
+  if (!tileId) return null;
+  if (tileId.startsWith('media_')) {
+    const mediaId = tileId.replace('media_', '');
+    const img = document.querySelector(`img[data-media-id="${mediaId}"], [data-media-id="${mediaId}"]`);
+    if (img) {
+      return img.closest('flow-grid-tile-container, flow-tile-container, flow-image-tile, .tile-row') || img.parentElement;
+    }
+  }
+  const byFad = document.querySelector(`[data-fad-id="${tileId}"]`);
+  if (byFad) return byFad;
+
+  const byTile = document.querySelector(`[data-tile-id="${tileId}"]`);
+  if (byTile) return byTile;
+
+  const all = getAllTilesInDom();
+  for (const t of all) {
+    if (getTileIdentifier(t) === tileId) {
+      markTileWithId(t, tileId);
+      return t;
+    }
+  }
+  return null;
+}
+
+async function findAndGetTile(tileId) {
+  let tile = findTileInDom(tileId);
+  if (tile) return tile;
+
+  const activeContainer = getScrollContainer();
+  let lastTop = -1;
+  let noChange = 0;
+
+  while (isMassDownloading) {
+    scrollContainerDown(activeContainer, 350);
+    await new Promise((r) => setTimeout(r, 500));
+
+    tile = findTileInDom(tileId);
+    if (tile) return tile;
+
+    const currentTop = getScrollPos(activeContainer);
+    if (currentTop === lastTop) {
+      noChange++;
+      if (noChange >= 6) {
+        if (activeContainer === window) window.scrollTo({ top: 0 });
+        else activeContainer.scrollTop = 0;
+        await new Promise((r) => setTimeout(r, 1000));
+        break;
+      }
+    } else {
+      noChange = 0;
+    }
+    lastTop = currentTop;
+  }
+  return findTileInDom(tileId);
+}
+
+function findMoreButton(tile) {
+  // 1. Angular Material menu trigger
+  const ngMoreBtn = tile.querySelector('button[aria-label="More options"], button.mat-mdc-menu-trigger, button[flowhotbarbutton][aria-haspopup="menu"]');
+  if (ngMoreBtn) return ngMoreBtn;
+
+  // 2. Button with mat-icon "more_vert"
+  const icons = Array.from(tile.querySelectorAll('mat-icon, svg, [data-mat-icon-type]'));
+  for (const ic of icons) {
+    if ((ic.textContent || '').trim() === 'more_vert' || (ic.getAttribute('aria-label') || '').includes('more')) {
+      const parent = ic.closest('button, [role="button"]');
+      if (parent) return parent;
+    }
+  }
+
+  // 3. aria-haspopup="menu"
+  const menuBtn = tile.querySelector('button[aria-haspopup="menu"], [role="button"][aria-haspopup="menu"]');
+  if (menuBtn) return menuBtn;
+
+  // 4. aria-label with download/options
+  const ariaBtn = tile.querySelector('button[aria-label*="more" i], button[aria-label*="menu" i], button[aria-label*="option" i], button[aria-label*="unduh" i], button[aria-label*="download" i]');
+  if (ariaBtn) return ariaBtn;
+
+  return tile.querySelector('button, [role="button"]');
+}
+
+function getAvailableResolutionItem(resOptions) {
+  const allItems = Array.from(document.querySelectorAll('.mat-mdc-menu-item, [mat-menu-item], flow-menu-item button, [role="menuitem"], .mat-menu-item'));
+  for (const res of resOptions) {
+    const cleanRes = res.trim().toLowerCase();
+    if (!cleanRes) continue;
+
+    for (const el of allItems) {
+      const txt = el.textContent.trim().toLowerCase();
+      const labelEl = el.querySelector('.label, .item-text, span');
+      const labelTxt = labelEl ? labelEl.textContent.trim().toLowerCase() : '';
+
+      let isMatch = false;
+      if (cleanRes === '2k' && (txt.includes('2k') || labelTxt === '2k')) isMatch = true;
+      else if (cleanRes === '4k' && (txt.includes('4k') || labelTxt === '4k')) isMatch = true;
+      else if (cleanRes === '1k' && (txt.includes('1k') || labelTxt === '1k' || txt.includes('original'))) isMatch = true;
+      else if (cleanRes === '1080p' && txt.includes('1080p')) isMatch = true;
+      else if (cleanRes === '720p' && txt.includes('720p')) isMatch = true;
+      else if (txt.includes(cleanRes) || labelTxt.includes(cleanRes)) isMatch = true;
+
+      if (isMatch) {
+        const isDisabled = el.disabled || el.classList.contains('mat-mdc-menu-item-disabled') || el.getAttribute('aria-disabled') === 'true';
+        if (!isDisabled) return el;
+      }
+    }
+  }
+
+  // Fallback: any active download resolution item
+  for (const el of allItems) {
+    const txt = el.textContent.trim().toLowerCase();
+    const isDisabled = el.disabled || el.classList.contains('mat-mdc-menu-item-disabled') || el.getAttribute('aria-disabled') === 'true';
+    if (!isDisabled && (txt.includes('2k') || txt.includes('4k') || txt.includes('1k') || txt.includes('original') || txt.includes('upscaled'))) {
+      return el;
+    }
+  }
+  return null;
+}
+
+async function processTileDownload(tile, resolutionText, tileId) {
+  closeAnyOpenMenus();
+  await new Promise((r) => setTimeout(r, 200));
+
+  // Hover tile to reveal controls
+  const rect = tile.getBoundingClientRect();
+  const clientX = rect.left + rect.width / 2;
+  const clientY = rect.top + rect.height / 2;
+  tile.dispatchEvent(new MouseEvent('mouseenter', { bubbles: true, clientX, clientY }));
+  tile.dispatchEvent(new MouseEvent('mouseover', { bubbles: true, clientX, clientY }));
+  tile.dispatchEvent(new MouseEvent('mousemove', { bubbles: true, clientX, clientY }));
+  await new Promise((r) => setTimeout(r, 350));
+
+  const trigger = findMoreButton(tile);
+  let menuOpened = false;
+
+  // Try clicking trigger up 3 levels
+  let cur = trigger || tile;
+  let lim = 0;
+  while (cur && lim < 3) {
+    cur.click();
+    await new Promise((r) => setTimeout(r, 350));
+    const m = document.querySelector('.mat-mdc-menu-panel, .mat-menu-panel, mat-menu, [role="menu"]');
+    if (m) {
+      menuOpened = true;
+      break;
+    }
+    cur = cur.parentElement;
+    lim++;
+  }
+
+  // Contextmenu fallback
+  if (!menuOpened) {
+    let rTarget = trigger || tile;
+    rTarget.dispatchEvent(new MouseEvent('contextmenu', { bubbles: true, cancelable: true, clientX, clientY, button: 2 }));
+    await new Promise((r) => setTimeout(r, 400));
+    const m = document.querySelector('.mat-mdc-menu-panel, .mat-menu-panel, mat-menu, [role="menu"]');
+    if (m) menuOpened = true;
+  }
+
+  const menu = document.querySelector('.mat-mdc-menu-panel, .mat-menu-panel, mat-menu, [role="menu"]');
+  if (!menuOpened || !menu) {
+    closeAnyOpenMenus();
+    return { success: false, reason: 'menu_failed' };
+  }
+
+  const resOptions = (resolutionText || '2K, 4K, 1K, Original').split(',').map((s) => s.trim());
+  let targetItem = getAvailableResolutionItem(resOptions);
+
+  // If resolutions not directly in first menu, look for "Download" / "Unduh" trigger
+  if (!targetItem) {
+    const allMenuItems = Array.from(document.querySelectorAll('.mat-mdc-menu-item, [mat-menu-item], flow-menu-item, [role="menuitem"], button'));
+    let downloadTrigger = null;
+    for (const el of allMenuItems) {
+      const txt = el.textContent.trim().toLowerCase();
+      if (txt === 'download' || txt === 'unduh' || txt.startsWith('download') || txt.startsWith('unduh')) {
+        downloadTrigger = el.closest('button, [role="menuitem"]') || el;
+        break;
+      }
+    }
+    if (downloadTrigger) {
+      downloadTrigger.dispatchEvent(new MouseEvent('mouseenter', { bubbles: true }));
+      downloadTrigger.click();
+      await new Promise((r) => setTimeout(r, 600));
+      targetItem = getAvailableResolutionItem(resOptions);
+    }
+  }
+
+  if (!targetItem) {
+    closeAnyOpenMenus();
+    return { success: false, reason: 'resolution_not_found' };
+  }
+
+  const isVideoOrUpscale = tile.querySelector('video') !== null || /(1080p|720p|4k|2k|video|mp4|upscaled)/i.test(targetItem.textContent);
+  const maxWaitMs = isVideoOrUpscale ? 20000 : 8000;
+
+  // Listen for Chrome download start handshake
+  const downloadPromise = new Promise((resolve) => {
+    let done = false;
+    const onDownload = () => {
+      if (!done) {
+        done = true;
+        cleanup();
+        resolve(true);
+      }
+    };
+    const timer = setTimeout(() => {
+      if (!done) {
+        done = true;
+        cleanup();
+        resolve(false);
+      }
+    }, maxWaitMs);
+
+    function cleanup() {
+      document.removeEventListener('FlowDownloadStarted', onDownload);
+      clearTimeout(timer);
+    }
+    document.addEventListener('FlowDownloadStarted', onDownload);
+  });
+
+  targetItem.focus();
+  targetItem.click();
+  await new Promise((r) => setTimeout(r, 300));
+  closeAnyOpenMenus();
+
+  const isVerified = await downloadPromise;
+  if (isVerified) {
+    downloadedIds.add(tileId);
+    saveDownloadHistory();
+    return { success: true };
+  } else {
+    return { success: false, reason: 'timeout' };
+  }
+}
+
+// Master Function: Mass Download 2K/4K Engine
+async function executeFlowMassDownload({ resolution = '2K', batchDelaySeconds = 2, skipDownloaded = true, folderName = 'MetaGen_Flow' } = {}) {
+  if (isMassDownloading) {
+    console.warn('[Meta-Gen Flow Bridge] Mass download sudah sedang berjalan.');
+    return { success: false, error: 'Mass download sudah berjalan.' };
+  }
+
+  isMassDownloading = true;
+  showFlowToast('Mass Downloader 2K', 'Mengalihkan tampilan ke mode Petak (Grid)...', false);
+
+  // STEP 0: Wajib alihkan mode tampilan dari batch ke Petak (Grid)
+  await ensureGridViewMode();
+  await new Promise((r) => setTimeout(r, 800));
+
+  // Set download subfolder in background
+  try {
+    chrome.runtime.sendMessage({ type: 'SET_FLOW_DOWNLOAD_FOLDER', folder: folderName });
+  } catch (e) {}
+
+  // STEP 1: Pre-scan dengan zoom 50%
+  massDownloaderOriginalZoom = document.body.style.zoom || '';
+  document.body.style.zoom = '50%';
+  await new Promise((r) => setTimeout(r, 700));
+
+  showFlowToast('Mass Downloader 2K', 'Memindai seluruh aset di galeri...', false);
+
+  const uniqueIds = new Set();
+  const activeContainer = getScrollContainer();
+  let lastTop = -1;
+  let noChange = 0;
+
+  if (activeContainer === window) window.scrollTo({ top: 0 });
+  else activeContainer.scrollTop = 0;
+  await new Promise((r) => setTimeout(r, 900));
+
+  while (isMassDownloading) {
+    const currentTiles = getAllTilesInDom();
+    for (const t of currentTiles) {
+      const id = getTileIdentifier(t);
+      if (id) {
+        markTileWithId(t, id);
+        uniqueIds.add(id);
+      }
+    }
+
+    scrollContainerDown(activeContainer, 500);
+    await new Promise((r) => setTimeout(r, 300));
+
+    const curTop = getScrollPos(activeContainer);
+    if (curTop === lastTop) {
+      noChange++;
+      if (noChange >= 10) break; // Reached bottom
+    } else {
+      noChange = 0;
+    }
+    lastTop = curTop;
+  }
+
+  // Restore normal zoom
+  document.body.style.zoom = massDownloaderOriginalZoom;
+  await new Promise((r) => setTimeout(r, 600));
+
+  const masterList = Array.from(uniqueIds);
+  console.log('[Meta-Gen Flow Bridge] Scan selesai! Total unik:', masterList.length);
+
+  if (masterList.length === 0) {
+    isMassDownloading = false;
+    showFlowToast('Mass Downloader', 'Tidak ada media ditemukan di canvas.', false);
+    return { success: false, count: 0 };
+  }
+
+  // STEP 2: Scroll back to top
+  if (activeContainer === window) window.scrollTo({ top: 0 });
+  else activeContainer.scrollTop = 0;
+  await new Promise((r) => setTimeout(r, 1200));
+
+  // STEP 3: Iterate and Download
+  let successCount = 0;
+  let failCount = 0;
+  let skipCount = 0;
+
+  for (let i = 0; i < masterList.length; i++) {
+    if (!isMassDownloading) break;
+
+    const tileId = masterList[i];
+    if (skipDownloaded && downloadedIds.has(tileId)) {
+      skipCount++;
+      continue;
+    }
+
+    showFlowToast('Mass Downloader 2K', `Mendownload (${i + 1}/${masterList.length}) | Berhasil: ${successCount}...`, false);
+
+    const tile = await findAndGetTile(tileId);
+    if (!tile) {
+      failCount++;
+      continue;
+    }
+
+    try {
+      tile.scrollIntoView({ behavior: 'smooth', block: 'center' });
+    } catch (e) {}
+    await new Promise((r) => setTimeout(r, 700));
+
+    const res = await processTileDownload(tile, resolution, tileId);
+    if (res.success) {
+      successCount++;
+    } else {
+      failCount++;
+    }
+
+    // Broadcast progress to Meta-Gen Studio
+    try {
+      chrome.runtime.sendMessage({
+        type: 'FLOW_MASS_DOWNLOAD_PROGRESS',
+        payload: {
+          current: i + 1,
+          total: masterList.length,
+          saved: successCount,
+          skipped: skipCount,
+          failed: failCount,
+        },
+      });
+    } catch (e) {}
+
+    // Delay between downloads
+    if (isMassDownloading && i < masterList.length - 1) {
+      await new Promise((r) => setTimeout(r, (batchDelaySeconds || 2) * 1000));
+    }
+  }
+
+  isMassDownloading = false;
+  showFlowToast('Mass Downloader 2K', `Unduhan Selesai! Berhasil: ${successCount}, Dilewati: ${skipCount}, Gagal: ${failCount}`, true);
+
+  return {
+    success: true,
+    total: masterList.length,
+    saved: successCount,
+    skipped: skipCount,
+    failed: failCount,
+  };
+}
+
 // Listen for messages from background.js
 chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
+  if (message.action === 'FLOW_DOWNLOAD_STARTED') {
+    document.dispatchEvent(new CustomEvent('FlowDownloadStarted', { detail: message.item }));
+    return true;
+  }
+
+  if (message.action === 'FLOW_ENSURE_GRID_MODE') {
+    ensureGridViewMode().then((ok) => {
+      sendResponse({ success: ok });
+    });
+    return true;
+  }
+
+  if (message.action === 'FLOW_EXECUTE_MASS_DOWNLOAD') {
+    executeFlowMassDownload(message.payload)
+      .then((res) => sendResponse(res))
+      .catch((err) => sendResponse({ success: false, error: err.message }));
+    return true; // asynchronous response
+  }
+
+  if (message.action === 'FLOW_STOP_MASS_DOWNLOAD') {
+    isMassDownloading = false;
+    sendResponse({ success: true });
+    return true;
+  }
+
   if (message.action === 'FLOW_PING') {
     sendResponse({
       active: true,

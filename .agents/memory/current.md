@@ -61,15 +61,23 @@ Pengembangan Ekstensi Meta-Gen Assistant & Flow Bridge: Smart Tagging, Multi-Var
   - **Layer 3 (UI Controls di Meta-Gen Studio Toolbar)**:
     - Menambahkan pemilih variasi instan `Out: x1 | x2 | x3 | x4` tepat di samping tombol `Agent Batch` dan `Gen Batch`.
     - Pengguna dapat menentukan dengan 1-klik apakah ingin menghasilkan 1, 2, 3, atau 4 variasi gambar per prompt di Google Flow.
+- **Modul 2K/4K Mass Downloader Otomatis dengan Switch Mode Petak (Fase 3 Selesai) ([extension/flow-bridge.js](file:///c:/App%20Tools/meta-gen-gue/extension/flow-bridge.js), [extension/background.js](file:///c:/App%20Tools/meta-gen-gue/extension/background.js), [extension/content.js](file:///c:/App%20Tools/meta-gen-gue/extension/content.js), [components/PromptGeneratorView.tsx](file:///c:/App%20Tools/meta-gen-gue/components/PromptGeneratorView.tsx), [extension/manifest.json](file:///c:/App%20Tools/meta-gen-gue/extension/manifest.json))**:
+  - Diadaptasi dari referensi proyek pengguna di `C:\App Tools\flow 2k downloader` (v1.2.1).
+  - **Otomasi Switch Mode ke "Petak" (Grid)**: Sebelum unduh dimulai, memeriksa selector `#mat-button-toggle-0` / `#mat-button-toggle-0-button` (ikon `dashboard`, teks `Petak`). Jika kanvas masih di mode `Batch`, sistem langsung beralih ke `Petak` via simulasi pointer/mouse material toggle.
+  - **Zoom 50% Pre-Scan**: Canvas diset sementara ke `zoom: 50%` selama traversal `cdk-virtual-scroll-viewport` agar seluruh kartu terdeteksi dan terindeks dengan cepat tanpa lagging, kemudian dikembalikan ke zoom semula.
+  - **High-Res Menu Picker**: Otomasi hover pada setiap tile, klik menu 3-titik (`more_vert`), dan memilih opsi resolusi tertinggi (`2K`, `4K`, `Original`).
+  - **Browser Handshake**: Melacak event `chrome.downloads.onCreated` di `background.js` untuk konfirmasi download real-time.
+  - **Folder Routing Otomatis**: Hasil unduhan diarahkan otomatis ke `Downloads/MetaGen_Flow/[SessionTitle]/[filename]`.
+  - **UI Integration di Studio**: Tombol `Unduh 2K` di samping `Agent Batch` dan `JSON`, dilengkapi animasi `Loader2`, progress counter `Unduh (X/Total)`, dan opsi pembatalan aman.
 - **Server Pengembangan Aktif**:
   - Berjalan di `http://localhost:3000`.
 
 ## Currently Working On
-- Melanjutkan ke Fase 3: Modul 2K/4K Mass Downloader otomatis dari canvas Google Flow.
+- Melanjutkan ke Fase 4: Integrasi Watcher / Auto-Import ke FTP Bridge & Antrean Metadata Studio.
 
 ## Remaining Tasks (Roadmap)
 - [x] **Sinkronisasi Rasio Gambar Google Flow**: Penyesuaian aspek rasio (16:9, 1:1, 9:16, 4:3, 3:4) & jumlah output (x1-x4) otomatis.
-- [ ] **Modul 2K/4K Mass Downloader**: Otomasi klik menu 3-titik (`more_vert`) pada kartu hasil render di canvas Flow, memilih resolusi tertinggi (`2K Upscaled` / `4K Ultra HD`), dan routing subfolder download otomatis.
+- [x] **Modul 2K/4K Mass Downloader**: Otomasi klik menu 3-titik (`more_vert`) pada kartu hasil render di canvas Flow, memilih resolusi tertinggi (`2K Upscaled` / `4K Ultra HD`), routing subfolder download otomatis, dan switch mode tampilan ke `Petak`.
 - [ ] **Integrasi Watcher dengan FTP Bridge**: File unduhan otomatis dialirkan ke antrean penyematan ExifTool dan antrean upload FTP microstock.
 - [ ] **Modul Keyword Research**: Eksplorasi tren microstock, tag cloud interaktif, dan filter kata kunci terlarang di `components/KeywordResearchView.tsx`.
 

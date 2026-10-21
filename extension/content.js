@@ -480,6 +480,33 @@ if (isMetaGenTab) {
         });
       } catch (e) {}
     }
+
+    if (event.data?.type === 'METAGEN_TRIGGER_FLOW_MASS_DOWNLOAD') {
+      try {
+        chrome.runtime.sendMessage(
+          {
+            type: 'TRIGGER_FLOW_MASS_DOWNLOAD',
+            payload: event.data.payload || {},
+            folder: event.data.folder || 'MetaGen_Flow',
+          },
+          (response) => {
+            window.postMessage(
+              {
+                type: 'METAGEN_FLOW_MASS_DOWNLOAD_RESPONSE',
+                payload: response,
+              },
+              '*'
+            );
+          }
+        );
+      } catch (e) {}
+    }
+
+    if (event.data?.type === 'METAGEN_STOP_FLOW_MASS_DOWNLOAD') {
+      try {
+        chrome.runtime.sendMessage({ type: 'STOP_FLOW_MASS_DOWNLOAD' });
+      } catch (e) {}
+    }
   });
 
   chrome.runtime.sendMessage({ type: 'CHECK_PENDING_QUEUE' }, (response) => {
