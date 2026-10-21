@@ -99,6 +99,36 @@ function safeFormatList(val: unknown, fallback = ''): string {
   return fallback;
 }
 
+async function copyToClipboardSafe(text: string): Promise<boolean> {
+  if (typeof navigator !== 'undefined' && navigator.clipboard?.writeText) {
+    try {
+      await navigator.clipboard.writeText(text);
+      return true;
+    } catch {
+      // Fallback to execCommand below
+    }
+  }
+  if (typeof document !== 'undefined') {
+    try {
+      const textArea = document.createElement('textarea');
+      textArea.value = text;
+      textArea.style.position = 'fixed';
+      textArea.style.left = '-999999px';
+      textArea.style.top = '-999999px';
+      textArea.setAttribute('readonly', '');
+      document.body.appendChild(textArea);
+      textArea.focus();
+      textArea.select();
+      const successful = document.execCommand('copy');
+      document.body.removeChild(textArea);
+      return successful;
+    } catch {
+      return false;
+    }
+  }
+  return false;
+}
+
 const VISUAL_DIRECTION_OPTIONS: Array<{ id: VisualDirection; label: string; desc: string }> = [
   { id: 'photorealistic', label: 'Foto Komersial (Stock Photo)', desc: 'Sony A7R V, 85mm f/1.4, tekstur natural 8K' },
   { id: 'editorial', label: 'Editorial & High Fashion', desc: 'Pencahayaan terkontrol, estetika majalah premium' },
@@ -172,6 +202,8 @@ export function PromptGeneratorView({ onSwitchToMetadata, onSendImageToMetadata 
   const [generatingFlowCardId, setGeneratingFlowCardId] = useState<string | null>(null);
   const [flowQueueCardIds, setFlowQueueCardIds] = useState<string[]>([]);
   const [flowBatchLimit, setFlowBatchLimit] = useState<number>(5);
+  const [flowOutputCount, setFlowOutputCount] = useState<'x1' | 'x2' | 'x3' | 'x4'>('x1');
+  const [copiedAgentBatch, setCopiedAgentBatch] = useState<boolean>(false);
 
   // 7. Inspirations & Brainstorm
   const [inspirations, setInspirations] = useState<InspirationIdea[]>(() => getRandomCuratedIdeas(10));
@@ -529,8 +561,60 @@ export function PromptGeneratorView({ onSwitchToMetadata, onSendImageToMetadata 
         setGeneratingFlowCardId(qInfo?.activeCardId || null);
         setFlowQueueCardIds(qInfo?.queuedCardIds || []);
       }
+      if (event.data?.type === 'METAGEN_FLOW_CARD_DISCOVERED') {
+        const disc = event.data.payload;
+        if (disc?.cardId && disc?.imageDataUrl) {
+          setPrompts((prev) =>
+            prev.map((c) =>
+              c.id === disc.cardId && !c.generatedImageUrl
+                ? {
+                    ...c,
+                    generatedImageUrl: disc.imageDataUrl,
+                    variations: [{ letter: 'A', dataUrl: disc.imageDataUrl, token: disc.token }],
+                    selectedVariationIndex: 0,
+                    flowStatus: 'completed',
+                  }
+                : c
+            )
+          );
+          toast.success(`✓ Gambar adegan #${disc.ordinal || ''} terhubung dari Google Flow!`);
+        }
+      }
       if (event.data?.type === 'METAGEN_FLOW_GEN_RESULT') {
         const payload = event.data.payload;
+
+        // Support for Agent Batch Multi-Scene payload with multiple results
+        if (payload?.success && payload?.isAgentBatch && Array.isArray(payload?.results) && payload.results.length > 0) {
+          const resultsMap = new Map<string, any>(payload.results.map((r: any) => [r.cardId, r]));
+          const finishedIds = new Set(payload.results.map((r: any) => r.cardId));
+
+          setGeneratingFlowCardId((prev) => (prev && finishedIds.has(prev) ? null : prev));
+          setFlowQueueCardIds((prev) => prev.filter((id) => !finishedIds.has(id)));
+
+          setPrompts((prev) =>
+            prev.map((c) => {
+              const res = resultsMap.get(c.id);
+              if (res) {
+                const variations = res.variations || (res.imageDataUrl ? [{ letter: 'A', dataUrl: res.imageDataUrl, token: res.token }] : []);
+                return {
+                  ...c,
+                  generatedImageUrl: res.imageDataUrl || c.generatedImageUrl,
+                  variations: variations,
+                  selectedVariationIndex: 0,
+                  flowStatus: 'completed',
+                };
+              }
+              return c;
+            })
+          );
+
+          toast.success(`✓ ${payload.results.length} adegan Google Flow Agent berhasil dimuat!`, {
+            description: 'Setiap kartu adegan telah diperbarui dengan gambar masing-masing.',
+          });
+          return;
+        }
+
+        // Standard Single-Prompt handling
         setGeneratingFlowCardId((prev) => (prev === payload?.cardId ? null : prev));
         setFlowQueueCardIds((prev) => prev.filter((id) => id !== payload?.cardId));
         if (payload?.success && (payload?.imageDataUrl || payload?.variations?.length)) {
@@ -996,12 +1080,13 @@ export function PromptGeneratorView({ onSwitchToMetadata, onSendImageToMetadata 
           title: card.title,
           prompt: card.prompt,
           ratio: settings.aspectRatio || '16:9',
+          outputCount: flowOutputCount || 'x1',
           model: settings.engine === 'nanobanana' ? 'Nano Banana 2' : 'Imagen 3',
         },
       },
       '*'
     );
-    toast.info(`Mengirim prompt #${card.ordinal} ke Google Flow...`, {
+    toast.info(`Mengirim prompt #${card.ordinal} (${flowOutputCount || 'x1'}) ke Google Flow...`, {
       description: 'Ekstensi sedang mengarahkan input ke tab Google Flow.',
       duration: 5000,
     });
@@ -1029,6 +1114,7 @@ export function PromptGeneratorView({ onSwitchToMetadata, onSendImageToMetadata 
             title: card.title,
             prompt: card.prompt,
             ratio: settings.aspectRatio || '16:9',
+            outputCount: flowOutputCount || 'x1',
             model: settings.engine === 'nanobanana' ? 'Nano Banana 2' : 'Imagen 3',
           },
         },
@@ -1037,7 +1123,7 @@ export function PromptGeneratorView({ onSwitchToMetadata, onSendImageToMetadata 
     });
 
     toast.success(
-      `⚡ Batch Berjalan: ${targetCards.length} prompt dimasukkan ke antrean Google Flow!`,
+      `⚡ Batch Berjalan: ${targetCards.length} prompt (${flowOutputCount}) dimasukkan ke antrean Google Flow!`,
       {
         description:
           remainingCount > 0
@@ -1049,27 +1135,82 @@ export function PromptGeneratorView({ onSwitchToMetadata, onSendImageToMetadata 
   };
 
   // Copy formatted batch instruction for Google Flow Agent Mode (max 3-5 scenes)
-  const handleCopyFlowAgentBatch = () => {
-    const unrenderedPrompts = prompts.filter((p) => !p.generatedImageUrl);
-    if (unrenderedPrompts.length === 0) {
-      toast.info('Semua prompt pada sesi ini sudah memiliki gambar hasil render.');
+  const handleCopyFlowAgentBatch = async () => {
+    if (prompts.length === 0) {
+      toast.info('Belum ada prompt pada sesi ini.');
       return;
     }
 
+    const unrenderedPrompts = prompts.filter((p) => !p.generatedImageUrl);
+    const candidatePrompts = unrenderedPrompts.length > 0 ? unrenderedPrompts : prompts;
     const limit = Math.min(flowBatchLimit, 5); // Flow Agent works best with 3-5 scenes
-    const targetCards = unrenderedPrompts.slice(0, limit);
+    const targetCards = candidatePrompts.slice(0, limit);
     const aspect = settings.aspectRatio && settings.aspectRatio !== 'none' ? settings.aspectRatio : '16:9';
+    const outputCount = flowOutputCount || 'x1';
 
+    // Embed Aspect Ratio and Output Count directly into each scene prompt for Agent Mode
     const scenesText = targetCards
-      .map((c, i) => `Scene ${i + 1} (${c.title || `Concept #${c.ordinal}`}):\n${c.prompt.trim()}`)
+      .map(
+        (c, i) =>
+          `Scene ${i + 1} (${c.title || `Concept #${c.ordinal}`}):\n[Generate ${outputCount} image(s), Aspect Ratio: ${aspect}]\n${c.prompt.trim()}`
+      )
       .join('\n\n');
 
-    const agentPrompt = `Act in Agent Mode. I have ${targetCards.length} commercial microstock visual concepts. Batch generate an image for each scene sequentially in ${aspect} aspect ratio, keeping commercial stock photography quality:\n\n${scenesText}\n\nExecute and generate all ${targetCards.length} scenes now on the canvas.`;
+    const agentPrompt = `Act in Agent Mode. I have ${targetCards.length} commercial microstock visual concepts. Batch generate an image for each scene sequentially in ${aspect} aspect ratio with ${outputCount} output(s) each, keeping commercial stock photography quality:\n\n${scenesText}\n\nExecute and generate all ${targetCards.length} scenes now on the canvas.`;
 
-    void navigator.clipboard.writeText(agentPrompt);
-    toast.success(`📋 Master Prompt Flow Agent (${targetCards.length} adegan) disalin!`, {
-      description: 'Aktifkan tombol "Agent" di Google Flow lalu paste instruksi ini.',
-      duration: 6000,
+    const copied = await copyToClipboardSafe(agentPrompt);
+    setCopiedAgentBatch(true);
+    setTimeout(() => setCopiedAgentBatch(false), 2500);
+
+    // Register active agent scenes with extension so manual copy-paste also gets tracked and tagged accurately
+    window.postMessage(
+      {
+        type: 'METAGEN_REGISTER_AGENT_SCENES',
+        payload: {
+          scenes: targetCards.map((c, i) => ({
+            cardId: c.id,
+            ordinal: c.ordinal,
+            title: c.title,
+            prompt: c.prompt,
+            sceneIndex: i + 1,
+          })),
+        },
+      },
+      '*'
+    );
+
+    // 3. Directly dispatch generation to Google Flow tab via extension (Zero Extra Clicks!)
+    const targetCardIds = targetCards.map((c) => c.id);
+    setFlowQueueCardIds((prev) => Array.from(new Set([...prev, ...targetCardIds])));
+    setGeneratingFlowCardId(targetCards[0].id);
+
+    window.postMessage(
+      {
+        type: 'METAGEN_TRIGGER_FLOW_GEN',
+        payload: {
+          cardId: targetCards[0].id,
+          ordinal: targetCards[0].ordinal,
+          title: `Flow Agent Batch (${targetCards.length} Scenes)`,
+          prompt: agentPrompt,
+          ratio: aspect,
+          outputCount: outputCount,
+          model: settings.engine === 'nanobanana' ? 'Nano Banana 2' : 'Imagen 3',
+          isAgentBatch: true,
+          scenes: targetCards.map((c, i) => ({
+            cardId: c.id,
+            ordinal: c.ordinal,
+            title: c.title,
+            prompt: c.prompt,
+            sceneIndex: i + 1,
+          })),
+        },
+      },
+      '*'
+    );
+
+    toast.success(`⚡ Mengirim Agent Batch (${targetCards.length} adegan, ${outputCount}) langsung ke Google Flow!`, {
+      description: 'Master prompt tersalin ke clipboard dan proses pembuatan otomatis dimulai di Google Flow.',
+      duration: 5000,
     });
   };
 
@@ -1147,10 +1288,10 @@ export function PromptGeneratorView({ onSwitchToMetadata, onSendImageToMetadata 
   };
 
   // Copy All Prompts
-  const handleCopyAll = () => {
+  const handleCopyAll = async () => {
     if (prompts.length === 0) return;
     const txt = exportPromptsToQueueText(prompts);
-    void navigator.clipboard.writeText(txt);
+    await copyToClipboardSafe(txt);
     setCopiedAll(true);
     toast.success(`Semua (${prompts.length}) prompt disalin ke clipboard!`);
     setTimeout(() => setCopiedAll(false), 2000);
@@ -2466,19 +2607,61 @@ export function PromptGeneratorView({ onSwitchToMetadata, onSendImageToMetadata 
                     </div>
                   </div>
 
-                  {/* Flow Agent Master Prompt Copy */}
-                  <Button
-                    type="button"
-                    size="sm"
-                    variant="outline"
-                    onClick={handleCopyFlowAgentBatch}
-                    disabled={prompts.every((p) => p.generatedImageUrl)}
-                    className="h-7.5 px-2 text-xs font-bold border-2 border-purple-800 bg-purple-50 hover:bg-purple-100 text-purple-900 shadow-[1px_1px_0_#2c1810] cursor-pointer disabled:opacity-50"
-                    title={`Salin instruksi batch berstruktur khusus Google Flow Agent (maksimal ${Math.min(flowBatchLimit, 5)} adegan)`}
+                  {/* Flow Output Variations Selector (x1 to x4 - Google Flow Limit) */}
+                  <div
+                    className="flex items-center gap-0.5 px-1.5 py-0.5 bg-[#f5f0ff] rounded-lg border-2 border-purple-800 shadow-[1px_1px_0_#2c1810]"
+                    title="Jumlah hasil generate per prompt di Google Flow (x1 hingga x4 variasi)"
                   >
-                    <Wand2 className="w-3.5 h-3.5 mr-1 text-purple-700" />
-                    <span>Agent Batch ({Math.min(prompts.filter((p) => !p.generatedImageUrl).length, Math.min(flowBatchLimit, 5))})</span>
-                  </Button>
+                    <span className="text-[9px] uppercase font-black text-purple-900 tracking-tight">Out:</span>
+                    {(['x1', 'x2', 'x3', 'x4'] as const).map((outOption) => (
+                      <button
+                        key={outOption}
+                        type="button"
+                        onClick={() => setFlowOutputCount(outOption)}
+                        className={`px-1.5 py-0.5 rounded text-[10px] font-black cursor-pointer transition-all ${
+                          flowOutputCount === outOption
+                            ? 'bg-purple-900 text-white shadow-xs'
+                            : 'bg-white hover:bg-purple-100 text-purple-900 border border-purple-300'
+                        }`}
+                      >
+                        {outOption}
+                      </button>
+                    ))}
+                  </div>
+
+                  {/* Flow Agent Master Prompt Copy & Trigger */}
+                  {(() => {
+                    const unrendered = prompts.filter((p) => !p.generatedImageUrl);
+                    const candidates = unrendered.length > 0 ? unrendered : prompts;
+                    const batchCount = Math.min(candidates.length, Math.min(flowBatchLimit, 5));
+                    return (
+                      <Button
+                        type="button"
+                        size="sm"
+                        variant="outline"
+                        onClick={handleCopyFlowAgentBatch}
+                        disabled={prompts.length === 0}
+                        className={`h-7.5 px-2 text-xs font-bold border-2 border-purple-800 shadow-[1px_1px_0_#2c1810] cursor-pointer transition-all disabled:opacity-50 ${
+                          copiedAgentBatch
+                            ? 'bg-purple-200 text-purple-950 font-black'
+                            : 'bg-purple-50 hover:bg-purple-100 text-purple-900'
+                        }`}
+                        title={`Kirim instruksi batch berstruktur langsung ke Google Flow Agent (maksimal ${Math.min(flowBatchLimit, 5)} adegan, ${flowOutputCount} variasi)`}
+                      >
+                        {copiedAgentBatch ? (
+                          <>
+                            <Check className="w-3.5 h-3.5 mr-1 text-emerald-700" />
+                            <span>Mengirim ({batchCount})</span>
+                          </>
+                        ) : (
+                          <>
+                            <Wand2 className="w-3.5 h-3.5 mr-1 text-purple-700" />
+                            <span>Agent Batch ({batchCount})</span>
+                          </>
+                        )}
+                      </Button>
+                    );
+                  })()}
 
                   <Button
                     type="button"

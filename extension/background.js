@@ -319,6 +319,120 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
     return true;
   }
 
+  if (message.type === 'REGISTER_AGENT_SCENES') {
+    const scenes = message.payload?.scenes || [];
+    chrome.storage.local.set({ metagen_agent_scenes: scenes });
+    return true;
+  }
+
+  if (message.type === 'FLOW_CARD_DISCOVERED') {
+    const res = message.result;
+    if (lastMetaGenTabId) {
+      chrome.scripting.executeScript({
+        target: { tabId: lastMetaGenTabId },
+        func: (data) => {
+          window.postMessage({ type: 'METAGEN_FLOW_CARD_DISCOVERED', payload: data }, '*');
+        },
+        args: [res],
+      }).catch(() => {});
+    }
+    return true;
+  }
+
+  if (message.type === 'TRIGGER_MAIN_WORLD_CLICK_NEW_PROJECT') {
+    const tabId = sender.tab?.id;
+    if (tabId) {
+      chrome.scripting
+        .executeScript({
+          target: { tabId },
+          world: 'MAIN',
+          func: () => {
+            console.log('[Meta-Gen MainWorld] Looking for New Project button in MAIN world...');
+            const btn =
+              document.querySelector('button.new-project-button, .new-project-button') ||
+              Array.from(document.querySelectorAll('button')).find((b) => {
+                const txt = (b.textContent || '').toLowerCase();
+                return txt.includes('project baru') || txt.includes('new project') || txt.includes('proyek baru');
+              });
+            if (btn) {
+              console.log('[Meta-Gen MainWorld] Clicking New Project button inside MAIN world (Zone.js)...');
+              btn.click();
+            }
+          },
+        })
+        .catch(() => {});
+    }
+    return true;
+  }
+
+  if (message.type === 'TRIGGER_CDP_MOUSE_CLICK') {
+    const tabId = sender.tab?.id;
+    const coords = message.coords;
+    if (tabId && coords && typeof coords.x === 'number' && typeof coords.y === 'number') {
+      const target = { tabId };
+      (async () => {
+        try {
+          await chrome.debugger.attach(target, '1.3');
+        } catch (e) {}
+        try {
+          await chrome.debugger.sendCommand(target, 'Input.dispatchMouseEvent', {
+            type: 'mousePressed',
+            x: coords.x,
+            y: coords.y,
+            button: 'left',
+            clickCount: 1,
+          });
+          await new Promise((r) => setTimeout(r, 60));
+          await chrome.debugger.sendCommand(target, 'Input.dispatchMouseEvent', {
+            type: 'mouseReleased',
+            x: coords.x,
+            y: coords.y,
+            button: 'left',
+            clickCount: 1,
+          });
+          console.log('[Meta-Gen Background] Dispatched CDP mouse click at:', coords);
+        } catch (err) {
+          console.warn('[Meta-Gen Background] CDP mouse click warning:', err);
+        }
+      })();
+    }
+    return true;
+  }
+
+  if (message.type === 'TRIGGER_MAIN_WORLD_CLICK_AGENT_MODE') {
+    const tabId = sender.tab?.id;
+    if (tabId) {
+      chrome.scripting
+        .executeScript({
+          target: { tabId },
+          world: 'MAIN',
+          func: () => {
+            console.log('[Meta-Gen MainWorld] Looking for Agent Mode toggle button in MAIN world...');
+            const btn =
+              document.querySelector('flow-agent-mode-toggle-chip button, button.agent-mode-chip') ||
+              Array.from(document.querySelectorAll('button')).find((b) => {
+                const txt = (b.textContent || '').toLowerCase();
+                return txt === 'agen' || txt === 'agent' || b.closest('flow-agent-mode-toggle-chip');
+              });
+            if (btn) {
+              const chip = btn.closest('flow-agent-mode-toggle-chip');
+              const isChecked = chip?.classList.contains('checked') || btn.getAttribute('aria-pressed') === 'true';
+              if (!isChecked) {
+                console.log('[Meta-Gen MainWorld] Clicking Agent Mode toggle button inside MAIN world (Zone.js)...');
+                const target = btn.querySelector('.agent-mode-chip-label, span') || btn;
+                target.click();
+                btn.click();
+              } else {
+                console.log('[Meta-Gen MainWorld] Agent Mode is already checked in MAIN world.');
+              }
+            }
+          },
+        })
+        .catch(() => {});
+    }
+    return true;
+  }
+
   if (message.type === 'TRIGGER_MAIN_WORLD_SUBMIT') {
     const tabId = sender.tab?.id;
     const promptText = message.prompt || '';

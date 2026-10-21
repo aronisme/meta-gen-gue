@@ -1,7 +1,7 @@
 # Current Project State
 
 ## Last Updated
-2026-10-19 23:55
+2026-10-21 19:48
 
 ## Current Objective
 Pengembangan Ekstensi Meta-Gen Assistant & Flow Bridge: Smart Tagging, Multi-Variasi, Batch Chunking, dan Sinkronisasi Rasio Google Flow.
@@ -30,16 +30,47 @@ Pengembangan Ekstensi Meta-Gen Assistant & Flow Bridge: Smart Tagging, Multi-Var
   - Menghilangkan risiko rate-limit atau browser freeze dengan pembatasan chunk batch: default **5 prompt per kirim** dengan selector cepat (`Max: 3 | 5 | 8`).
   - Tombol dinamis: `⚡ Gen Batch (5/15)` -> `⚡ Gen Batch (5/10)` -> `⚡ Gen Batch (5/5)`.
   - Tombol baru: `📋 Agent Batch (Max 3-5)` untuk menyalin instruksi terstruktur siap pakai ke Google Flow Agent bawaan.
+- **Perbaikan Tombol Agent Batch ([components/PromptGeneratorView.tsx](file:///c:/App%20Tools/meta-gen-gue/components/PromptGeneratorView.tsx))**:
+  - Memperbaiki bug di mana tombol `Agent Batch` menjadi `disabled` (tidak dapat diklik) dan menampilkan hitungan `(0)` saat semua prompt dalam sesi sudah memiliki gambar hasil render. Kini secara cerdas memprioritaskan prompt yang belum dirender, dan otomatis beralih ke prompt yang ada di sesi jika seluruhnya sudah selesai dirender.
+  - Menambahkan fungsi helper `copyToClipboardSafe` yang memiliki fallback transparan ke `document.execCommand('copy')` saat `navigator.clipboard` terhalang perizinan browser.
+  - Integrasi 1-Klik Langsung (*Zero Extra Clicks*): Saat tombol `Agent Batch` diklik, sistem langsung menyalin prompt ke clipboard sebagai cadangan, menandai status `Mengirim (X)`, dan seketika mengeksekusi pengiriman ke Google Flow via ekstensi tanpa memerlukan klik kedua pada toast notifikasi.
+- **Resolusi Penuh Multi-Scene Agent Batch & Tagging Semantik ([extension/flow-bridge.js](file:///c:/App%20Tools/meta-gen-gue/extension/flow-bridge.js), [components/PromptGeneratorView.tsx](file:///c:/App%20Tools/meta-gen-gue/components/PromptGeneratorView.tsx), [extension/background.js](file:///c:/App%20Tools/meta-gen-gue/extension/background.js), [extension/content.js](file:///c:/App%20Tools/meta-gen-gue/extension/content.js))**:
+  - Menyelesaikan bug pemetaan di mana adegan-adegan yang berbeda (Scene 1 dan Scene 2) salah diberi label sebagai variasi sub-huruf dari kartu pertama (`#1 (A)` dan `#1 (B)`).
+  - Mengimplementasikan `findBestMatchingScene(tileElement, scenes)` di `flow-bridge.js` yang mengekstrak teks prompt tiap kartu canvas di Flow dan mencocokkannya secara semantik ke masing-masing adegan prompt di Meta-Gen.
+  - Setiap kartu canvas kini diberi badge sesuai nomor ordinal aslinya (misal: kartu aerial view diberi badge `⚡ MetaGen #2`, dan kartu low-angle diberi badge `⚡ MetaGen #1`), tanpa embel-embel sub-variasi `(A)/(B)`.
+  - Mengelompokkan hasil unduhan per-kartu (`results: [...]`), sehingga listener di Meta-Gen Studio mengupdate Kartu #1 dan Kartu #2 secara independen dan simultan.
+  - Menambahkan event bridge `METAGEN_REGISTER_AGENT_SCENES` dan fungsi `hydrateFlowBadges()` yang otomatis mengenali dan menempelkan badge semantik bahkan ketika pengguna menyalin prompt dan menempelkannya secara manual ke panel obrolan Google Flow Agent.
 - **Deploy ke Cloudflare Pages Selesai (`https://meta-gen-gue.pages.dev`)**:
   - Build dan deployment live dan aktif pada URL produksi: [https://meta-gen-gue.pages.dev](https://meta-gen-gue.pages.dev).
   - 12/12 unit tests Vitest (111 tests) 100% passed.
+- **Inisialisasi Otomatis "Project baru" di Google Flow ([extension/flow-bridge.js](file:///c:/App%20Tools/meta-gen-gue/extension/flow-bridge.js))**:
+  - Menambahkan deteksi tombol Material FAB `Project baru` (`button.new-project-button`) via `findNewProjectButton()` untuk skenario saat Google Flow baru dibuka di halaman dashboard (`https://flow.google.com/`).
+  - Implementasi `ensureActiveProject()` yang otomatis mengklik tombol tersebut dengan simulasi event pointer/mouse lengkap, menampilkan toast notifikasi *"Membuka Project baru otomatis..."*, dan menunggu transisi kanvas hingga 15 detik sebelum mengisi prompt.
+  - Menambahkan toleransi retry polling hingga 6 detik untuk editor ProseMirror guna menjamin kesiapan DOM sebelum injeksi teks.
+- **Aktivasi Otomatis Mode Agen Google Flow ([extension/flow-bridge.js](file:///c:/App%20Tools/meta-gen-gue/extension/flow-bridge.js), [extension/background.js](file:///c:/App%20Tools/meta-gen-gue/extension/background.js))**:
+  - Deteksi status presisi chip toggle Mode Agen (`isAgentModeActive()`): membedakan status mati (`aria-pressed="false"`, tanpa `checked`) vs aktif (`class="checked"`, `aria-pressed="true"`, dengan elemen glow).
+  - Implementasi `ensureAgentModeActive()`: jika status mati, otomatis mengklik tombol chip via 3 lapisan (DOM pointer/mouse, MAIN World Zone.js, dan hardware CDP) untuk menyalakan mode Agen sebelum prompt diisi. Jika sudah aktif, tombol dipertahankan menyala tanpa diklik ulang.
+- **Sinkronisasi Rasio Aspek & Jumlah Output Dual-Layer (Roadmap Fase 2 Selesai) ([extension/flow-bridge.js](file:///c:/App%20Tools/meta-gen-gue/extension/flow-bridge.js), [components/PromptGeneratorView.tsx](file:///c:/App%20Tools/meta-gen-gue/components/PromptGeneratorView.tsx))**:
+  - **Layer 1 (Direct Prompt Injection di Mode Agent)**:
+    - Di Google Flow Agent Mode, teks prompt disisipkan instruksi eksplisit per scene: `[Generate ${outputCount} image(s), Aspect Ratio: ${aspect}]` dan instruksi master agent prompt.
+    - Menghilangkan latensi pembukaan modal jika prompt dieksekusi oleh Agen cerdas Google Flow.
+  - **Layer 2 (Automated UI Settings Synchronization via Modal)**:
+    - Membaca status setelan aktif di Google Flow (`getCurrentFlowSettings` pada `button.settings-trigger-button`).
+    - Jika rasio aspek (`16:9`, `4:3`, `1:1`, `3:4`, `9:16`), jumlah output (`x1`, `x2`, `x3`, `x4`), atau mode (`Gambar` vs `Video`) belum cocok: otomatis membuka modal `flow-prompt-box-settings`, mengklik toggle yang sesuai dengan simulasi pointer/mouse Angular Ivy (`clickMaterialToggle`), dan menutup overlay via `Escape` & backdrop.
+    - Smart Skip (Zero Delay): Jika ringkasan setelan UI sudah cocok, pembukaan popover dilewati seketika.
+  - **Layer 3 (UI Controls di Meta-Gen Studio Toolbar)**:
+    - Menambahkan pemilih variasi instan `Out: x1 | x2 | x3 | x4` tepat di samping tombol `Agent Batch` dan `Gen Batch`.
+    - Pengguna dapat menentukan dengan 1-klik apakah ingin menghasilkan 1, 2, 3, atau 4 variasi gambar per prompt di Google Flow.
+- **Server Pengembangan Aktif**:
+  - Berjalan di `http://localhost:3000`.
 
 ## Currently Working On
-- Melanjutkan ke roadmap berikutnya: Sinkronisasi Rasio Gambar Google Flow (1:1, 16:9, 9:16).
+- Melanjutkan ke Fase 3: Modul 2K/4K Mass Downloader otomatis dari canvas Google Flow.
 
 ## Remaining Tasks (Roadmap)
-- [ ] **Sinkronisasi Rasio Gambar Google Flow**: Penyesuaian aspek rasio (1:1, 16:9, 9:16) ke setting switcher Flow secara otomatis sebelum prompt dieksekusi.
-- [ ] **Modul 2K/4K Mass Downloader**: Integrasi auto-click menu resolusi dan pre-scan zoom 50% ke extension.
+- [x] **Sinkronisasi Rasio Gambar Google Flow**: Penyesuaian aspek rasio (16:9, 1:1, 9:16, 4:3, 3:4) & jumlah output (x1-x4) otomatis.
+- [ ] **Modul 2K/4K Mass Downloader**: Otomasi klik menu 3-titik (`more_vert`) pada kartu hasil render di canvas Flow, memilih resolusi tertinggi (`2K Upscaled` / `4K Ultra HD`), dan routing subfolder download otomatis.
+- [ ] **Integrasi Watcher dengan FTP Bridge**: File unduhan otomatis dialirkan ke antrean penyematan ExifTool dan antrean upload FTP microstock.
 - [ ] **Modul Keyword Research**: Eksplorasi tren microstock, tag cloud interaktif, dan filter kata kunci terlarang di `components/KeywordResearchView.tsx`.
 
 ## Blockers / Errors
@@ -47,9 +78,11 @@ Pengembangan Ekstensi Meta-Gen Assistant & Flow Bridge: Smart Tagging, Multi-Var
 
 ## Files Recently Changed
 - `extension/flow-bridge.js`
-- `lib/prompt-agent/types.ts`
+- `extension/background.js`
+- `extension/content.js`
 - `components/PromptGeneratorView.tsx`
-- `docs/MASTER_PLAN_EXTENSION.md`
+- `.agents/memory/sessions/2026-10-21.md`
+- `.agents/memory/decisions.md`
 - `.agents/memory/current.md`
 
 

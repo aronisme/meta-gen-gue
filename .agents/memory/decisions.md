@@ -327,3 +327,75 @@
      - Menampilkan progress bar halus (0–100%), counter byte aktual (`14.2 / 48.0 MB`), kecepatan instan (`⚡ 3.4 MB/s`), status fase transfer, dan badge verifikasi engine metadata (`ExifTool` / `IPTC & XMP`).
      - Memperbarui `FtpBridgeStatusBanner` dengan badge `✨ ExifTool Active (v13.59)` dan menambahkan script `pnpm bridge:status` & `pnpm bridge:exiftool` di `package.json`.
 - **Rationale & Consequences**: Memberikan transparansi transfer 100% tanpa efek *freezing*, menjamin penanaman metadata otomatis pada file footage video, dan menjaga kompatibilitas penuh dengan sistem lama berkat arsitektur fallback cerdas.
+
+## [2026-10-21] Semantic Scene Disambiguation: Google Flow Agent Multi-Scene vs True Single-Prompt Variations
+- **Context**: 
+  1. Di Google Flow, satu eksekusi dapat menghasilkan banyak gambar dalam dua skenario yang berbeda:
+     - *Kasus A (True Variations)*: Satu prompt tunggal menghasilkan 2–4 gambar alternatif dari konsep yang sama.
+     - *Kasus B (Agent Mode Multi-Scene)*: Satu master prompt menghasilkan adegan berbeda (Scene 1, Scene 2) yang dirender sebagai baris kanvas independen dengan teks prompt unik masing-masing.
+  2. Sebelumnya, logika di `flow-bridge.js` menganggap setiap kali gambar baru > 1 sebagai variasi dari prompt pertama (`#1 (A)` dan `#1 (B)`), menyebabkan tertukarnya adegan dan gagal terisinya kartu prompt kedua di Meta-Gen Studio.
+- **Decision**:
+  1. **Diferensiasi Prompt Otomatis**: Memeriksa teks prompt aktual tiap baris kanvas via `extractTilePromptText()`. Jika baris memiliki prompt yang berbeda drastis, bridge menonaktifkan pelabelan sub-variasi `(A)/(B)`.
+  2. **Pencocokan Semantik per Adegan (`findBestMatchingScene`)**: Teks kartu kanvas dicocokkan ke array `scenes` yang dikirim dari Studio. Kartu adegan 2 (*Top-down aerial*) dipetakan ke ordinal 2 (`⚡ MetaGen #2`), dan kartu adegan 1 (*Low-angle*) dipetakan ke ordinal 1 (`⚡ MetaGen #1`).
+  3. **Multi-Card Result Grouping**: Bridge mengelompokkan hasil unduhan berdasarkan `cardId` (`results: [...]`), memungkinkan Meta-Gen Studio memperbarui seluruh kartu target secara simultan.
+  4. **State Persistence & Passive Hydration**: Menyimpan `metagen_agent_scenes` di `chrome.storage.local` saat prompt disalin, memungkinkan `hydrateFlowBadges()` secara pasif mengenali dan menempelkan badge semantik bahkan ketika pengguna menempelkan prompt secara manual ke panel obrolan Google Flow Agent.
+- **Rationale & Consequences**: Menjamin 100% presisi asosiasi visual adegan di kanvas Flow, menghilangkan bug kartu kosong di Studio, dan mempertahankan kebebasan alur kerja pengguna (baik via tombol otomatis maupun paste manual).
+
+## [2026-10-21] Google Flow Dashboard Auto-Project Initialization: New Project Button Detection & Transition
+- **Context**: 
+  1. Ketika Google Flow dibuka untuk pertama kali (URL `https://flow.google.com/`), pengguna berada di halaman dashboard / daftar proyek, bukan di kanvas project (`/project/...`).
+  2. Pada halaman dashboard, kotak prompt (ProseMirror / Angular `flow-prompt-box`) belum ada. Untuk masuk ke kanvas pembuatan gambar, pengguna harus mengklik tombol FAB Material `Project baru` (`button.new-project-button`).
+  3. Jika Meta-Gen memicu pembuatan prompt saat tab Flow masih di halaman dashboard, bridge sebelumnya langsung gagal dengan pesan error *"Kotak prompt Google Flow tidak ditemukan"*.
+- **Decision**:
+  1. **Deteksi Multi-Selektor Tombol `Project baru` (`findNewProjectButton`)**:
+     - Memeriksa `button.new-project-button`, `button.mat-mdc-extended-fab.new-project-button`, `button[mat-fab][extended]`.
+     - Memeriksa teks tombol ("Project baru", "Proyek baru", "New project", "Create project") dan ikon `<mat-icon>add</mat-icon>`.
+  2. **Simulasi Klik Hardware Lengkap (`clickNewProjectButton`)**:
+     - Mengirimkan sekuens event pointer & mouse terpercaya (`pointerover`, `pointerenter`, `pointerdown`, `mousedown`, `pointerup`, `mouseup`, `click`) dengan scroll ke tengah viewport untuk kompatibilitas penuh dengan Angular Material FAB & Zone.js.
+  3. **Auto-Project Navigation Guard (`ensureActiveProject`)**:
+     - Dipanggil di pre-flight `handleFlowGeneration` dan endpoint `FLOW_ENSURE_PROJECT`.
+     - Otomatis mengklik tombol `Project baru` jika kanvas belum aktif, menampilkan toast notifikasi *"Membuka Project baru otomatis..."*, dan menunggu transisi URL `/project/` serta inisialisasi ProseMirror editor hingga 15 detik.
+  4. **Resilient Editor Polling**: Menambahkan toleransi polling 6 detik pada pencarian editor prompt pasca-transisi navigasi.
+- **Rationale & Consequences**: Menghilangkan hambatan manual saat pertama kali membuka Google Flow, memungkinkan eksekusi otomatis ujung-ke-ujung (Zero Extra Clicks) dari Meta-Gen Studio langsung ke kanvas render Flow.
+
+## [2026-10-21] Google Flow Agent Mode Auto-Activation: Toggle Chip State Detection & Multi-Tier Trigger
+- **Context**: 
+  1. Di dalam kanvas proyek Google Flow (`https://flow.google.com/project/...`), terdapat toggle chip mode Agen (`<flow-agent-mode-toggle-chip>`).
+  2. Ketika tombol Agen mati/tidak aktif: `<flow-agent-mode-toggle-chip>` tidak memiliki kelas `checked` dan `<button class="agent-mode-chip" aria-pressed="false">`.
+  3. Ketika tombol Agen aktif/menyala: `<flow-agent-mode-toggle-chip class="checked">` dan `<button class="agent-mode-chip agent-mode-chip-checked" aria-pressed="true">` memiliki elemen glow (`.glow-fill`, `.glow-outline`).
+  4. Untuk eksekusi prompt multi-scene berstruktur Agent (seperti dari tombol *Agent Batch*), Google Flow wajib berada dalam status Agen Aktif. Jika tidak aktif, Flow hanya memperlakukan prompt sebagai pembuatan gambar standar tunggal.
+- **Decision**:
+  1. **Deteksi Status Presisi (`isAgentModeActive`)**:
+     - Menguji apakah chip memiliki kelas `checked`, tombol memiliki `aria-pressed="true"`, atau elemen `.glow-fill` hadir di DOM.
+     - Jika sudah aktif, sistem **tidak akan mengklik** (menghindari toggle off yang tidak disengaja).
+  2. **Multi-Tier Activation Trigger (`clickAgentModeButton` & `ensureAgentModeActive`)**:
+     - Jika terdeteksi tidak aktif (`aria-pressed="false"`), ekstensi memicu sekuens klik 3 lapis: DOM pointer/mouse, eksekusi aman di MAIN World Zone.js (`TRIGGER_MAIN_WORLD_CLICK_AGENT_MODE`), dan klik fisik hardware CDP (`TRIGGER_CDP_MOUSE_CLICK`).
+     - Menunggu hingga 3.5 detik untuk transisi status tombol ke `checked` / `aria-pressed="true"`.
+  3. **Inklusi ke Alur Eksekusi**:
+     - Dipanggil otomatis pada Step 0.5 di `handleFlowGeneration` segera setelah kanvas proyek `/project/...` terkonfirmasi aktif.
+- **Rationale & Consequences**: Menjamin 100% Google Flow berada di Mode Agen sebelum prompt multi-scene disuntikkan, menghilangkan kebutuhan pengguna menyalakan chip Agen secara manual, dan mencegah salah eksekusi di mode standar.
+
+## [2026-10-21] Google Flow Aspect Ratio & Module Settings Synchronization (Roadmap Fase 2)
+- **Context**: 
+  1. Di Google Flow, terdapat modul pengaturan popup (`button.settings-trigger-button` dengan ringkasan model, rasio, dan jumlah output).
+  2. Modul pengaturan memuat:
+     - Switcher Mode: `Gambar` vs `Video` (`flow-toggles[aria-label="Mode"]`).
+     - Switcher Rasio Aspek: `16:9`, `4:3`, `1:1`, `3:4`, `9:16` (`flow-toggles[aria-label="Rasio aspek"]`).
+     - Switcher Jumlah Output: `x1`, `x2`, `x3`, `x4` (`flow-toggles[aria-label="Jumlah output"]`).
+  3. Di Google Flow Agent Mode, instruksi rasio dan jumlah variasi juga dapat disisipkan langsung ke dalam teks prompt (misal: `"in 16:9 aspect ratio"`).
+  4. Pengguna membutuhkan sinkronisasi otomatis agar rasio yang dipilih di Meta-Gen Studio langsung diterapkan ke UI Google Flow tanpa klik manual.
+- **Decision**:
+  1. **Dual-Layer Aspect Ratio Control**:
+     - *Layer 1 (Prompt Semantics)*: Teks prompt Agent menyematkan klausul rasio eksplisit (`"in ${aspect} aspect ratio"`).
+     - *Layer 2 (UI Switcher Sync)*: Ekstensi membaca ringkasan setelan tombol via `getCurrentFlowSettings()`. Jika rasio sudah cocok dan bukan mode Video, ekstensi tidak perlu membuka popover (Zero Delay).
+  2. **Automated Settings Popover Configuration (`ensureFlowSettings`)**:
+     - Jika rasio belum cocok atau mode Video aktif:
+       1. Klik `button.settings-trigger-button`.
+       2. Beralih ke mode `Gambar` jika sebelumnya di mode `Video`.
+       3. Memilih rasio target (`16:9`, `1:1`, `9:16`, `4:3`, `3:4`) pada `flow-toggles[aria-label="Rasio aspek"]`.
+       4. Menutup overlay dengan tombol `Escape` dan klik backdrop.
+  3. **Inklusi Otomatis ke Pre-Flight**: Dipanggil pada Step 0.6 di `handleFlowGeneration` tepat setelah kanvas proyek dan mode Agen aktif.
+- **Rationale & Consequences**: Menjamin hasil render di Google Flow 100% konsisten dengan aspek rasio yang dipilih di Meta-Gen Studio, baik untuk single prompt maupun batch generation.
+
+
+

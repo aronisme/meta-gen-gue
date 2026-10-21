@@ -197,27 +197,617 @@ function savePromptToRegistry(token, data) {
 function hydrateFlowBadges() {
   if (!chrome?.storage?.local) return;
   try {
-    chrome.storage.local.get(['metagen_flow_registry'], (res) => {
-      const reg = res.metagen_flow_registry;
-      if (!reg || Object.keys(reg).length === 0) return;
+    chrome.storage.local.get(['metagen_flow_registry', 'metagen_agent_scenes'], (res) => {
+      const reg = res.metagen_flow_registry || {};
+      const agentScenes = res.metagen_agent_scenes || [];
 
-      document.querySelectorAll('img, video, flow-image-tile img').forEach((el) => {
+      document.querySelectorAll('img, video, flow-image-tile img').forEach(async (el) => {
         const token = getMediaToken(el);
-        if (token && reg[token]) {
-          const tileContainer =
-            el.closest('flow-grid-tile-container') ||
-            el.closest('flow-tile-container') ||
-            el.closest('flow-image-tile') ||
-            el.closest('.tile-row') ||
-            el.closest('[data-tile-id]') ||
-            el.parentElement;
-          if (tileContainer && !tileContainer.querySelector('.metagen-flow-badge')) {
+        if (!token) return;
+
+        const tileContainer =
+          el.closest('flow-grid-tile-container') ||
+          el.closest('flow-tile-container') ||
+          el.closest('flow-image-tile') ||
+          el.closest('.tile-row') ||
+          el.closest('[data-tile-id]') ||
+          el.parentElement;
+        if (!tileContainer) return;
+
+        // 1. Direct restore from registry
+        if (reg[token]) {
+          if (!tileContainer.querySelector('.metagen-flow-badge')) {
             tagCardWithPromptData(tileContainer, reg[token]);
+          }
+          return;
+        }
+
+        // 2. Discover unbadged tile matching active agent scenes (e.g. if user pasted to Agent manually)
+        if (!tileContainer.querySelector('.metagen-flow-badge') && agentScenes.length > 0) {
+          const matchedScene = findBestMatchingScene(tileContainer, agentScenes);
+          if (matchedScene) {
+            const cardData = {
+              cardId: matchedScene.cardId,
+              ordinal: matchedScene.ordinal,
+              variation: '',
+              title: matchedScene.title || '',
+              prompt: matchedScene.prompt || '',
+              token: token,
+              mediaId: el.getAttribute('data-media-id') || '',
+            };
+            tagCardWithPromptData(tileContainer, cardData);
+            savePromptToRegistry(token, cardData);
+
+            // Notify Meta-Gen Studio tab about discovered card image
+            try {
+              const dataUrl = await imageToDataUrl(el);
+              chrome.runtime.sendMessage({
+                type: 'FLOW_CARD_DISCOVERED',
+                result: {
+                  cardId: matchedScene.cardId,
+                  ordinal: matchedScene.ordinal,
+                  token: token,
+                  imageDataUrl: dataUrl,
+                },
+              });
+            } catch (e) {}
           }
         }
       });
     });
   } catch (e) {}
+}
+
+// Helper: Locate "New Project" / "Project baru" button on Google Flow dashboard
+function findNewProjectButton() {
+  // Strategy 1: Exact selectors from user's inspected button
+  const specificSelectors = [
+    'button.new-project-button',
+    '.new-project-button',
+    'button.mat-mdc-extended-fab.new-project-button',
+    'button.mdc-fab--extended.new-project-button',
+    'button.mat-mdc-fab.new-project-button',
+    'button[mat-fab][extended]',
+  ];
+  for (const sel of specificSelectors) {
+    const el = document.querySelector(sel);
+    if (el) return el;
+  }
+
+  // Strategy 2: Search buttons for text "Project baru" / "New project"
+  const allButtons = Array.from(document.querySelectorAll('button, a[role="button"]'));
+  for (const b of allButtons) {
+    if (b.classList.contains('new-project-button')) return b;
+    const txt = (b.textContent || '').trim().toLowerCase();
+    if (
+      txt.includes('project baru') ||
+      txt.includes('proyek baru') ||
+      txt.includes('new project') ||
+      txt.includes('create project')
+    ) {
+      return b;
+    }
+  }
+
+  // Strategy 3: Button with mat-icon "add" + "project"/"proyek"
+  for (const b of allButtons) {
+    const icons = Array.from(b.querySelectorAll('mat-icon, [role="img"], i, span'));
+    const hasAdd = icons.some((i) => {
+      const icText = (i.textContent || '').trim().toLowerCase();
+      const icType = (i.getAttribute('data-mat-icon-type') || '').toLowerCase();
+      return icText === 'add' || icType === 'add';
+    });
+    const txt = (b.textContent || '').trim().toLowerCase();
+    if (hasAdd && (txt.includes('project') || txt.includes('proyek') || b.hasAttribute('mat-fab'))) {
+      return b;
+    }
+  }
+
+  return null;
+}
+
+// Helper: Click "Project baru" button using multi-tier pointer simulation, MAIN world Zone.js, and CDP
+function clickNewProjectButton(btn) {
+  try {
+    btn.scrollIntoView({ behavior: 'instant', block: 'center', inline: 'center' });
+  } catch (e) {}
+
+  btn.focus();
+
+  const rect = btn.getBoundingClientRect();
+  const clickX = rect.width > 0 ? Math.round(rect.left + rect.width / 2) : 100;
+  const clickY = rect.height > 0 ? Math.round(rect.top + rect.height / 2) : 100;
+
+  // Find inner target elements to dispatch events on
+  const innerTargets = [
+    btn.querySelector('.mat-mdc-button-touch-target'),
+    btn.querySelector('.mdc-button__label'),
+    btn.querySelector('span'),
+    btn,
+  ].filter(Boolean);
+
+  const eventOpts = {
+    bubbles: true,
+    cancelable: true,
+    composed: true,
+    view: window,
+    clientX: clickX,
+    clientY: clickY,
+  };
+
+  // Tier 1: DOM Pointer & Mouse Events in Isolated World on both child and button
+  for (const target of innerTargets) {
+    target.dispatchEvent(new PointerEvent('pointerover', eventOpts));
+    target.dispatchEvent(new PointerEvent('pointerenter', eventOpts));
+    target.dispatchEvent(new PointerEvent('pointerdown', { ...eventOpts, isPrimary: true, button: 0 }));
+    target.dispatchEvent(new MouseEvent('mousedown', { ...eventOpts, button: 0 }));
+    target.dispatchEvent(new PointerEvent('pointerup', { ...eventOpts, isPrimary: true, button: 0 }));
+    target.dispatchEvent(new MouseEvent('mouseup', { ...eventOpts, button: 0 }));
+    try {
+      target.click();
+    } catch (e) {}
+  }
+  btn.click();
+
+  // Tier 2: Trigger click directly inside MAIN World (Angular Zone.js context)
+  try {
+    chrome.runtime.sendMessage({ type: 'TRIGGER_MAIN_WORLD_CLICK_NEW_PROJECT' });
+  } catch (e) {}
+
+  // Tier 3: Hardware-level CDP click via chrome.debugger
+  try {
+    if (rect.width > 0 && rect.height > 0) {
+      chrome.runtime.sendMessage({
+        type: 'TRIGGER_CDP_MOUSE_CLICK',
+        coords: { x: clickX, y: clickY },
+      });
+    }
+  } catch (e) {}
+}
+
+// Helper: Ensure Google Flow has an active project open (auto-clicks "Project baru" if on dashboard)
+async function ensureActiveProject() {
+  const isInsideProjectUrl = window.location.href.includes('/project/');
+  const initialNewButton = findNewProjectButton();
+
+  // RULE 1: If strictly on a /project/ URL and "Project baru" button is absent, project canvas is ready!
+  if (isInsideProjectUrl && !initialNewButton) {
+    console.log('[Meta-Gen Flow Bridge] Already inside active project canvas (/project/):', window.location.href);
+    return true;
+  }
+
+  console.log(
+    '[Meta-Gen Flow Bridge] Dashboard detected (isInsideProjectUrl:',
+    isInsideProjectUrl,
+    ', hasNewButton:',
+    !!initialNewButton,
+    '). Must create / open Project first before inputting prompt!'
+  );
+  showFlowToast('Google Flow', 'Membuat Proyek Baru terlebih dahulu...', false);
+
+  // RULE 2: Search for the "Project baru" button (polling up to 6s if page is still rendering)
+  let newProjBtn = initialNewButton;
+  if (!newProjBtn) {
+    const pollStart = Date.now();
+    while (Date.now() - pollStart < 6000 && !newProjBtn) {
+      await new Promise((r) => setTimeout(r, 300));
+      newProjBtn = findNewProjectButton();
+    }
+  }
+
+  if (newProjBtn) {
+    console.log('[Meta-Gen Flow Bridge] Tombol "Project baru" ditemukan! Mengklik tombol...', newProjBtn);
+    clickNewProjectButton(newProjBtn);
+
+    // RULE 3: Wait until the browser navigates into /project/
+    const startWait = Date.now();
+    while (Date.now() - startWait < 20000) {
+      await new Promise((r) => setTimeout(r, 600));
+
+      if (window.location.href.includes('/project/')) {
+        console.log('[Meta-Gen Flow Bridge] Navigasi berhasil masuk ke URL project:', window.location.href);
+        showFlowToast('Google Flow', 'Proyek baru siap! Mempersiapkan canvas...', false);
+        // Wait 1.5s for Angular / ProseMirror component tree on canvas to fully mount
+        await new Promise((r) => setTimeout(r, 1500));
+        return true;
+      }
+
+      // If still on dashboard after 3.5s, click again
+      if (Date.now() - startWait > 3500 && !window.location.href.includes('/project/')) {
+        const retryBtn = findNewProjectButton();
+        if (retryBtn) {
+          clickNewProjectButton(retryBtn);
+        }
+      }
+    }
+
+    console.warn('[Meta-Gen Flow Bridge] Timeout menunggu URL berubah menjadi /project/.');
+  } else {
+    console.warn('[Meta-Gen Flow Bridge] Tombol "Project baru" tidak ditemukan di dashboard.');
+  }
+
+  // Strict check: If STILL not on /project/, throw error so we do NOT type prompt on dashboard
+  if (!window.location.href.includes('/project/')) {
+    throw new Error('Google Flow belum beralih ke halaman project baru. Silakan klik tombol "Project baru" di Google Flow.');
+  }
+
+  return true;
+}
+
+// Helper: Check if Google Flow Agent Mode is currently active
+function isAgentModeActive() {
+  // Check container chip for 'checked' class
+  const chip = document.querySelector('flow-agent-mode-toggle-chip');
+  if (chip && chip.classList.contains('checked')) return true;
+
+  // Check button for aria-pressed="true" or 'agent-mode-chip-checked' class
+  const btn = document.querySelector('flow-agent-mode-toggle-chip button, button.agent-mode-chip');
+  if (btn) {
+    if (btn.getAttribute('aria-pressed') === 'true') return true;
+    if (btn.classList.contains('agent-mode-chip-checked')) return true;
+  }
+
+  // Check for glow elements present only when active
+  const glow = document.querySelector(
+    'flow-agent-mode-toggle-chip .glow-fill, flow-agent-mode-toggle-chip .glow-outline, button.agent-mode-chip .glow-fill'
+  );
+  if (glow) return true;
+
+  return false;
+}
+
+// Helper: Locate Agent Mode toggle button in Google Flow
+function findAgentModeButton() {
+  // Strategy 1: Specific selectors from user's inspected button
+  const specificSelectors = [
+    'flow-agent-mode-toggle-chip button.agent-mode-chip',
+    'flow-agent-mode-toggle-chip button',
+    'button.agent-mode-chip',
+    'flow-agent-mode-toggle-chip',
+  ];
+  for (const sel of specificSelectors) {
+    const el = document.querySelector(sel);
+    if (el) return el;
+  }
+
+  // Strategy 2: Search button containing .agent-mode-chip-label or text "Agen" / "Agent"
+  const allButtons = Array.from(document.querySelectorAll('button, [role="button"]'));
+  for (const b of allButtons) {
+    if (b.classList.contains('agent-mode-chip')) return b;
+    const label = b.querySelector('.agent-mode-chip-label');
+    if (label) return b;
+    const txt = (b.textContent || '').trim().toLowerCase();
+    if (txt === 'agen' || txt === 'agent' || b.closest('flow-agent-mode-toggle-chip')) {
+      return b;
+    }
+  }
+
+  return null;
+}
+
+// Helper: Click Agent Mode button using multi-tier pointer simulation, MAIN world Zone.js, and CDP
+function clickAgentModeButton(btn) {
+  try {
+    btn.scrollIntoView({ behavior: 'instant', block: 'center', inline: 'center' });
+  } catch (e) {}
+
+  btn.focus();
+
+  const rect = btn.getBoundingClientRect();
+  const clickX = rect.width > 0 ? Math.round(rect.left + rect.width / 2) : 100;
+  const clickY = rect.height > 0 ? Math.round(rect.top + rect.height / 2) : 100;
+
+  const innerTarget = btn.querySelector('.agent-mode-chip-label, span') || btn;
+
+  const eventOpts = {
+    bubbles: true,
+    cancelable: true,
+    composed: true,
+    view: window,
+    clientX: clickX,
+    clientY: clickY,
+  };
+
+  // Tier 1: DOM events in isolated world
+  innerTarget.dispatchEvent(new PointerEvent('pointerover', eventOpts));
+  innerTarget.dispatchEvent(new PointerEvent('pointerenter', eventOpts));
+  innerTarget.dispatchEvent(new PointerEvent('pointerdown', { ...eventOpts, isPrimary: true, button: 0 }));
+  innerTarget.dispatchEvent(new MouseEvent('mousedown', { ...eventOpts, button: 0 }));
+  innerTarget.dispatchEvent(new PointerEvent('pointerup', { ...eventOpts, isPrimary: true, button: 0 }));
+  innerTarget.dispatchEvent(new MouseEvent('mouseup', { ...eventOpts, button: 0 }));
+  try {
+    innerTarget.click();
+  } catch (e) {}
+  btn.click();
+
+  // Tier 2: MAIN world dispatch in Zone.js
+  try {
+    chrome.runtime.sendMessage({ type: 'TRIGGER_MAIN_WORLD_CLICK_AGENT_MODE' });
+  } catch (e) {}
+
+  // Tier 3: Hardware-level CDP click
+  try {
+    if (rect.width > 0 && rect.height > 0) {
+      chrome.runtime.sendMessage({
+        type: 'TRIGGER_CDP_MOUSE_CLICK',
+        coords: { x: clickX, y: clickY },
+      });
+    }
+  } catch (e) {}
+}
+
+// Helper: Ensure Google Flow Agent Mode is active
+async function ensureAgentModeActive() {
+  if (isAgentModeActive()) {
+    console.log('[Meta-Gen Flow Bridge] Mode Agen sudah AKTIF (checked / aria-pressed=true).');
+    return true;
+  }
+
+  console.log('[Meta-Gen Flow Bridge] Mode Agen saat ini NONAKTIF. Mencari tombol untuk mengaktifkan...');
+  showFlowToast('Google Flow', 'Mengaktifkan Mode Agen...', false);
+
+  let btn = findAgentModeButton();
+  if (!btn) {
+    const pollStart = Date.now();
+    while (Date.now() - pollStart < 4000 && !btn) {
+      await new Promise((r) => setTimeout(r, 250));
+      btn = findAgentModeButton();
+    }
+  }
+
+  if (btn) {
+    clickAgentModeButton(btn);
+
+    // Wait up to 3.5 seconds for class="checked" or aria-pressed="true"
+    const startWait = Date.now();
+    while (Date.now() - startWait < 3500) {
+      await new Promise((r) => setTimeout(r, 200));
+      if (isAgentModeActive()) {
+        console.log('[Meta-Gen Flow Bridge] Mode Agen BERHASIL diaktifkan!');
+        showFlowToast('Google Flow', 'Mode Agen aktif! Siap generate...', false);
+        await new Promise((r) => setTimeout(r, 400));
+        return true;
+      }
+    }
+    console.warn('[Meta-Gen Flow Bridge] Timeout menunggu status Mode Agen aktif.');
+  } else {
+    console.warn('[Meta-Gen Flow Bridge] Tombol Mode Agen tidak ditemukan di DOM.');
+  }
+
+  return isAgentModeActive();
+}
+
+// Helper: Normalize aspect ratio string ('16:9', '1:1', '9:16', '4:3', '3:4')
+function normalizeRatio(ratio) {
+  if (!ratio || typeof ratio !== 'string') return '16:9';
+  const clean = ratio.trim().replace(/\s+/g, '');
+  if (clean === '1:1' || clean === '1/1') return '1:1';
+  if (clean === '16:9' || clean === '16/9') return '16:9';
+  if (clean === '9:16' || clean === '9/16') return '9:16';
+  if (clean === '4:3' || clean === '4/3') return '4:3';
+  if (clean === '3:4' || clean === '3/4') return '3:4';
+  return '16:9';
+}
+
+// Helper: Safely click Angular Material Button Toggle using full pointer sequence
+function clickMaterialToggle(toggleEl) {
+  if (!toggleEl) return;
+  const btn = toggleEl.querySelector('button.mat-button-toggle-button') || toggleEl.querySelector('button') || toggleEl;
+  try {
+    btn.scrollIntoView({ behavior: 'instant', block: 'nearest' });
+  } catch (e) {}
+  btn.focus();
+  const opts = { bubbles: true, cancelable: true, composed: true, view: window };
+  btn.dispatchEvent(new PointerEvent('pointerdown', opts));
+  btn.dispatchEvent(new MouseEvent('mousedown', opts));
+  btn.dispatchEvent(new PointerEvent('pointerup', opts));
+  btn.dispatchEvent(new MouseEvent('mouseup', opts));
+  btn.click();
+}
+
+// Helper: Inspect current setting trigger button summary
+function getCurrentFlowSettings() {
+  const triggerBtn = document.querySelector(
+    'button.settings-trigger-button, button[aria-label="Pemicu setelan" i], button[aria-label*="setelan" i]'
+  );
+  if (!triggerBtn) return null;
+
+  const summary = triggerBtn.querySelector('.settings-summary');
+  const txt = (summary ? summary.textContent : triggerBtn.textContent || '').trim().toLowerCase();
+
+  const icon = triggerBtn.querySelector('mat-icon');
+  const iconText = (icon ? icon.textContent : '').trim().toLowerCase();
+
+  let ratio = '16:9';
+  if (iconText === 'crop_16_9' || txt.includes('16:9')) ratio = '16:9';
+  else if (iconText === 'crop_square' || txt.includes('1:1')) ratio = '1:1';
+  else if (iconText === 'crop_9_16' || txt.includes('9:16')) ratio = '9:16';
+  else if (iconText === 'crop_landscape' || txt.includes('4:3')) ratio = '4:3';
+  else if (iconText === 'crop_portrait' || txt.includes('3:4')) ratio = '3:4';
+
+  let count = 'x1';
+  if (txt.includes('x4')) count = 'x4';
+  else if (txt.includes('x3')) count = 'x3';
+  else if (txt.includes('x2')) count = 'x2';
+  else if (txt.includes('x1')) count = 'x1';
+
+  const isVideo = txt.includes('video') || iconText === 'videocam';
+
+  return { triggerBtn, ratio, count, isVideo, rawText: txt };
+}
+
+// Helper: Configure Google Flow Settings (Mode, Aspect Ratio, Outputs, Video Type)
+async function ensureFlowSettings(targetRatio = '16:9', targetOutput = null, targetMode = 'gambar', videoType = null) {
+  const normRatio = normalizeRatio(targetRatio);
+  const normOutput = targetOutput
+    ? (targetOutput.toString().startsWith('x') ? targetOutput.toLowerCase() : `x${targetOutput}`)
+    : null;
+  const isTargetVideo = (targetMode || 'gambar').toLowerCase() === 'video';
+
+  const current = getCurrentFlowSettings();
+  console.log('[Meta-Gen Flow Bridge] Current Flow Settings:', current, 'Target:', {
+    normRatio,
+    normOutput,
+    isTargetVideo,
+    videoType,
+  });
+
+  // Fast check: If settings already 100% match, skip opening popup (Zero Delay!)
+  const isModeMatch = isTargetVideo ? current?.isVideo : !current?.isVideo;
+  const isRatioMatch = current?.ratio === normRatio;
+  const isOutputMatch = !normOutput || isTargetVideo || current?.count === normOutput;
+
+  if (current && isModeMatch && isRatioMatch && isOutputMatch) {
+    console.log(
+      '[Meta-Gen Flow Bridge] Settings already 100% match target (Ratio: ' +
+        normRatio +
+        ', Output: ' +
+        (normOutput || current.count) +
+        ', Mode: ' +
+        (isTargetVideo ? 'Video' : 'Gambar') +
+        '). No popup needed.'
+    );
+    return true;
+  }
+
+  const triggerBtn = current?.triggerBtn || document.querySelector(
+    'button.settings-trigger-button, button[aria-label="Pemicu setelan" i], button[aria-label*="setelan" i]'
+  );
+
+  if (!triggerBtn) {
+    console.warn('[Meta-Gen Flow Bridge] Tombol pemicu setelan tidak ditemukan di DOM.');
+    return false;
+  }
+
+  showFlowToast(
+    'Google Flow',
+    `Menyesuaikan Setelan (${isTargetVideo ? 'Video' : 'Gambar'}, ${normRatio}${normOutput && !isTargetVideo ? ', ' + normOutput : ''})...`,
+    false
+  );
+
+  // 1. Open the settings overlay by clicking the trigger button
+  triggerBtn.scrollIntoView({ behavior: 'instant', block: 'center' });
+  triggerBtn.click();
+
+  // 2. Wait up to 2 seconds for settings overlay to appear
+  let overlay = null;
+  const overlayStart = Date.now();
+  while (Date.now() - overlayStart < 2000 && !overlay) {
+    await new Promise((r) => setTimeout(r, 120));
+    overlay = document.querySelector('flow-prompt-box-settings, .settings-content-overlay');
+  }
+
+  if (!overlay) {
+    console.warn('[Meta-Gen Flow Bridge] Overlay flow-prompt-box-settings tidak muncul setelah tombol diklik.');
+    return false;
+  }
+
+  // 3. Ensure Mode is correctly set ("Gambar" vs "Video")
+  const modeGroup = overlay.querySelector('flow-toggles[aria-label="Mode" i]');
+  if (modeGroup) {
+    const targetModeToggle = Array.from(modeGroup.querySelectorAll('.mat-button-toggle, button')).find((el) => {
+      const txt = (el.textContent || '').trim().toLowerCase();
+      const icon = el.querySelector('mat-icon')?.textContent || '';
+      return isTargetVideo ? (txt.includes('video') || icon === 'videocam') : (txt.includes('gambar') || icon === 'image');
+    });
+    if (targetModeToggle) {
+      const isChecked = targetModeToggle.classList.contains('mat-button-toggle-checked') ||
+        targetModeToggle.querySelector('button')?.getAttribute('aria-checked') === 'true';
+      if (!isChecked) {
+        console.log('[Meta-Gen Flow Bridge] Mengalihkan mode ke:', isTargetVideo ? 'Video' : 'Gambar');
+        clickMaterialToggle(targetModeToggle);
+        await new Promise((r) => setTimeout(r, 200));
+      }
+    }
+  }
+
+  // 3.5. If video mode and videoType specified ("Frame" vs "Bahan")
+  if (isTargetVideo && videoType) {
+    const videoTypeGroup = overlay.querySelector('flow-toggles[aria-label="Jenis video" i]');
+    if (videoTypeGroup) {
+      const vToggle = Array.from(videoTypeGroup.querySelectorAll('.mat-button-toggle')).find((el) => {
+        return (el.textContent || '').trim().toLowerCase().includes(videoType.toLowerCase());
+      });
+      if (vToggle) {
+        const isChecked = vToggle.classList.contains('mat-button-toggle-checked') ||
+          vToggle.querySelector('button')?.getAttribute('aria-checked') === 'true';
+        if (!isChecked) {
+          console.log('[Meta-Gen Flow Bridge] Memilih jenis video:', videoType);
+          clickMaterialToggle(vToggle);
+          await new Promise((r) => setTimeout(r, 150));
+        }
+      }
+    }
+  }
+
+  // 4. Select the desired Aspect Ratio
+  const ratioGroup = overlay.querySelector('flow-toggles[aria-label="Rasio aspek" i]');
+  if (ratioGroup) {
+    const ratioToggles = Array.from(ratioGroup.querySelectorAll('.mat-button-toggle'));
+    const targetToggle = ratioToggles.find((t) => {
+      const txt = (t.querySelector('.toggle-text')?.textContent || t.textContent || '').trim().toLowerCase();
+      return txt === normRatio;
+    });
+
+    if (targetToggle) {
+      const isChecked = targetToggle.classList.contains('mat-button-toggle-checked') ||
+        targetToggle.querySelector('button')?.getAttribute('aria-checked') === 'true';
+
+      if (!isChecked) {
+        console.log('[Meta-Gen Flow Bridge] Memilih rasio aspek:', normRatio);
+        clickMaterialToggle(targetToggle);
+        await new Promise((r) => setTimeout(r, 200));
+      } else {
+        console.log('[Meta-Gen Flow Bridge] Rasio aspek sudah terpilih:', normRatio);
+      }
+    } else {
+      console.warn('[Meta-Gen Flow Bridge] Toggle rasio aspek tidak ditemukan untuk:', normRatio);
+    }
+  }
+
+  // 5. Select Output Count if targetOutput specified (x1, x2, x3, x4) - max 4
+  if (normOutput && !isTargetVideo) {
+    const outputGroup = overlay.querySelector('flow-toggles[aria-label="Jumlah output" i]');
+    if (outputGroup) {
+      const outputToggles = Array.from(outputGroup.querySelectorAll('.mat-button-toggle'));
+      const targetToggle = outputToggles.find((t) => {
+        const txt = (t.querySelector('.toggle-text')?.textContent || t.textContent || '').trim().toLowerCase();
+        return txt === normOutput;
+      });
+
+      if (targetToggle) {
+        const isChecked = targetToggle.classList.contains('mat-button-toggle-checked') ||
+          targetToggle.querySelector('button')?.getAttribute('aria-checked') === 'true';
+
+        if (!isChecked) {
+          console.log('[Meta-Gen Flow Bridge] Memilih jumlah output:', normOutput);
+          clickMaterialToggle(targetToggle);
+          await new Promise((r) => setTimeout(r, 200));
+        } else {
+          console.log('[Meta-Gen Flow Bridge] Jumlah output sudah terpilih:', normOutput);
+        }
+      } else {
+        console.warn('[Meta-Gen Flow Bridge] Toggle jumlah output tidak ditemukan untuk:', normOutput);
+      }
+    }
+  }
+
+  // 6. Close the overlay
+  document.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', code: 'Escape', keyCode: 27, bubbles: true }));
+  const backdrop = document.querySelector('.cdk-overlay-backdrop');
+  if (backdrop) backdrop.click();
+
+  await new Promise((r) => setTimeout(r, 250));
+
+  // If overlay is still present in DOM, toggle trigger button again to dismiss
+  if (document.querySelector('flow-prompt-box-settings, .settings-content-overlay')) {
+    try {
+      triggerBtn.click();
+    } catch (e) {}
+  }
+
+  console.log('[Meta-Gen Flow Bridge] Konfigurasi setelan Google Flow selesai.');
+  return true;
 }
 
 // Helper: Ensure Google Flow is in "Batch" view mode for clear per-image prompt visibility
@@ -369,6 +959,44 @@ function isTileMatchingTargetPrompt(tileElement, targetPrompt) {
 
   const matchedWords = targetWords.filter((w) => tileText.includes(w));
   return matchedWords.length >= 2 || matchedWords.length / targetWords.length >= 0.15;
+}
+
+// Helper: Find best matching scene for an Agent Batch multi-scene tile
+function findBestMatchingScene(tileElement, scenes) {
+  if (!scenes || !Array.isArray(scenes) || scenes.length === 0) return null;
+  const tileText = extractTilePromptText(tileElement).toLowerCase();
+  if (!tileText) return null;
+
+  let bestScene = null;
+  let bestScore = -1;
+
+  for (const scene of scenes) {
+    const scenePrompt = (scene.prompt || '').toLowerCase();
+    const sceneTitle = (scene.title || '').toLowerCase();
+
+    // Direct substring or inclusion
+    if (scenePrompt && (tileText.includes(scenePrompt.slice(0, 35)) || scenePrompt.includes(tileText.slice(0, 35)))) {
+      return scene;
+    }
+
+    // Keyword overlap
+    const sceneWords = `${scenePrompt} ${sceneTitle}`
+      .replace(/[^a-z0-9\s]/g, '')
+      .split(/\s+/)
+      .filter((w) => w.length > 3);
+
+    if (sceneWords.length === 0) continue;
+
+    const matched = sceneWords.filter((w) => tileText.includes(w));
+    const score = matched.length / sceneWords.length;
+
+    if (score > bestScore && (matched.length >= 2 || score >= 0.15)) {
+      bestScore = score;
+      bestScene = scene;
+    }
+  }
+
+  return bestScene;
 }
 
 // Helper: Convert image to Data URL safely
@@ -526,11 +1154,28 @@ function clickSubmitButton(btn) {
 
 // Main Flow Generation Handler
 async function handleFlowGeneration(payload) {
-  const { cardId, prompt, ratio, ordinal, title } = payload;
+  const { cardId, prompt, ratio, ordinal, title, outputCount, mode, videoType } = payload;
   console.log('[Meta-Gen Flow Bridge] Starting generation task for card:', cardId, 'Ordinal:', ordinal, 'prompt length:', prompt?.length);
   showFlowToast('Meta-Gen: Menerima Prompt...', 'Sedang mempersiapkan input di Google Flow...', false);
 
-  // 0. Dismiss any blocking cookie banner & Ensure Batch View Mode
+  // 0. Ensure an active project canvas is open (Auto-clicks "Project baru" if on dashboard)
+  await ensureActiveProject();
+
+  // Strict Guard: DO NOT PROCEED IF NOT IN A PROJECT CANVAS!
+  if (!window.location.href.includes('/project/')) {
+    throw new Error('Gagal membuka project baru di Google Flow. Silakan klik tombol "Project baru" di tab Flow.');
+  }
+
+  // 0.5. Ensure Agent Mode is Active (by user rule: kalau sudah di halaman proyek aktifkan mode agent)
+  await ensureAgentModeActive();
+
+  // 0.6. Synchronize Aspect Ratio & Flow Settings (16:9, 1:1, 9:16, 4:3, 3:4, output count x1-x4, and mode)
+  const targetOutput = outputCount
+    ? (outputCount.toString().startsWith('x') ? outputCount : `x${outputCount}`)
+    : null;
+  await ensureFlowSettings(ratio || '16:9', targetOutput, mode || 'gambar', videoType || null);
+
+  // Dismiss any blocking cookie banner & Ensure Batch View Mode
   dismissGoogleCookieBar();
   await ensureBatchViewMode();
 
@@ -543,19 +1188,31 @@ async function handleFlowGeneration(payload) {
   console.log('[Meta-Gen Flow Bridge] Baseline media count:', baselineTokens.size);
 
   // 2. Locate prompt input (ProseMirror on flow.google.com, Angular flow-prompt-box, or ContentEditable)
-  const editorCandidates = [
-    document.querySelector('div.ProseMirror[contenteditable="true"]'),
-    document.querySelector('.ProseMirror[contenteditable="true"]'),
-    document.querySelector('.ProseMirror'),
-    document.querySelector('flow-prompt-box [contenteditable="true"]'),
-    document.querySelector('div[role="textbox"][data-slate-editor="true"]'),
-    document.querySelector('flow-prompt-box textarea'),
-    document.querySelector('[contenteditable="true"]:not([aria-hidden="true"])'),
-    document.querySelector('textarea:not([aria-hidden="true"])'),
-    document.querySelector('[contenteditable="true"]'),
-    document.querySelector('input[type="text"][placeholder*="prompt" i]'),
-  ];
-  const editor = editorCandidates.find((el) => el && el.offsetParent !== null) || editorCandidates.find(Boolean);
+  let editor = null;
+  const findEditor = () => {
+    const editorCandidates = [
+      document.querySelector('div.ProseMirror[contenteditable="true"]'),
+      document.querySelector('.ProseMirror[contenteditable="true"]'),
+      document.querySelector('.ProseMirror'),
+      document.querySelector('flow-prompt-box [contenteditable="true"]'),
+      document.querySelector('div[role="textbox"][data-slate-editor="true"]'),
+      document.querySelector('flow-prompt-box textarea'),
+      document.querySelector('[contenteditable="true"]:not([aria-hidden="true"])'),
+      document.querySelector('textarea:not([aria-hidden="true"])'),
+      document.querySelector('[contenteditable="true"]'),
+      document.querySelector('input[type="text"][placeholder*="prompt" i]'),
+    ];
+    return editorCandidates.find((el) => el && el.offsetParent !== null) || editorCandidates.find(Boolean);
+  };
+
+  editor = findEditor();
+  if (!editor) {
+    const pollStart = Date.now();
+    while (Date.now() - pollStart < 6000 && !editor) {
+      await new Promise((r) => setTimeout(r, 500));
+      editor = findEditor();
+    }
+  }
 
   if (!editor) {
     throw new Error('Kotak prompt Google Flow tidak ditemukan. Pastikan Anda berada di halaman project Flow.');
@@ -911,20 +1568,82 @@ async function handleFlowGeneration(payload) {
     throw new Error('Waktu habis (Timeout): Gambar tidak muncul di canvas Flow setelah 180 detik.');
   }
 
-  // 10. Tag ALL Discovered Variations in Google Flow DOM & Add ALL to Baseline
-  const isMultiple = detectedBatchItems.length > 1;
-  const variationLetters = ['A', 'B', 'C', 'D', 'E', 'F'];
+  // 10. Check if this generation is an Agent Batch (Multi-Scene) vs Standard Variations
+  const isAgentBatch = !!(payload.isAgentBatch || (payload.scenes && payload.scenes.length > 1));
+  const scenesList = payload.scenes || [];
 
+  // Check if discovered tiles have distinctly different prompt texts from each other
+  const tilePrompts = detectedBatchItems
+    .map((item) => extractTilePromptText(item.tileContainer))
+    .filter(Boolean);
+  const uniqueTilePrompts = new Set(tilePrompts);
+  const hasDistinctTilePrompts = uniqueTilePrompts.size > 1;
+
+  const isMultiSceneRun = isAgentBatch || (scenesList.length > 1 && hasDistinctTilePrompts);
+
+  const variationLetters = ['A', 'B', 'C', 'D', 'E', 'F'];
+  const sceneMatchCounters = {}; // cardId -> count of items matching this scene
+
+  // If multi-scene, track which items belong to which scene
+  const itemSceneAssignments = [];
+  const assignedSceneCardIds = new Set();
+
+  if (isMultiSceneRun && scenesList.length > 0) {
+    for (let idx = 0; idx < detectedBatchItems.length; idx++) {
+      const item = detectedBatchItems[idx];
+      let matchedScene = findBestMatchingScene(item.tileContainer, scenesList);
+
+      // If no semantic match, fallback to remaining unassigned scene
+      if (!matchedScene) {
+        matchedScene = scenesList.find((s) => !assignedSceneCardIds.has(s.cardId)) || scenesList[idx % scenesList.length];
+      }
+
+      if (matchedScene) {
+        assignedSceneCardIds.add(matchedScene.cardId);
+        sceneMatchCounters[matchedScene.cardId] = (sceneMatchCounters[matchedScene.cardId] || 0) + 1;
+      }
+
+      itemSceneAssignments.push(matchedScene);
+    }
+  }
+
+  // Tag items and populate registry
   for (let idx = 0; idx < detectedBatchItems.length; idx++) {
     const item = detectedBatchItems[idx];
-    const varLetter = isMultiple ? (variationLetters[idx] || String(idx + 1)) : '';
+    let targetCardId = cardId;
+    let targetOrdinal = ordinal || 1;
+    let targetTitle = title || '';
+    let targetPromptText = prompt;
+    let varLetter = '';
+
+    if (isMultiSceneRun && itemSceneAssignments[idx]) {
+      const scene = itemSceneAssignments[idx];
+      targetCardId = scene.cardId;
+      targetOrdinal = scene.ordinal || idx + 1;
+      targetTitle = scene.title || '';
+      targetPromptText = scene.prompt || prompt;
+
+      // Only assign variation letter (A, B) if multiple images matched the SAME scene
+      const totalMatchingThisScene = sceneMatchCounters[scene.cardId] || 1;
+      if (totalMatchingThisScene > 1) {
+        const currentMatchIdx = (sceneMatchCounters[`${scene.cardId}_seen`] || 0);
+        sceneMatchCounters[`${scene.cardId}_seen`] = currentMatchIdx + 1;
+        varLetter = variationLetters[currentMatchIdx] || String(currentMatchIdx + 1);
+      } else {
+        varLetter = ''; // Standalone scene, clean badge like '⚡ MetaGen #1'
+      }
+    } else {
+      // Standard single prompt variation logic
+      const isMultiple = detectedBatchItems.length > 1;
+      varLetter = isMultiple ? (variationLetters[idx] || String(idx + 1)) : '';
+    }
 
     const cardData = {
-      cardId: cardId,
-      ordinal: ordinal || 1,
+      cardId: targetCardId,
+      ordinal: targetOrdinal,
       variation: varLetter,
-      title: title || '',
-      prompt: prompt,
+      title: targetTitle,
+      prompt: targetPromptText,
       ratio: ratio || '16:9',
       token: item.token,
       mediaId: item.mediaId,
@@ -936,15 +1655,13 @@ async function handleFlowGeneration(payload) {
     }
 
     savePromptToRegistry(item.token, cardData);
-
-    // CRITICAL: Consume token into baselineTokens so next prompts will NEVER touch it!
     baselineTokens.add(item.token);
   }
 
-  // 11. Extract All Variations Data to Return to Meta-Gen Studio
-  showFlowToast('Meta-Gen: Gambar Selesai!', `Menyimpan ${detectedBatchItems.length} variasi gambar #${ordinal || 1}...`, true);
+  // 11. Extract All Images Data & Group by CardId
+  showFlowToast('Meta-Gen: Gambar Selesai!', `Menyimpan ${detectedBatchItems.length} gambar hasil render...`, true);
 
-  const variationsList = [];
+  const extractedMediaItems = [];
   for (let idx = 0; idx < detectedBatchItems.length; idx++) {
     const it = detectedBatchItems[idx];
     const itImg = it.img;
@@ -957,28 +1674,69 @@ async function handleFlowGeneration(payload) {
       : itImg.src;
 
     const itBase64 = await imageToDataUrl(itImg, prefUrl);
-    variationsList.push({
-      letter: isMultiple ? (variationLetters[idx] || String(idx + 1)) : 'A',
+    const assignedScene = itemSceneAssignments[idx];
+
+    extractedMediaItems.push({
+      cardId: assignedScene?.cardId || cardId,
+      ordinal: assignedScene?.ordinal || ordinal || 1,
+      title: assignedScene?.title || title || '',
       token: it.token,
       dataUrl: itBase64,
       mediaId: itMediaId,
     });
   }
 
-  const primaryItem = detectedBatchItems[0];
-  const primaryDataUrl = variationsList[0]?.dataUrl || '';
+  // Group by cardId for multi-scene support
+  const resultsByCard = [];
+  const cardGroupMap = new Map();
 
-  showFlowToast('✓ Meta-Gen: Selesai!', `Prompt #${ordinal || 1} (${variationsList.length} variasi) siap di Studio.`, true);
+  for (const item of extractedMediaItems) {
+    if (!cardGroupMap.has(item.cardId)) {
+      cardGroupMap.set(item.cardId, []);
+    }
+    cardGroupMap.get(item.cardId).push(item);
+  }
+
+  for (const [cId, items] of cardGroupMap.entries()) {
+    const first = items[0];
+    const variations = items.map((it, i) => ({
+      letter: items.length > 1 ? (variationLetters[i] || String(i + 1)) : 'A',
+      token: it.token,
+      dataUrl: it.dataUrl,
+      mediaId: it.mediaId,
+    }));
+
+    resultsByCard.push({
+      cardId: cId,
+      ordinal: first.ordinal,
+      title: first.title,
+      token: first.token,
+      imageDataUrl: variations[0]?.dataUrl || '',
+      variations: variations,
+      variationsCount: variations.length,
+    });
+  }
+
+  const primaryItem = resultsByCard[0] || {};
+  showFlowToast(
+    '✓ Meta-Gen: Selesai!',
+    isMultiSceneRun
+      ? `${resultsByCard.length} adegan siap di Meta-Gen Studio.`
+      : `Prompt #${ordinal || 1} (${extractedMediaItems.length} variasi) siap di Studio.`,
+    true
+  );
 
   return {
     success: true,
-    cardId: cardId,
-    ordinal: ordinal,
-    title: title,
-    token: primaryItem.token,
-    variationsCount: variationsList.length,
-    imageDataUrl: primaryDataUrl,
-    variations: variationsList,
+    isAgentBatch: isMultiSceneRun,
+    results: resultsByCard,
+    cardId: primaryItem.cardId || cardId,
+    ordinal: primaryItem.ordinal || ordinal,
+    title: primaryItem.title || title,
+    token: primaryItem.token || detectedBatchItems[0]?.token,
+    variationsCount: extractedMediaItems.length,
+    imageDataUrl: primaryItem.imageDataUrl || extractedMediaItems[0]?.dataUrl || '',
+    variations: primaryItem.variations || extractedMediaItems.map((m, i) => ({ letter: variationLetters[i] || 'A', ...m })),
     filename: `Flow_Prompt_${ordinal || '1'}_${Date.now().toString().slice(-4)}.jpg`,
   };
 }
@@ -986,7 +1744,27 @@ async function handleFlowGeneration(payload) {
 // Listen for messages from background.js
 chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
   if (message.action === 'FLOW_PING') {
-    sendResponse({ active: true, url: window.location.href });
+    sendResponse({
+      active: true,
+      url: window.location.href,
+      hasProject: window.location.href.includes('/project/'),
+      hasNewProjectButton: !!findNewProjectButton(),
+      isAgentModeActive: isAgentModeActive(),
+    });
+    return true;
+  }
+
+  if (message.action === 'FLOW_ENSURE_PROJECT') {
+    ensureActiveProject().then((ok) => {
+      sendResponse({ success: ok, url: window.location.href });
+    });
+    return true;
+  }
+
+  if (message.action === 'FLOW_ENSURE_AGENT_MODE') {
+    ensureAgentModeActive().then((ok) => {
+      sendResponse({ success: ok, isAgentModeActive: isAgentModeActive() });
+    });
     return true;
   }
 

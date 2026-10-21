@@ -471,6 +471,15 @@ if (isMetaGenTab) {
         );
       }
     }
+
+    if (event.data?.type === 'METAGEN_REGISTER_AGENT_SCENES') {
+      try {
+        chrome.runtime.sendMessage({
+          type: 'REGISTER_AGENT_SCENES',
+          payload: event.data.payload,
+        });
+      } catch (e) {}
+    }
   });
 
   chrome.runtime.sendMessage({ type: 'CHECK_PENDING_QUEUE' }, (response) => {
