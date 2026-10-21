@@ -61,6 +61,8 @@ export interface PromptCardItem {
   flowStatus?: 'idle' | 'generating' | 'completed' | 'error';
   variations?: FlowVariationItem[];
   selectedVariationIndex?: number;
+  mediaToken?: string;
+  mediaId?: string;
 }
 
 export interface FlowVariationItem {

@@ -440,5 +440,34 @@
      - Mengklik `targetItem` menggunakan `targetItem.focus()`, `mouseenter`, `mousedown`, `click()`, `mouseup()`, dan jeda 350ms sebelum menutup menu.
 - **Rationale & Consequences**: Menjamin 100% opsi resolusi 2K, 4K, maupun 1K terpilih dan terpicu dengan akurat di Google Flow tanpa kegagalan menu.
 
+## [2026-10-21] Eliminasi Skroll Mentok & Zoom 50%: Adopsi Sistem Tracking Internal Meta-Gen untuk Mass Downloader
+- **Context**: 
+  1. Pengguna memberikan instruksi tegas: *"kita gak perlu skroll sampai mentok untuk treking. kita punya sistem treking sendiri"*.
+  2. Implementasi sebelumnya yang mengadopsi cara kerja ekstensi pihak ketiga (`flow 2k downloader`) menggunakan metode *brute-force blind scan*:
+     - Mengubah zoom browser menjadi `50%` (`document.body.style.zoom = '50%'`).
+     - Melakukan auto-scroll ke bawah berkali-kali hingga mentok di ujung kanvas (`noChange >= 10`).
+     - Mengembalikan zoom ke 100% dan scroll kembali ke paling atas.
+  3. Hal ini sangat lambat, mengacaukan tampilan pengguna, dan tidak perlu dilakukan karena Meta-Gen sudah memiliki sistem pelacakan sendiri yang mencatat semua aset gambar yang dihasilkan:
+     - `metagen_flow_registry` di `chrome.storage.local` (memetakan token -> cardId, ordinal, prompt, mediaId).
+     - `metagen_agent_scenes` di `chrome.storage.local` (daftar adegan terdaftar).
+     - Tagging DOM langsung: atribut `[data-metagen-card-id]`, `[data-metagen-token]`, `[data-metagen-ordinal]`, dan badge visual `.metagen-flow-badge`.
+     - Data sesi aktif di Meta-Gen Studio (`prompts` array berisi cardId, ordinal, mediaToken, variations).
+- **Decision**:
+  1. **Hapus Total Zoom 50% dan Pre-Scan Skroll Mentok**:
+     - Menghapus manipulasi `document.body.style.zoom`.
+     - Menghapus perulangan while-loop yang melakukan scroll ke bawah sampai ujung kanvas.
+     - Menghapus reset scroll ke posisi paling atas.
+  2. **Pengambilan Antrean Unduhan Berbasis Tracking Internal (`getTrackedDownloadTargets`)**:
+     - *Prioritas 1*: Mengambil daftar kartu target langsung dari Meta-Gen Studio UI (`payload.targetCards`) yang dikirim saat tombol unduh ditekan.
+     - *Prioritas 2*: Memeriksa elemen DOM yang telah ditandai dengan badge Meta-Gen (`[data-metagen-card-id]`, `.metagen-flow-badge`, `[data-metagen-token]`).
+     - *Prioritas 3*: Mengambil data dari `metagen_flow_registry` di `chrome.storage.local`.
+     - *Fallback (jika bukan batch Meta-Gen)*: Hanya mengambil tile yang sedang terlihat (*currently visible*) di kanvas tanpa melakukan scroll ke bawah.
+  3. **Pencarian Target Pintar & Terarah Tanpa Skroll Mentok (`findTrackedTile`)**:
+     - Menemukan tile langsung via query selector `[data-metagen-card-id]`, `[data-metagen-token]`, `[data-media-id]`, atau `[data-metagen-ordinal]` (instan 0ms jika sudah dirender).
+     - Jika berada sedikit di luar viewport akibat virtual-scroll Angular, hanya melakukan maksimal 3 kali dorongan scroll halus (*gentle nudge* 400px), dan langsung berhenti seketika saat elemen ditemukan.
+  4. **Pembaruan Payload di Studio UI (`PromptGeneratorView.tsx`)**:
+     - Menyerahkan array `targetCards` dari sesi aktif Studio (`cardId`, `ordinal`, `token`, `mediaId`, `hasImage`) ke background payload saat tombol unduh ditekan.
+- **Rationale & Consequences**: Proses unduh dimulai secara instan tanpa jeda pemindaian yang memakan waktu lama, kanvas pengguna tetap tenang tanpa zoom 50% atau getaran scroll mentok, dan hanya kartu milik sesi Meta-Gen yang diunduh secara tepat sasaran.
+
 
 

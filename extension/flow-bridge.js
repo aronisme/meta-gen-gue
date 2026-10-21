@@ -1829,7 +1829,6 @@ async function handleFlowGeneration(payload) {
 // ========================================================
 let isMassDownloading = false;
 let downloadedIds = new Set();
-let massDownloaderOriginalZoom = '';
 
 // Load download history from local storage
 if (typeof chrome !== 'undefined' && chrome.storage?.local) {
@@ -1903,13 +1902,18 @@ function getAllTilesInDom() {
 
 function getTileIdentifier(tile) {
   if (!tile) return null;
+  const cardId = tile.getAttribute('data-metagen-card-id');
+  if (cardId) return 'card_' + cardId;
+
+  const token = tile.getAttribute('data-metagen-token');
+  if (token) return 'token_' + token;
+
   const imgWithMediaId = tile.querySelector('img[data-media-id], [data-media-id]') || (tile.hasAttribute('data-media-id') ? tile : null);
   if (imgWithMediaId?.getAttribute('data-media-id')) {
     return 'media_' + imgWithMediaId.getAttribute('data-media-id');
   }
   if (tile.getAttribute('data-tile-id')) return tile.getAttribute('data-tile-id');
   if (tile.getAttribute('data-fad-id')) return tile.getAttribute('data-fad-id');
-  if (tile.getAttribute('data-metagen-token')) return tile.getAttribute('data-metagen-token');
 
   const img = tile.querySelector('img') || (tile.tagName === 'IMG' ? tile : null);
   if (img?.src) {
@@ -1928,6 +1932,16 @@ function markTileWithId(tile, id) {
 
 function findTileInDom(tileId) {
   if (!tileId) return null;
+  if (tileId.startsWith('card_')) {
+    const cId = tileId.replace('card_', '');
+    const byCard = document.querySelector(`[data-metagen-card-id="${cId}"]`);
+    if (byCard) return byCard;
+  }
+  if (tileId.startsWith('token_')) {
+    const tId = tileId.replace('token_', '');
+    const byToken = document.querySelector(`[data-metagen-token="${tId}"]`);
+    if (byToken) return byToken;
+  }
   if (tileId.startsWith('media_')) {
     const mediaId = tileId.replace('media_', '');
     const img = document.querySelector(`img[data-media-id="${mediaId}"], [data-media-id="${mediaId}"]`);
@@ -1951,36 +1965,199 @@ function findTileInDom(tileId) {
   return null;
 }
 
-async function findAndGetTile(tileId) {
-  let tile = findTileInDom(tileId);
-  if (tile) return tile;
+// Smart Targeted Tile Lookup using Meta-Gen Tracking System (NO zoom, NO scrolling to bottom)
+async function findTrackedTile(target) {
+  if (!target) return null;
 
-  const activeContainer = getScrollContainer();
-  let lastTop = -1;
-  let noChange = 0;
-
-  while (isMassDownloading) {
-    scrollContainerDown(activeContainer, 350);
-    await new Promise((r) => setTimeout(r, 500));
-
-    tile = findTileInDom(tileId);
-    if (tile) return tile;
-
-    const currentTop = getScrollPos(activeContainer);
-    if (currentTop === lastTop) {
-      noChange++;
-      if (noChange >= 6) {
-        if (activeContainer === window) window.scrollTo({ top: 0 });
-        else activeContainer.scrollTop = 0;
-        await new Promise((r) => setTimeout(r, 1000));
-        break;
-      }
-    } else {
-      noChange = 0;
-    }
-    lastTop = currentTop;
+  // 1. Direct match by cardId
+  if (target.cardId) {
+    const el = document.querySelector(`[data-metagen-card-id="${target.cardId}"]`);
+    if (el) return el;
   }
-  return findTileInDom(tileId);
+
+  // 2. Direct match by token
+  if (target.token) {
+    const el = document.querySelector(`[data-metagen-token="${target.token}"]`);
+    if (el) return el;
+
+    const imgs = Array.from(document.querySelectorAll('img, video'));
+    for (const img of imgs) {
+      if (getMediaToken(img) === target.token || (img.src && img.src.includes(target.token))) {
+        const container =
+          img.closest('flow-grid-tile-container, flow-tile-container, flow-image-tile, .tile-row, [data-tile-id]') ||
+          img.parentElement;
+        if (container) return container;
+      }
+    }
+  }
+
+  // 3. Direct match by mediaId
+  if (target.mediaId) {
+    const img = document.querySelector(`img[data-media-id="${target.mediaId}"], [data-media-id="${target.mediaId}"]`);
+    if (img) {
+      const container =
+        img.closest('flow-grid-tile-container, flow-tile-container, flow-image-tile, .tile-row, [data-tile-id]') ||
+        img.parentElement;
+      if (container) return container;
+    }
+  }
+
+  // 4. Match by ordinal
+  if (target.ordinal) {
+    const el = document.querySelector(`[data-metagen-ordinal="${target.ordinal}"]`);
+    if (el) return el;
+  }
+
+  // 5. Target has attached tile
+  if (target.tile && target.tile.isConnected) {
+    return target.tile;
+  }
+
+  // 6. Generic ID lookup in findTileInDom
+  if (target.id) {
+    const generic = findTileInDom(target.id);
+    if (generic) return generic;
+  }
+
+  // 7. Virtual Scroll Nudge: max 3 gentle 400px nudges (HANYA jika berada sedikit di luar viewport, TIDAK sampai mentok)
+  const activeContainer = getScrollContainer();
+  let nudgeSteps = 0;
+  while (isMassDownloading && nudgeSteps < 3) {
+    scrollContainerDown(activeContainer, 400);
+    await new Promise((r) => setTimeout(r, 400));
+    nudgeSteps++;
+
+    if (target.cardId) {
+      const el = document.querySelector(`[data-metagen-card-id="${target.cardId}"]`);
+      if (el) return el;
+    }
+    if (target.token) {
+      const el = document.querySelector(`[data-metagen-token="${target.token}"]`);
+      if (el) return el;
+    }
+    if (target.id) {
+      const found = findTileInDom(target.id);
+      if (found) return found;
+    }
+  }
+
+  return null;
+}
+
+// Backwards-compatible tile finder
+async function findAndGetTile(tileId) {
+  return findTrackedTile({ id: tileId });
+}
+
+// Helper: Extract targets directly from Meta-Gen tracking system
+async function getTrackedDownloadTargets(options = {}) {
+  try {
+    hydrateFlowBadges();
+  } catch (e) {}
+  await new Promise((r) => setTimeout(r, 200));
+
+  const storageData = await new Promise((resolve) => {
+    if (typeof chrome !== 'undefined' && chrome.storage?.local) {
+      chrome.storage.local.get(['metagen_flow_registry', 'metagen_agent_scenes'], (res) => resolve(res || {}));
+    } else {
+      resolve({});
+    }
+  });
+
+  const registry = storageData.metagen_flow_registry || {};
+  const targetsMap = new Map();
+
+  // Strategy 1: Explicit targetCards from Meta-Gen Studio UI
+  if (Array.isArray(options.targetCards) && options.targetCards.length > 0) {
+    for (const tc of options.targetCards) {
+      const cardId = tc.cardId || tc.id;
+      if (!cardId) continue;
+
+      let regToken = tc.token || null;
+      let regMediaId = tc.mediaId || null;
+      for (const [tKey, regItem] of Object.entries(registry)) {
+        if (regItem && regItem.cardId === cardId) {
+          regToken = regToken || tKey;
+          regMediaId = regMediaId || regItem.mediaId;
+        }
+      }
+
+      targetsMap.set(cardId, {
+        id: 'card_' + cardId,
+        cardId: cardId,
+        ordinal: tc.ordinal,
+        title: tc.title || '',
+        token: regToken,
+        mediaId: regMediaId,
+      });
+    }
+  }
+
+  // Strategy 2: If no explicit targetCards, check elements already tagged in DOM
+  if (targetsMap.size === 0) {
+    const badgedElements = Array.from(document.querySelectorAll('[data-metagen-card-id], .metagen-flow-badge'));
+    for (const el of badgedElements) {
+      const container = el.hasAttribute('data-metagen-card-id')
+        ? el
+        : el.closest('[data-metagen-card-id]') || el.parentElement;
+      if (!container) continue;
+
+      const cardId = container.getAttribute('data-metagen-card-id');
+      const token = container.getAttribute('data-metagen-token') || getMediaToken(container.querySelector('img, video'));
+      const ordinal = container.getAttribute('data-metagen-ordinal');
+      const id = cardId ? 'card_' + cardId : (token ? 'token_' + token : getTileIdentifier(container));
+
+      if (id && !targetsMap.has(id)) {
+        targetsMap.set(id, {
+          id,
+          cardId,
+          ordinal: ordinal ? parseInt(ordinal, 10) : undefined,
+          token,
+          tile: container,
+        });
+      }
+    }
+  }
+
+  // Strategy 3: Also include items from metagen_flow_registry if targetsMap is still empty
+  if (targetsMap.size === 0 && Object.keys(registry).length > 0) {
+    for (const [tok, item] of Object.entries(registry)) {
+      if (!item) continue;
+      const id = item.cardId ? 'card_' + item.cardId : 'token_' + tok;
+      if (!targetsMap.has(id)) {
+        targetsMap.set(id, {
+          id,
+          cardId: item.cardId,
+          ordinal: item.ordinal,
+          title: item.title,
+          token: tok,
+          mediaId: item.mediaId,
+        });
+      }
+    }
+  }
+
+  // Strategy 4: Fallback to visible tiles in DOM without any scrolling
+  if (targetsMap.size === 0) {
+    const visibleTiles = getAllTilesInDom();
+    for (const t of visibleTiles) {
+      const id = getTileIdentifier(t);
+      if (id && !targetsMap.has(id)) {
+        targetsMap.set(id, {
+          id,
+          tile: t,
+        });
+      }
+    }
+  }
+
+  const list = Array.from(targetsMap.values());
+  list.sort((a, b) => {
+    if (a.ordinal && b.ordinal) return a.ordinal - b.ordinal;
+    return 0;
+  });
+
+  return list;
 }
 
 function findMoreButton(tile) {
@@ -2233,79 +2410,39 @@ async function processTileDownload(tile, resolutionText, tileId) {
   }
 }
 
-// Master Function: Mass Download 2K/4K Engine
-async function executeFlowMassDownload({ resolution = '2K', batchDelaySeconds = 2, skipDownloaded = true, folderName = 'MetaGen_Flow' } = {}) {
+// Master Function: Mass Download 2K/4K Engine using Meta-Gen Tracking
+async function executeFlowMassDownload({
+  resolution = '2K',
+  batchDelaySeconds = 2,
+  skipDownloaded = true,
+  folderName = 'MetaGen_Flow',
+  targetCards = null,
+} = {}) {
   if (isMassDownloading) {
     console.warn('[Meta-Gen Flow Bridge] Mass download sudah sedang berjalan.');
     return { success: false, error: 'Mass download sudah berjalan.' };
   }
 
   isMassDownloading = true;
-  console.log('[Meta-Gen Flow Bridge] Memulai proses Mass Downloader 2K pada kanvas...');
+  console.log('[Meta-Gen Flow Bridge] Memulai proses Mass Downloader menggunakan sistem tracking internal Meta-Gen...');
 
   // Set download subfolder in background
   try {
     chrome.runtime.sendMessage({ type: 'SET_FLOW_DOWNLOAD_FOLDER', folder: folderName });
   } catch (e) {}
 
-  // STEP 1: Pre-scan dengan zoom 50%
-  massDownloaderOriginalZoom = document.body.style.zoom || '';
-  document.body.style.zoom = '50%';
-  await new Promise((r) => setTimeout(r, 700));
+  showFlowToast('Mass Downloader 2K', 'Menyiapkan target dari sistem tracking Meta-Gen...', false);
 
-  showFlowToast('Mass Downloader 2K', 'Memindai seluruh aset di galeri...', false);
-
-  const uniqueIds = new Set();
-  const activeContainer = getScrollContainer();
-  let lastTop = -1;
-  let noChange = 0;
-
-  if (activeContainer === window) window.scrollTo({ top: 0 });
-  else activeContainer.scrollTop = 0;
-  await new Promise((r) => setTimeout(r, 900));
-
-  while (isMassDownloading) {
-    const currentTiles = getAllTilesInDom();
-    for (const t of currentTiles) {
-      const id = getTileIdentifier(t);
-      if (id) {
-        markTileWithId(t, id);
-        uniqueIds.add(id);
-      }
-    }
-
-    scrollContainerDown(activeContainer, 500);
-    await new Promise((r) => setTimeout(r, 300));
-
-    const curTop = getScrollPos(activeContainer);
-    if (curTop === lastTop) {
-      noChange++;
-      if (noChange >= 10) break; // Reached bottom
-    } else {
-      noChange = 0;
-    }
-    lastTop = curTop;
-  }
-
-  // Restore normal zoom
-  document.body.style.zoom = massDownloaderOriginalZoom;
-  await new Promise((r) => setTimeout(r, 600));
-
-  const masterList = Array.from(uniqueIds);
-  console.log('[Meta-Gen Flow Bridge] Scan selesai! Total unik:', masterList.length);
+  // Ambil daftar target langsung dari tracking Meta-Gen (tanpa zoom 50% dan tanpa skroll mentok)
+  const masterList = await getTrackedDownloadTargets({ targetCards });
+  console.log('[Meta-Gen Flow Bridge] Antrean target terdeteksi dari tracking:', masterList.length, masterList);
 
   if (masterList.length === 0) {
     isMassDownloading = false;
-    showFlowToast('Mass Downloader', 'Tidak ada media ditemukan di canvas.', false);
+    showFlowToast('Mass Downloader', 'Tidak ada media Meta-Gen yang terdeteksi untuk diunduh.', false);
     return { success: false, count: 0 };
   }
 
-  // STEP 2: Scroll back to top
-  if (activeContainer === window) window.scrollTo({ top: 0 });
-  else activeContainer.scrollTop = 0;
-  await new Promise((r) => setTimeout(r, 1200));
-
-  // STEP 3: Iterate and Download
   let successCount = 0;
   let failCount = 0;
   let skipCount = 0;
@@ -2313,16 +2450,28 @@ async function executeFlowMassDownload({ resolution = '2K', batchDelaySeconds = 
   for (let i = 0; i < masterList.length; i++) {
     if (!isMassDownloading) break;
 
-    const tileId = masterList[i];
-    if (skipDownloaded && downloadedIds.has(tileId)) {
+    const target = masterList[i];
+    const primaryId = target.id || (target.cardId ? 'card_' + target.cardId : 'tile_' + i);
+
+    // Cek apakah item sudah pernah diunduh
+    const isAlreadyDownloaded =
+      downloadedIds.has(primaryId) ||
+      (target.cardId && downloadedIds.has('card_' + target.cardId)) ||
+      (target.token && downloadedIds.has('token_' + target.token)) ||
+      (target.mediaId && downloadedIds.has('media_' + target.mediaId));
+
+    if (skipDownloaded && isAlreadyDownloaded) {
       skipCount++;
+      console.log(`[Meta-Gen Flow Bridge] Melewati ${primaryId} (sudah diunduh sebelumnya).`);
       continue;
     }
 
-    showFlowToast('Mass Downloader 2K', `Mendownload (${i + 1}/${masterList.length}) | Berhasil: ${successCount}...`, false);
+    const labelText = target.ordinal ? `Adegan #${target.ordinal}` : `Item (${i + 1}/${masterList.length})`;
+    showFlowToast('Mass Downloader 2K', `Mendownload ${labelText} | Berhasil: ${successCount}...`, false);
 
-    const tile = await findAndGetTile(tileId);
+    const tile = await findTrackedTile(target);
     if (!tile) {
+      console.warn(`[Meta-Gen Flow Bridge] Target tile tidak ditemukan di canvas:`, target);
       failCount++;
       continue;
     }
@@ -2330,11 +2479,18 @@ async function executeFlowMassDownload({ resolution = '2K', batchDelaySeconds = 
     try {
       tile.scrollIntoView({ behavior: 'smooth', block: 'center' });
     } catch (e) {}
-    await new Promise((r) => setTimeout(r, 700));
+    await new Promise((r) => setTimeout(r, 500));
 
+    const tileId = getTileIdentifier(tile) || primaryId;
     const res = await processTileDownload(tile, resolution, tileId);
+
     if (res.success) {
       successCount++;
+      downloadedIds.add(primaryId);
+      if (target.cardId) downloadedIds.add('card_' + target.cardId);
+      if (target.token) downloadedIds.add('token_' + target.token);
+      if (target.mediaId) downloadedIds.add('media_' + target.mediaId);
+      saveDownloadHistory();
     } else {
       failCount++;
     }

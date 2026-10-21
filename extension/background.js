@@ -758,36 +758,6 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
     return true;
   }
 
-  if (message.type === 'TRIGGER_FLOW_MASS_DOWNLOAD') {
-    (async () => {
-      try {
-        const flowUrlPatterns = [
-          '*://flow.google.com/project/*',
-          '*://flow.google.com/*',
-          '*://labs.google/fx/tools/flow*',
-        ];
-        const tabs = await chrome.tabs.query({ url: flowUrlPatterns });
-        const flowTab = tabs.find((t) => t.url && t.url.includes('/project/') && !t.discarded) || tabs[0];
-        if (!flowTab) {
-          sendResponse({ success: false, error: 'Tab Google Flow tidak ditemukan. Pastikan halaman project terbuka.' });
-          return;
-        }
-
-        if (message.folder) {
-          currentFlowDownloadFolder = message.folder;
-        }
-
-        const res = await chrome.tabs.sendMessage(flowTab.id, {
-          action: 'FLOW_EXECUTE_MASS_DOWNLOAD',
-          payload: message.payload || {},
-        });
-        sendResponse(res);
-      } catch (err) {
-        sendResponse({ success: false, error: err.message });
-      }
-    })();
-    return true;
-  }
 
   if (message.type === 'STOP_FLOW_MASS_DOWNLOAD') {
     (async () => {

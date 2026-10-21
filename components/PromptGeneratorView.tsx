@@ -1257,6 +1257,19 @@ export function PromptGeneratorView({ onSwitchToMetadata, onSendImageToMetadata 
         ? '4K, 1080p'
         : '1K, original, 1080p';
 
+    // Sertakan daftar target adegan dari tracking Meta-Gen Studio
+    const sessionTargets = prompts.map((p) => {
+      const activeVar = p.variations?.[p.selectedVariationIndex || 0] || p.variations?.[0];
+      return {
+        cardId: p.id,
+        ordinal: p.ordinal,
+        title: p.title || '',
+        token: activeVar?.token || p.mediaToken || '',
+        mediaId: activeVar?.mediaId || p.mediaId || '',
+        hasImage: !!p.generatedImageUrl,
+      };
+    });
+
     window.postMessage(
       {
         type: 'METAGEN_TRIGGER_FLOW_MASS_DOWNLOAD',
@@ -1264,6 +1277,7 @@ export function PromptGeneratorView({ onSwitchToMetadata, onSendImageToMetadata 
           resolution: resPayload,
           batchDelaySeconds: 2,
           skipDownloaded: true,
+          targetCards: sessionTargets,
         },
         folder: `MetaGen_Flow/${cleanFolder}`,
       },
@@ -1271,8 +1285,8 @@ export function PromptGeneratorView({ onSwitchToMetadata, onSendImageToMetadata 
     );
 
     toast.info(`⚡ Memulai Mass Downloader ${flowDownloadResolution} di Google Flow...`, {
-      description: `Ekstensi sedang memindai dan mengunduh seluruh aset visual resolusi ${flowDownloadResolution} di galeri Flow.`,
-      duration: 6000,
+      description: `Menggunakan sistem tracking internal Meta-Gen (${sessionTargets.length} adegan) tanpa skroll mentok.`,
+      duration: 5000,
     });
   };
 
