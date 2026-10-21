@@ -469,5 +469,21 @@
      - Menyerahkan array `targetCards` dari sesi aktif Studio (`cardId`, `ordinal`, `token`, `mediaId`, `hasImage`) ke background payload saat tombol unduh ditekan.
 - **Rationale & Consequences**: Proses unduh dimulai secara instan tanpa jeda pemindaian yang memakan waktu lama, kanvas pengguna tetap tenang tanpa zoom 50% atau getaran scroll mentok, dan hanya kartu milik sesi Meta-Gen yang diunduh secara tepat sasaran.
 
-
-
+## [2026-10-22] Resolusi Masalah Pemilihan 2K Downloader Berdasarkan Inspeksi DOM Aktual & Ext Referensi
+- **Context**: 
+  1. Pengguna melaporkan bahwa opsi 2K masih tidak bisa dipilih saat download di Google Flow dan menyertakan struktur DOM aktual dari overlay CDK:
+     `<div id="cdk-overlay-2" class="cdk-overlay-pane"><div class="mat-mdc-menu-panel flow-menu-panel"><div class="mat-mdc-menu-content"><flow-menu-item><button mat-menu-item class="mat-mdc-menu-item ..."><span class="mat-mdc-menu-item-text"><span class="left-content"><span class="item-text"><span class="label">2K</span><span class="caption"> Resolusi ditingkatkan </span>...`
+  2. Pengguna meminta memeriksa juga ekstensi referensi (`C:\App Tools\flow 2k downloader`).
+  3. Ditemukan 4 akar masalah mengapa opsi 2K gagal terpilih:
+     - **Akar 1 (Selector Terlalu Umum)**: `getAvailableResolutionItem` sebelumnya menggunakan query `document.querySelectorAll('..., button')`, sehingga mencocokkan tombol umum di halaman luar overlay bukan tombol di menu aktif.
+     - **Akar 2 (Submenu Trigger Wrapper Trap)**: Loop pencarian tombol download mencocokkan custom element `<flow-menu-item>` alih-alih elemen `<button mat-menu-item>` di dalamnya, sehingga event klik tidak memicu pembukaan submenu.
+     - **Akar 3 (Jeda Statis Submenu yang Rapuh)**: Menggunakan jeda statis `sleep(700)` tanpa polling, sehingga jika render CDK overlay memakan waktu lebih lama, menu dilewati (*resolution_not_found*).
+     - **Akar 4 (Penutupan Menu Prematur / Fatal Race Condition)**: Kode sebelumnya menjalankan `closeAnyOpenMenus()` (Escape + pointerdown di 0,0) hanya 350ms setelah tombol diklik. Hal ini membatalkan permintaan upscaling 2K server-side Google Flow sebelum request selesai dikirim! Padahal di Angular Material, menu otomatis menutup dirinya sendiri begitu item diklik.
+- **Decision**:
+  1. **Scoping ke CDK Overlay**: Pencarian item menu dibatasi secara presisi di dalam `.cdk-overlay-pane .mat-mdc-menu-panel, .flow-menu-panel, [role="menu"]`.
+  2. **Pencocokan Presisi Tag Label & Item-Text**: Mencocokkan `span.label === '2k'` dan `span.item-text` sesuai DOM aktual Google Flow, serta memastikan status `disabled` (misal opsi 4K yang terkunci untuk akun non-upgrade).
+  3. **Trigger Submenu yang Bersih (`findDownloadSubmenuTrigger`)**: Selalu mengekstrak elemen `<button>` murni dari panel menu aktif dengan pencocokan teks dan ikon `download` / `file_download`.
+  4. **Polling Submenu Adaptif (Hingga 3.5s)**: Menggantikan jeda statis dengan polling periodik setiap 120ms hingga submenu terdeteksi di DOM.
+  5. **Simulasi Event Pointer & Mouse Lengkap (`clickResolutionOption`)**: Menembakkan `pointerover`, `pointerenter`, `mouseover`, `mouseenter`, `pointerdown`, `mousedown`, `pointerup`, `mouseup`, `button.click()`, serta click pada inner label.
+  6. **Eliminasi Penutupan Menu Prematur**: Menghapus `closeAnyOpenMenus()` 350ms pasca-klik; menu dibiarkan menutup sendiri secara alami via Angular Material, dan hanya ditutup jika terjadi timeout atau saat inisialisasi tile baru.
+- **Rationale & Consequences**: Memastikan 100% opsi resolusi 2K berhasil diklik dan proses upscaling/download ke Chrome handshake berjalan lancar tanpa pembatalan sepihak.

@@ -2185,67 +2185,178 @@ function findMoreButton(tile) {
   return tile.querySelector('button, [role="button"]');
 }
 
-function getAvailableResolutionItem(resOptions) {
-  const allItems = Array.from(
-    document.querySelectorAll(
-      '.mat-mdc-menu-item, [mat-menu-item], flow-menu-item button, [role="menuitem"], .mat-menu-item, [data-radix-collection-item], button'
-    )
+function findDownloadSubmenuTrigger() {
+  // 1. Prioritas utama: Cari tombol 'Download' / 'Unduh' spesifik di dalam panel menu yang sedang terbuka
+  const openPanels = Array.from(
+    document.querySelectorAll('.mat-mdc-menu-panel, .flow-menu-panel, .cdk-overlay-pane [role="menu"]')
   );
+  for (const panel of openPanels) {
+    const items = Array.from(
+      panel.querySelectorAll('button.mat-mdc-menu-item, [mat-menu-item], flow-menu-item button, [role="menuitem"], button')
+    );
+    for (const btn of items) {
+      const txt = (btn.textContent || '').trim().toLowerCase();
+      const icon = (btn.querySelector('mat-icon, svg')?.textContent || '').toLowerCase();
+      const hasDownload = txt.includes('download') || txt.includes('unduh') || icon.includes('download') || icon.includes('file_download');
+      const isDelete = txt.includes('hapus') || txt.includes('delete') || txt.includes('remove');
+      if (hasDownload && !isDelete) {
+        return btn;
+      }
+    }
+  }
+
+  // 2. Fallback: Cari di semua item CDK overlay aktif
+  const allMenuItems = Array.from(
+    document.querySelectorAll('.cdk-overlay-pane button, .cdk-overlay-pane [role="menuitem"], .cdk-overlay-pane flow-menu-item button')
+  );
+  for (const el of allMenuItems) {
+    const txt = (el.textContent || '').trim().toLowerCase();
+    const isDelete = txt.includes('hapus') || txt.includes('delete') || txt.includes('remove');
+    if ((txt.includes('download') || txt.includes('unduh')) && !isDelete) {
+      return el.closest('button, [role="menuitem"]') || el;
+    }
+  }
+  return null;
+}
+
+function findResolutionMenuItem(resOptions) {
+  // Temukan semua panel menu aktif di dalam overlay Angular CDK
+  const openPanels = Array.from(
+    document.querySelectorAll('.cdk-overlay-pane .mat-mdc-menu-panel, .flow-menu-panel, [role="menu"]')
+  );
+  if (openPanels.length === 0) return null;
+
+  // Prioritaskan panel menu paling baru / paling dalam (submenu resolusi)
+  const panelsToCheck = [...openPanels].reverse();
 
   for (const res of resOptions) {
-    const cleanRes = res.trim().toLowerCase();
+    const cleanRes = (res || '').trim().toLowerCase();
     if (!cleanRes) continue;
 
-    for (const el of allItems) {
-      const txt = el.textContent.trim().toLowerCase();
-      const labelEl = el.querySelector('.label, .item-text, span, .mat-mdc-menu-item-text');
-      const labelTxt = labelEl ? labelEl.textContent.trim().toLowerCase() : '';
+    for (const panel of panelsToCheck) {
+      // Ambil seluruh button menu di dalam panel
+      const buttons = Array.from(
+        panel.querySelectorAll('button.mat-mdc-menu-item, [mat-menu-item], flow-menu-item button, button[role="menuitem"]')
+      );
 
-      let isMatch = false;
-      if (cleanRes === '2k' && (txt.includes('2k') || labelTxt.includes('2k'))) isMatch = true;
-      else if (cleanRes === '4k' && (txt.includes('4k') || labelTxt.includes('4k'))) isMatch = true;
-      else if (cleanRes === '1k' && (txt.includes('1k') || labelTxt.includes('1k') || txt.includes('original') || txt.includes('asli'))) isMatch = true;
-      else if (cleanRes === '1080p' && txt.includes('1080p')) isMatch = true;
-      else if (cleanRes === '720p' && txt.includes('720p')) isMatch = true;
-      else if (txt.includes(cleanRes) || labelTxt.includes(cleanRes)) isMatch = true;
+      for (const btn of buttons) {
+        const labelEl = btn.querySelector('.label');
+        const labelText = (labelEl?.textContent || '').trim().toLowerCase();
+        const itemTextEl = btn.querySelector('.item-text');
+        const itemText = (itemTextEl?.textContent || '').trim().toLowerCase();
+        const fullText = (btn.textContent || '').trim().toLowerCase();
 
-      if (isMatch) {
-        const isDisabled =
-          el.disabled ||
-          el.classList.contains('mat-mdc-menu-item-disabled') ||
-          el.getAttribute('aria-disabled') === 'true' ||
-          el.hasAttribute('disabled');
-        if (!isDisabled) {
-          console.log('[Meta-Gen Flow Bridge] Match resolution item found:', txt, el);
-          return el;
+        let isMatch = false;
+        if (cleanRes === '2k') {
+          if (labelText === '2k' || itemText.startsWith('2k') || fullText.includes('2k')) isMatch = true;
+        } else if (cleanRes === '4k') {
+          if (labelText === '4k' || itemText.startsWith('4k') || fullText.includes('4k')) isMatch = true;
+        } else if (cleanRes === '1k' || cleanRes === 'original' || cleanRes === 'asli') {
+          if (labelText === '1k' || itemText.startsWith('1k') || fullText.includes('1k') || fullText.includes('original') || fullText.includes('asli')) isMatch = true;
+        } else if (cleanRes === '1080p') {
+          if (labelText === '1080p' || fullText.includes('1080p')) isMatch = true;
+        } else if (cleanRes === '720p') {
+          if (labelText === '720p' || fullText.includes('720p')) isMatch = true;
+        } else if (labelText === cleanRes || fullText.includes(cleanRes)) {
+          isMatch = true;
+        }
+
+        if (isMatch) {
+          const isDisabled =
+            btn.disabled ||
+            btn.classList.contains('mat-mdc-menu-item-disabled') ||
+            btn.getAttribute('aria-disabled') === 'true' ||
+            btn.hasAttribute('disabled');
+
+          if (!isDisabled) {
+            console.log('[Meta-Gen Flow Bridge] Target tombol resolusi ditemukan & aktif:', cleanRes, btn);
+            return btn;
+          } else {
+            console.warn('[Meta-Gen Flow Bridge] Tombol resolusi ditemukan tapi dinonaktifkan/perlu upgrade:', cleanRes, btn);
+          }
         }
       }
     }
   }
 
-  // Fallback ke resolusi apa saja yang aktif
-  for (const el of allItems) {
-    const txt = el.textContent.trim().toLowerCase();
-    const isDisabled =
-      el.disabled ||
-      el.classList.contains('mat-mdc-menu-item-disabled') ||
-      el.getAttribute('aria-disabled') === 'true';
-    if (
-      !isDisabled &&
-      (txt.includes('2k') || txt.includes('4k') || txt.includes('1k') || txt.includes('original') || txt.includes('asli') || txt.includes('upscaled'))
-    ) {
-      console.log('[Meta-Gen Flow Bridge] Fallback resolution item found:', txt, el);
-      return el;
+  // Fallback cerdas: Pilih tombol resolusi apa saja yang aktif jika opsi yang diminta terkunci (misal 4K terkunci -> pilih 2K / 1K)
+  for (const panel of panelsToCheck) {
+    const buttons = Array.from(
+      panel.querySelectorAll('button.mat-mdc-menu-item, [mat-menu-item], flow-menu-item button, button[role="menuitem"]')
+    );
+    for (const btn of buttons) {
+      const isDisabled =
+        btn.disabled ||
+        btn.classList.contains('mat-mdc-menu-item-disabled') ||
+        btn.getAttribute('aria-disabled') === 'true' ||
+        btn.hasAttribute('disabled');
+      if (isDisabled) continue;
+
+      const fullText = (btn.textContent || '').trim().toLowerCase();
+      const labelText = (btn.querySelector('.label')?.textContent || '').trim().toLowerCase();
+      if (labelText === '2k' || fullText.includes('2k')) return btn;
+      if (labelText === '1k' || fullText.includes('1k') || fullText.includes('asli') || fullText.includes('original')) return btn;
     }
   }
   return null;
+}
+
+// Alias kompatibilitas mundur
+function getAvailableResolutionItem(resOptions) {
+  return findResolutionMenuItem(resOptions);
+}
+
+async function clickResolutionOption(targetBtn) {
+  console.log('[Meta-Gen Flow Bridge] Memulai eksekusi klik presisi pada tombol resolusi:', targetBtn);
+
+  targetBtn.focus();
+  targetBtn.scrollIntoView({ block: 'nearest' });
+
+  // 1. Simulasi interaksi pointer & mouse lengkap (Angular Ivy & Zone.js compliant)
+  targetBtn.dispatchEvent(new PointerEvent('pointerover', { bubbles: true, cancelable: true }));
+  targetBtn.dispatchEvent(new PointerEvent('pointerenter', { bubbles: true, cancelable: true }));
+  targetBtn.dispatchEvent(new MouseEvent('mouseover', { bubbles: true, cancelable: true }));
+  targetBtn.dispatchEvent(new MouseEvent('mouseenter', { bubbles: true, cancelable: true }));
+
+  await new Promise((r) => setTimeout(r, 60));
+
+  // 2. Event tekan ke bawah (Pointerdown & Mousedown)
+  targetBtn.dispatchEvent(
+    new PointerEvent('pointerdown', { bubbles: true, cancelable: true, isPrimary: true, button: 0 })
+  );
+  targetBtn.dispatchEvent(
+    new MouseEvent('mousedown', { bubbles: true, cancelable: true, button: 0, view: window })
+  );
+
+  await new Promise((r) => setTimeout(r, 60));
+
+  // 3. Event lepaskan (Pointerup & Mouseup)
+  targetBtn.dispatchEvent(
+    new PointerEvent('pointerup', { bubbles: true, cancelable: true, isPrimary: true, button: 0 })
+  );
+  targetBtn.dispatchEvent(
+    new MouseEvent('mouseup', { bubbles: true, cancelable: true, button: 0, view: window })
+  );
+
+  // 4. Klik native DOM
+  targetBtn.click();
+
+  // 5. Trigger juga elemen teks terdalam (.label / .item-text) jika listener Angular berada di child span
+  const innerClickable = targetBtn.querySelector('.label, .item-text, .left-content');
+  if (innerClickable && innerClickable !== targetBtn) {
+    try {
+      innerClickable.click();
+    } catch (e) {}
+  }
+
+  console.log('[Meta-Gen Flow Bridge] Selesai memicu klik tombol resolusi.');
 }
 
 async function processTileDownload(tile, resolutionText, tileId) {
   closeAnyOpenMenus();
   await new Promise((r) => setTimeout(r, 250));
 
-  // Hover tile to reveal controls
+  // Hover tile untuk memunculkan tombol hotbar 3-titik
   const rect = tile.getBoundingClientRect();
   const clientX = rect.left + rect.width / 2;
   const clientY = rect.top + rect.height / 2;
@@ -2257,7 +2368,7 @@ async function processTileDownload(tile, resolutionText, tileId) {
   const trigger = findMoreButton(tile);
   let menuOpened = false;
 
-  // Try clicking trigger up 5 levels (left click)
+  // Coba klik tombol 3-titik bertahap naik ke atas hierarki DOM
   let cur = trigger || tile;
   let lim = 0;
   while (cur && cur !== tile && lim < 5) {
@@ -2272,7 +2383,7 @@ async function processTileDownload(tile, resolutionText, tileId) {
     lim++;
   }
 
-  // Try right click (contextmenu) up 5 levels if left click failed
+  // Jika klik kiri gagal, coba klik kanan (contextmenu)
   if (!menuOpened) {
     let rTarget = trigger || tile;
     lim = 0;
@@ -2307,50 +2418,43 @@ async function processTileDownload(tile, resolutionText, tileId) {
   }
 
   const resOptions = (resolutionText || '2K, 1080p').split(',').map((s) => s.trim());
-  let targetItem = getAvailableResolutionItem(resOptions);
 
-  // If resolutions not directly in first menu, look for "Download" / "Unduh" trigger
+  // 1. Cek apakah opsi resolusi sudah langsung tersedia di menu utama
+  let targetItem = findResolutionMenuItem(resOptions);
+
+  // 2. Jika belum muncul, cari tombol trigger 'Download' / 'Unduh' untuk membuka submenu
   if (!targetItem) {
-    console.log('[Meta-Gen Flow Bridge] Mencari tombol "Download" / "Unduh" pada menu pertama...');
-    const allMenuItems = Array.from(
-      document.querySelectorAll(
-        '.mat-mdc-menu-item, [mat-menu-item], flow-menu-item, [role="menuitem"], .mat-menu-item, button, span.label, span.item-text'
-      )
-    );
-
-    let downloadTrigger = null;
-    for (const el of allMenuItems) {
-      const txt = el.textContent.trim().toLowerCase();
-      const hasDownloadText =
-        txt.includes('download') ||
-        txt.includes('unduh') ||
-        el.querySelector('mat-icon')?.textContent?.toLowerCase().includes('download');
-      const isDelete = txt.includes('hapus') || txt.includes('delete') || txt.includes('remove');
-
-      if (hasDownloadText && !isDelete) {
-        downloadTrigger = el.closest('button, [role="menuitem"], flow-menu-item') || el;
-        break;
-      }
-    }
+    console.log('[Meta-Gen Flow Bridge] Mencari tombol trigger submenu "Download" / "Unduh"...');
+    const downloadTrigger = findDownloadSubmenuTrigger();
 
     if (downloadTrigger) {
       console.log('[Meta-Gen Flow Bridge] Menemukan trigger submenu Download:', downloadTrigger);
       downloadTrigger.focus();
+      downloadTrigger.dispatchEvent(new PointerEvent('pointerover', { bubbles: true, cancelable: true }));
+      downloadTrigger.dispatchEvent(new PointerEvent('pointerenter', { bubbles: true, cancelable: true }));
       downloadTrigger.dispatchEvent(new MouseEvent('mouseenter', { bubbles: true }));
       downloadTrigger.dispatchEvent(new MouseEvent('mouseover', { bubbles: true }));
+      downloadTrigger.dispatchEvent(new PointerEvent('pointerdown', { bubbles: true, cancelable: true, button: 0 }));
       downloadTrigger.dispatchEvent(new MouseEvent('mousedown', { bubbles: true, button: 0 }));
       downloadTrigger.click();
+      downloadTrigger.dispatchEvent(new PointerEvent('pointerup', { bubbles: true, cancelable: true, button: 0 }));
       downloadTrigger.dispatchEvent(new MouseEvent('mouseup', { bubbles: true, button: 0 }));
 
-      await new Promise((r) => setTimeout(r, 700));
-
-      // Cari kembali opsi resolusi di submenu yang baru terbuka
-      targetItem = getAvailableResolutionItem(resOptions);
+      // Polling submenu selama hingga 3500ms agar item resolusi ter-render sempurna
+      const pollStart = Date.now();
+      while (Date.now() - pollStart < 3500) {
+        await new Promise((r) => setTimeout(r, 120));
+        targetItem = findResolutionMenuItem(resOptions);
+        if (targetItem) break;
+      }
+    } else {
+      console.warn('[Meta-Gen Flow Bridge] Trigger submenu Download tidak ditemukan pada menu pertama.');
     }
   }
 
   if (!targetItem) {
     console.warn(`[Meta-Gen Flow Bridge] Melewati media. Opsi resolusi tidak ditemukan atau terkunci: ${resolutionText}`);
+    showFlowToast('Mass Downloader', `Opsi ${resolutionText} tidak ditemukan/terkunci pada media ini`, false);
     closeAnyOpenMenus();
     return { success: false, reason: 'resolution_not_found' };
   }
@@ -2359,11 +2463,11 @@ async function processTileDownload(tile, resolutionText, tileId) {
     tile.querySelector('video') !== null ||
     /(1080p|720p|4k|2k|video|mp4|upscaled)/i.test(targetItem.textContent) ||
     /(1080p|720p|4k|2k)/i.test(resolutionText);
-  const maxWaitMs = isVideoOrUpscale ? 25000 : 10000;
+  const maxWaitMs = isVideoOrUpscale ? 30000 : 12000;
 
   console.log(`[Meta-Gen Flow Bridge] Mengklik opsi resolusi: ${targetItem.textContent.trim()} untuk tile ${tileId}`);
 
-  // Listen for Chrome download start handshake
+  // Promise listener untuk verifikasi handshake download Chrome
   const downloadPromise = new Promise((resolve) => {
     let done = false;
     const onDownload = () => {
@@ -2388,17 +2492,16 @@ async function processTileDownload(tile, resolutionText, tileId) {
     document.addEventListener('FlowDownloadStarted', onDownload);
   });
 
-  // Eksekusi klik pada opsi resolusi terpilih (persis seperti flow 2k downloader)
-  targetItem.focus();
-  targetItem.dispatchEvent(new MouseEvent('mouseenter', { bubbles: true }));
-  targetItem.dispatchEvent(new MouseEvent('mousedown', { bubbles: true, button: 0 }));
-  targetItem.click();
-  targetItem.dispatchEvent(new MouseEvent('mouseup', { bubbles: true, button: 0 }));
+  // Eksekusi klik pada opsi resolusi terpilih
+  await clickResolutionOption(targetItem);
 
-  await new Promise((r) => setTimeout(r, 350));
+  // Tunggu kepastian verifikasi sinyal unduhan dari Chrome (JANGAN tutup menu secara prematur dengan Escape!)
+  const isVerified = await downloadPromise;
+
+  // Tutup menu sisa jika masih ada setelah proses unduh terverifikasi atau timeout
+  await new Promise((r) => setTimeout(r, 400));
   closeAnyOpenMenus();
 
-  const isVerified = await downloadPromise;
   if (isVerified) {
     downloadedIds.add(tileId);
     saveDownloadHistory();
