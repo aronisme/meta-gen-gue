@@ -210,6 +210,7 @@ export function PromptGeneratorView({ onSwitchToMetadata, onSendImageToMetadata 
     total: number;
     saved: number;
   }>({ current: 0, total: 0, saved: 0 });
+  const [flowDownloadResolution, setFlowDownloadResolution] = useState<'2K' | '4K' | '1K'>('2K');
 
   // 7. Inspirations & Brainstorm
   const [inspirations, setInspirations] = useState<InspirationIdea[]>(() => getRandomCuratedIdeas(10));
@@ -1249,11 +1250,18 @@ export function PromptGeneratorView({ onSwitchToMetadata, onSendImageToMetadata 
     setFlowMassDownloadProgress({ current: 0, total: 0, saved: 0 });
 
     const cleanFolder = session.title?.replace(/[^a-zA-Z0-9_\-]/g, '_') || 'Session';
+    const resPayload =
+      flowDownloadResolution === '2K'
+        ? '2K, 1080p'
+        : flowDownloadResolution === '4K'
+        ? '4K, 1080p'
+        : '1K, original, 1080p';
+
     window.postMessage(
       {
         type: 'METAGEN_TRIGGER_FLOW_MASS_DOWNLOAD',
         payload: {
-          resolution: '2K, 4K, 1K, Original',
+          resolution: resPayload,
           batchDelaySeconds: 2,
           skipDownloaded: true,
         },
@@ -1262,8 +1270,8 @@ export function PromptGeneratorView({ onSwitchToMetadata, onSendImageToMetadata 
       '*'
     );
 
-    toast.info('⚡ Memulai Mass Downloader 2K di Google Flow...', {
-      description: 'Ekstensi sedang memindai dan mengunduh seluruh aset visual resolusi 2K/Original di galeri Flow.',
+    toast.info(`⚡ Memulai Mass Downloader ${flowDownloadResolution} di Google Flow...`, {
+      description: `Ekstensi sedang memindai dan mengunduh seluruh aset visual resolusi ${flowDownloadResolution} di galeri Flow.`,
       duration: 6000,
     });
   };
@@ -2723,7 +2731,29 @@ export function PromptGeneratorView({ onSwitchToMetadata, onSendImageToMetadata 
                     );
                   })()}
 
-                  {/* Flow 2K/4K Mass Downloader */}
+                  {/* Flow Download Resolution Selector */}
+                  <div
+                    className="flex items-center gap-0.5 px-1.5 py-0.5 bg-[#eefbf4] rounded-lg border-2 border-emerald-800 shadow-[1px_1px_0_#2c1810]"
+                    title="Pilih resolusi unduhan massal galeri Google Flow (2K Upscaled, 4K Ultra HD, atau 1K Original)"
+                  >
+                    <span className="text-[9px] uppercase font-black text-emerald-900 tracking-tight">Res:</span>
+                    {(['2K', '4K', '1K'] as const).map((rOption) => (
+                      <button
+                        key={rOption}
+                        type="button"
+                        onClick={() => setFlowDownloadResolution(rOption)}
+                        className={`px-1.5 py-0.5 rounded text-[10px] font-black cursor-pointer transition-all ${
+                          flowDownloadResolution === rOption
+                            ? 'bg-emerald-800 text-white shadow-xs'
+                            : 'bg-white hover:bg-emerald-100 text-emerald-900 border border-emerald-300'
+                        }`}
+                      >
+                        {rOption}
+                      </button>
+                    ))}
+                  </div>
+
+                  {/* Flow 2K/4K/1K Mass Downloader */}
                   <Button
                     type="button"
                     size="sm"
@@ -2737,7 +2767,7 @@ export function PromptGeneratorView({ onSwitchToMetadata, onSendImageToMetadata 
                     title={
                       isFlowMassDownloading
                         ? 'Klik untuk menghentikan unduh massal'
-                        : 'Unduh seluruh aset visual galeri Google Flow dalam resolusi tertinggi (2K/4K)'
+                        : `Unduh seluruh aset visual galeri Google Flow dalam resolusi ${flowDownloadResolution}`
                     }
                   >
                     {isFlowMassDownloading ? (
@@ -2752,7 +2782,7 @@ export function PromptGeneratorView({ onSwitchToMetadata, onSendImageToMetadata 
                     ) : (
                       <>
                         <Download className="w-3.5 h-3.5 mr-1 text-emerald-700" />
-                        <span>Unduh 2K</span>
+                        <span>Unduh {flowDownloadResolution}</span>
                       </>
                     )}
                   </Button>

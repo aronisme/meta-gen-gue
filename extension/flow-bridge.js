@@ -2009,36 +2009,55 @@ function findMoreButton(tile) {
 }
 
 function getAvailableResolutionItem(resOptions) {
-  const allItems = Array.from(document.querySelectorAll('.mat-mdc-menu-item, [mat-menu-item], flow-menu-item button, [role="menuitem"], .mat-menu-item'));
+  const allItems = Array.from(
+    document.querySelectorAll(
+      '.mat-mdc-menu-item, [mat-menu-item], flow-menu-item button, [role="menuitem"], .mat-menu-item, [data-radix-collection-item], button'
+    )
+  );
+
   for (const res of resOptions) {
     const cleanRes = res.trim().toLowerCase();
     if (!cleanRes) continue;
 
     for (const el of allItems) {
       const txt = el.textContent.trim().toLowerCase();
-      const labelEl = el.querySelector('.label, .item-text, span');
+      const labelEl = el.querySelector('.label, .item-text, span, .mat-mdc-menu-item-text');
       const labelTxt = labelEl ? labelEl.textContent.trim().toLowerCase() : '';
 
       let isMatch = false;
-      if (cleanRes === '2k' && (txt.includes('2k') || labelTxt === '2k')) isMatch = true;
-      else if (cleanRes === '4k' && (txt.includes('4k') || labelTxt === '4k')) isMatch = true;
-      else if (cleanRes === '1k' && (txt.includes('1k') || labelTxt === '1k' || txt.includes('original'))) isMatch = true;
+      if (cleanRes === '2k' && (txt.includes('2k') || labelTxt.includes('2k'))) isMatch = true;
+      else if (cleanRes === '4k' && (txt.includes('4k') || labelTxt.includes('4k'))) isMatch = true;
+      else if (cleanRes === '1k' && (txt.includes('1k') || labelTxt.includes('1k') || txt.includes('original') || txt.includes('asli'))) isMatch = true;
       else if (cleanRes === '1080p' && txt.includes('1080p')) isMatch = true;
       else if (cleanRes === '720p' && txt.includes('720p')) isMatch = true;
       else if (txt.includes(cleanRes) || labelTxt.includes(cleanRes)) isMatch = true;
 
       if (isMatch) {
-        const isDisabled = el.disabled || el.classList.contains('mat-mdc-menu-item-disabled') || el.getAttribute('aria-disabled') === 'true';
-        if (!isDisabled) return el;
+        const isDisabled =
+          el.disabled ||
+          el.classList.contains('mat-mdc-menu-item-disabled') ||
+          el.getAttribute('aria-disabled') === 'true' ||
+          el.hasAttribute('disabled');
+        if (!isDisabled) {
+          console.log('[Meta-Gen Flow Bridge] Match resolution item found:', txt, el);
+          return el;
+        }
       }
     }
   }
 
-  // Fallback: any active download resolution item
+  // Fallback ke resolusi apa saja yang aktif
   for (const el of allItems) {
     const txt = el.textContent.trim().toLowerCase();
-    const isDisabled = el.disabled || el.classList.contains('mat-mdc-menu-item-disabled') || el.getAttribute('aria-disabled') === 'true';
-    if (!isDisabled && (txt.includes('2k') || txt.includes('4k') || txt.includes('1k') || txt.includes('original') || txt.includes('upscaled'))) {
+    const isDisabled =
+      el.disabled ||
+      el.classList.contains('mat-mdc-menu-item-disabled') ||
+      el.getAttribute('aria-disabled') === 'true';
+    if (
+      !isDisabled &&
+      (txt.includes('2k') || txt.includes('4k') || txt.includes('1k') || txt.includes('original') || txt.includes('asli') || txt.includes('upscaled'))
+    ) {
+      console.log('[Meta-Gen Flow Bridge] Fallback resolution item found:', txt, el);
       return el;
     }
   }
@@ -2047,7 +2066,7 @@ function getAvailableResolutionItem(resOptions) {
 
 async function processTileDownload(tile, resolutionText, tileId) {
   closeAnyOpenMenus();
-  await new Promise((r) => setTimeout(r, 200));
+  await new Promise((r) => setTimeout(r, 250));
 
   // Hover tile to reveal controls
   const rect = tile.getBoundingClientRect();
@@ -2056,18 +2075,18 @@ async function processTileDownload(tile, resolutionText, tileId) {
   tile.dispatchEvent(new MouseEvent('mouseenter', { bubbles: true, clientX, clientY }));
   tile.dispatchEvent(new MouseEvent('mouseover', { bubbles: true, clientX, clientY }));
   tile.dispatchEvent(new MouseEvent('mousemove', { bubbles: true, clientX, clientY }));
-  await new Promise((r) => setTimeout(r, 350));
+  await new Promise((r) => setTimeout(r, 400));
 
   const trigger = findMoreButton(tile);
   let menuOpened = false;
 
-  // Try clicking trigger up 3 levels
+  // Try clicking trigger up 5 levels (left click)
   let cur = trigger || tile;
   let lim = 0;
-  while (cur && lim < 3) {
+  while (cur && cur !== tile && lim < 5) {
     cur.click();
-    await new Promise((r) => setTimeout(r, 350));
-    const m = document.querySelector('.mat-mdc-menu-panel, .mat-menu-panel, mat-menu, [role="menu"]');
+    await new Promise((r) => setTimeout(r, 400));
+    const m = document.querySelector('.mat-mdc-menu-panel, .mat-menu-panel, mat-menu, [role="menu"], [data-radix-menu-content], [data-state="open"]');
     if (m) {
       menuOpened = true;
       break;
@@ -2076,50 +2095,96 @@ async function processTileDownload(tile, resolutionText, tileId) {
     lim++;
   }
 
-  // Contextmenu fallback
+  // Try right click (contextmenu) up 5 levels if left click failed
   if (!menuOpened) {
     let rTarget = trigger || tile;
-    rTarget.dispatchEvent(new MouseEvent('contextmenu', { bubbles: true, cancelable: true, clientX, clientY, button: 2 }));
-    await new Promise((r) => setTimeout(r, 400));
-    const m = document.querySelector('.mat-mdc-menu-panel, .mat-menu-panel, mat-menu, [role="menu"]');
-    if (m) menuOpened = true;
+    lim = 0;
+    while (rTarget && lim < 5) {
+      const elRect = rTarget.getBoundingClientRect();
+      rTarget.dispatchEvent(
+        new MouseEvent('contextmenu', {
+          bubbles: true,
+          cancelable: true,
+          clientX: elRect.left + elRect.width / 2,
+          clientY: elRect.top + elRect.height / 2,
+          button: 2,
+        })
+      );
+      await new Promise((r) => setTimeout(r, 400));
+      const m = document.querySelector('.mat-mdc-menu-panel, .mat-menu-panel, mat-menu, [role="menu"], [data-radix-menu-content], [data-state="open"]');
+      if (m) {
+        menuOpened = true;
+        break;
+      }
+      if (rTarget === tile) break;
+      rTarget = rTarget.parentElement;
+      lim++;
+    }
   }
 
-  const menu = document.querySelector('.mat-mdc-menu-panel, .mat-menu-panel, mat-menu, [role="menu"]');
+  const menu = document.querySelector('.mat-mdc-menu-panel, .mat-menu-panel, mat-menu, [role="menu"], [data-radix-menu-content], [data-state="open"]');
   if (!menuOpened || !menu) {
+    console.warn(`[Meta-Gen Flow Bridge] Gagal membuka menu opsi download untuk tile: ${tileId}`);
     closeAnyOpenMenus();
     return { success: false, reason: 'menu_failed' };
   }
 
-  const resOptions = (resolutionText || '2K, 4K, 1K, Original').split(',').map((s) => s.trim());
+  const resOptions = (resolutionText || '2K, 1080p').split(',').map((s) => s.trim());
   let targetItem = getAvailableResolutionItem(resOptions);
 
   // If resolutions not directly in first menu, look for "Download" / "Unduh" trigger
   if (!targetItem) {
-    const allMenuItems = Array.from(document.querySelectorAll('.mat-mdc-menu-item, [mat-menu-item], flow-menu-item, [role="menuitem"], button'));
+    console.log('[Meta-Gen Flow Bridge] Mencari tombol "Download" / "Unduh" pada menu pertama...');
+    const allMenuItems = Array.from(
+      document.querySelectorAll(
+        '.mat-mdc-menu-item, [mat-menu-item], flow-menu-item, [role="menuitem"], .mat-menu-item, button, span.label, span.item-text'
+      )
+    );
+
     let downloadTrigger = null;
     for (const el of allMenuItems) {
       const txt = el.textContent.trim().toLowerCase();
-      if (txt === 'download' || txt === 'unduh' || txt.startsWith('download') || txt.startsWith('unduh')) {
-        downloadTrigger = el.closest('button, [role="menuitem"]') || el;
+      const hasDownloadText =
+        txt.includes('download') ||
+        txt.includes('unduh') ||
+        el.querySelector('mat-icon')?.textContent?.toLowerCase().includes('download');
+      const isDelete = txt.includes('hapus') || txt.includes('delete') || txt.includes('remove');
+
+      if (hasDownloadText && !isDelete) {
+        downloadTrigger = el.closest('button, [role="menuitem"], flow-menu-item') || el;
         break;
       }
     }
+
     if (downloadTrigger) {
+      console.log('[Meta-Gen Flow Bridge] Menemukan trigger submenu Download:', downloadTrigger);
+      downloadTrigger.focus();
       downloadTrigger.dispatchEvent(new MouseEvent('mouseenter', { bubbles: true }));
+      downloadTrigger.dispatchEvent(new MouseEvent('mouseover', { bubbles: true }));
+      downloadTrigger.dispatchEvent(new MouseEvent('mousedown', { bubbles: true, button: 0 }));
       downloadTrigger.click();
-      await new Promise((r) => setTimeout(r, 600));
+      downloadTrigger.dispatchEvent(new MouseEvent('mouseup', { bubbles: true, button: 0 }));
+
+      await new Promise((r) => setTimeout(r, 700));
+
+      // Cari kembali opsi resolusi di submenu yang baru terbuka
       targetItem = getAvailableResolutionItem(resOptions);
     }
   }
 
   if (!targetItem) {
+    console.warn(`[Meta-Gen Flow Bridge] Melewati media. Opsi resolusi tidak ditemukan atau terkunci: ${resolutionText}`);
     closeAnyOpenMenus();
     return { success: false, reason: 'resolution_not_found' };
   }
 
-  const isVideoOrUpscale = tile.querySelector('video') !== null || /(1080p|720p|4k|2k|video|mp4|upscaled)/i.test(targetItem.textContent);
-  const maxWaitMs = isVideoOrUpscale ? 20000 : 8000;
+  const isVideoOrUpscale =
+    tile.querySelector('video') !== null ||
+    /(1080p|720p|4k|2k|video|mp4|upscaled)/i.test(targetItem.textContent) ||
+    /(1080p|720p|4k|2k)/i.test(resolutionText);
+  const maxWaitMs = isVideoOrUpscale ? 25000 : 10000;
+
+  console.log(`[Meta-Gen Flow Bridge] Mengklik opsi resolusi: ${targetItem.textContent.trim()} untuk tile ${tileId}`);
 
   // Listen for Chrome download start handshake
   const downloadPromise = new Promise((resolve) => {
@@ -2146,17 +2211,24 @@ async function processTileDownload(tile, resolutionText, tileId) {
     document.addEventListener('FlowDownloadStarted', onDownload);
   });
 
+  // Eksekusi klik pada opsi resolusi terpilih (persis seperti flow 2k downloader)
   targetItem.focus();
+  targetItem.dispatchEvent(new MouseEvent('mouseenter', { bubbles: true }));
+  targetItem.dispatchEvent(new MouseEvent('mousedown', { bubbles: true, button: 0 }));
   targetItem.click();
-  await new Promise((r) => setTimeout(r, 300));
+  targetItem.dispatchEvent(new MouseEvent('mouseup', { bubbles: true, button: 0 }));
+
+  await new Promise((r) => setTimeout(r, 350));
   closeAnyOpenMenus();
 
   const isVerified = await downloadPromise;
   if (isVerified) {
     downloadedIds.add(tileId);
     saveDownloadHistory();
+    console.log(`[Meta-Gen Flow Bridge] Unduhan ${tileId} terverifikasi Chrome & masuk riwayat.`);
     return { success: true };
   } else {
+    console.warn(`[Meta-Gen Flow Bridge] Unduhan ${tileId} tidak terdeteksi oleh Chrome setelah ${maxWaitMs / 1000}s.`);
     return { success: false, reason: 'timeout' };
   }
 }

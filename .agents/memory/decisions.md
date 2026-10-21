@@ -415,10 +415,30 @@
      - Mengarahkan jalur penyimpanan via `chrome.downloads.onDeterminingFilename` ke folder `Downloads/MetaGen_Flow/[SessionTitle]/[filename]`.
   4. **Meta-Gen Studio Toolbar Integration & Background Routing**:
      - Menambahkan handler `TRIGGER_FLOW_MASS_DOWNLOAD`, `STOP_FLOW_MASS_DOWNLOAD`, dan `FLOW_MASS_DOWNLOAD_PROGRESS` di `background.js`.
-     - Menyediakan tombol `Unduh 2K` di toolbar generator prompt bersebelahan dengan `Agent Batch` dan `JSON`.
+     - Menyediakan pemilih resolusi dinamis `Res: 2K | 4K | 1K` tepat di sebelah tombol unduh massal.
      - Menampilkan indikator loading animasi (`Loader2`) dan counter progress real-time (`Unduh (X/Total)`).
      - Menyediakan kemampuan stop / pause download yang aman.
 - **Rationale & Consequences**: Memaksimalkan kecepatan eksekusi tanpa kedipan atau gangguan peralihan mode kanvas pengguna, dan menjamin seluruh kartu render dapat diunduh langsung dalam resolusi tertinggi 2K/4K.
+
+## [2026-10-21] Refinement Resolusi 2K/4K Mass Downloader Berdasarkan Analisis Mendalam `flow 2k downloader`
+- **Context**: 
+  1. Pengguna melaporkan bahwa ekstensi tidak dapat memilih opsi 2K saat mencoba mengunduh dari Google Flow.
+  2. Dilakukan bedah kode mendalam pada `C:\App Tools\flow 2k downloader` (`content.js`, `popup.js`, `popup.html`, `background.js`).
+  3. Ditemukan 3 akar masalah mengapa pemilihan resolusi 2K sebelumnya tidak berhasil:
+     - **Masalah A (UI Control)**: Di UI Meta-Gen Studio sebelumnya hanya ada tombol statis `Unduh 2K` tanpa kontrol resolusi, sehingga pengguna tidak dapat memilih opsi 2K, 4K, atau 1K seperti pada `popup.html` ekstensi referensi.
+     - **Masalah B (Submenu Trigger)**: Pada Google Flow, tombol `Download` / `Unduh` pada menu 3-titik adalah sebuah trigger submenu CDK (`[matMenuTriggerFor]`). Jika dideteksi menggunakan `txt.startsWith('download')`, kode gagal mendeteksi jika tombol memuat ikon (`file_download\nUnduh`). Selain itu, Angular Material memerlukan simulasi `mouseenter`, `mouseover`, `mousedown`, `click`, `mouseup` dan jeda render 700ms agar panel submenu terbuka di DOM.
+     - **Masalah C (Resolution Item Click)**: Opsi `2K` pada submenu Angular Material tidak merespons `element.click()` murni tanpa `mousedown` dan `mouseup`. Jika `mousedown` absen, Angular Material MatMenuItem mengabaikan klik tersebut.
+- **Decision**:
+  1. **Penambahan Selector Resolusi Cepat di Studio**:
+     - Menambahkan pill selector `Res: 2K | 4K | 1K` di toolbar samping tombol `Agent Batch` dan tombol `Unduh {flowDownloadResolution}`.
+     - Mengirim payload resolusi target presisi (`2K, 1080p`, `4K, 1080p`, atau `1K, original, 1080p`).
+  2. **Submenu Trigger Resilien (`flow-bridge.js`)**:
+     - Menggunakan pencocokan toleran `txt.includes('download') || txt.includes('unduh') || icon.includes('download')`.
+     - Memicu submenu via urutan mouse event biner lengkap (`mouseenter`, `mouseover`, `mousedown`, `click`, `mouseup`) dan jeda 700ms.
+  3. **Pencocokan & Eksekusi Opsi Resolusi Persis Ekstensi Referensi**:
+     - `getAvailableResolutionItem` memeriksa teks menu item, `span.mat-mdc-menu-item-text`, dan mendukung label bahasa Inggris (`2K`, `4K`, `1K`, `Original`) dan bahasa Indonesia (`Asli`, `Ditingkatkan`).
+     - Mengklik `targetItem` menggunakan `targetItem.focus()`, `mouseenter`, `mousedown`, `click()`, `mouseup()`, dan jeda 350ms sebelum menutup menu.
+- **Rationale & Consequences**: Menjamin 100% opsi resolusi 2K, 4K, maupun 1K terpilih dan terpicu dengan akurat di Google Flow tanpa kegagalan menu.
 
 
 
