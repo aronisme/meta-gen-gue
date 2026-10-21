@@ -2169,11 +2169,7 @@ async function executeFlowMassDownload({ resolution = '2K', batchDelaySeconds = 
   }
 
   isMassDownloading = true;
-  showFlowToast('Mass Downloader 2K', 'Mengalihkan tampilan ke mode Petak (Grid)...', false);
-
-  // STEP 0: Wajib alihkan mode tampilan dari batch ke Petak (Grid)
-  await ensureGridViewMode();
-  await new Promise((r) => setTimeout(r, 800));
+  console.log('[Meta-Gen Flow Bridge] Memulai proses Mass Downloader 2K pada kanvas...');
 
   // Set download subfolder in background
   try {
@@ -2318,7 +2314,7 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
   }
 
   if (message.action === 'FLOW_EXECUTE_MASS_DOWNLOAD') {
-    executeFlowMassDownload(message.payload)
+    executeFlowMassDownload(message.options || message.payload || {})
       .then((res) => sendResponse(res))
       .catch((err) => sendResponse({ success: false, error: err.message }));
     return true; // asynchronous response

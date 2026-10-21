@@ -1263,7 +1263,7 @@ export function PromptGeneratorView({ onSwitchToMetadata, onSendImageToMetadata 
     );
 
     toast.info('⚡ Memulai Mass Downloader 2K di Google Flow...', {
-      description: 'Ekstensi sedang beralih ke mode Petak dan memindai resolusi 2K/Original di galeri Flow.',
+      description: 'Ekstensi sedang memindai dan mengunduh seluruh aset visual resolusi 2K/Original di galeri Flow.',
       duration: 6000,
     });
   };
@@ -2737,7 +2737,7 @@ export function PromptGeneratorView({ onSwitchToMetadata, onSendImageToMetadata 
                     title={
                       isFlowMassDownloading
                         ? 'Klik untuk menghentikan unduh massal'
-                        : 'Beralih ke mode Petak dan unduh seluruh aset visual galeri Google Flow dalam resolusi tertinggi (2K/4K)'
+                        : 'Unduh seluruh aset visual galeri Google Flow dalam resolusi tertinggi (2K/4K)'
                     }
                   >
                     {isFlowMassDownloading ? (

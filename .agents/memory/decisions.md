@@ -397,30 +397,28 @@
   3. **Inklusi Otomatis ke Pre-Flight**: Dipanggil pada Step 0.6 di `handleFlowGeneration` tepat setelah kanvas proyek dan mode Agen aktif.
 - **Rationale & Consequences**: Menjamin hasil render di Google Flow 100% konsisten dengan aspek rasio yang dipilih di Meta-Gen Studio, baik untuk single prompt maupun batch generation.
 
-## [2026-10-21] Fase 3: Modul 2K/4K Mass Downloader Google Flow dengan Otomasi Switch Mode Petak (Grid)
+## [2026-10-21] Fase 3: Modul 2K/4K Mass Downloader Google Flow (Direct Canvas Native Mode)
 - **Context**: 
   1. Pengguna memiliki proyek pendukung di `C:\App Tools\flow 2k downloader` (v1.2.1) yang mampu mengunduh seluruh gambar yang telah dirender di Google Flow dalam resolusi tertinggi (2K / 4K / Original).
-  2. Google Flow secara default bisa berada di mode tampilan `Batch` (`flow-batch-row` / `.tile-row`), di mana gambar dikelompokkan per baris prompt. Untuk melakukan mass download per aset dengan hotbar action menu (`more_vert`), tampilan **wajib dialihkan ke mode "Petak" (Grid)**:
-     `<mat-button-toggle id="mat-button-toggle-0"><button id="mat-button-toggle-0-button" role="radio"><mat-icon>dashboard</mat-icon><span class="toggle-text">Petak</span></button></mat-button-toggle>`.
+  2. Sempat direncanakan pengalihan mode tampilan ke `Petak` (Grid), namun pengguna mengonfirmasi bahwa **pengalihan mode tampilan tidak diperlukan sama sekali**. Mass downloader harus langsung bekerja secara fleksibel pada mode tampilan apa pun yang sedang aktif di kanvas Google Flow (baik tampilan `Batch` maupun `Petak`).
   3. Pengguna menginginkan integrasi fitur ini langsung ke Meta-Gen Studio & Chrome Extension, dengan routing otomatis ke folder `Downloads/MetaGen_Flow/[SessionTitle]/`.
 - **Decision**:
-  1. **Pre-Download View Mode Switch (`ensureGridViewMode`)**:
-     - Memeriksa selector spesifik `id="mat-button-toggle-0"` atau `id="mat-button-toggle-0-button"`, serta teks `Petak` dan ikon `dashboard`.
-     - Jika mode Petak belum aktif, melakukan klik biner (`pointerdown`, `mousedown`, `pointerup`, `mouseup`, `click`) pada toggle.
-     - Fallback ke tombol menu setelan canvas jika toggle berada di popover.
+  1. **Zero View Mode Switch (Native Mode Agnostic)**:
+     - Menghapus kewajiban switch mode tampilan ke `Petak`. Mass downloader langsung memindai elemen tile/gambar pada mode tampilan kanvas yang sedang aktif tanpa menyentuh tombol toggle tampilan.
   2. **Zoom 50% Pre-Scan & Virtual Scroller Traversal (`executeFlowMassDownload`)**:
      - Mengadaptasi teknik dari `flow 2k downloader`: mengatur `document.body.style.zoom = '50%'` saat fase pre-scan agar viewport virtual Angular (`cdk-virtual-scroll-viewport`) merender seluruh tile tanpa terpotong.
-     - Melakukan scroll bertahap hingga seluruh tile kanvas terindeks, lalu mengembalikan zoom ke kondisi awal.
+     - Melakukan scroll bertahap hingga seluruh tile kanvas terindeks, lalu mengembalikan zoom ke kondisi awal (100%).
   3. **High-Resolution Tile Extraction & Download Pipeline**:
      - Mengarahkan pointer mouse (hover) ke tile, memicu tombol action (`button.mat-mdc-menu-trigger`, `flowhotbarbutton`, atau ikon `more_vert`).
      - Membuka menu dan mencari item resolusi target (`2K`, `4K`, `Original`).
      - Mengintegrasikan browser handshake `chrome.downloads.onCreated` di `background.js` untuk konfirmasi unduhan aktual tanpa polling buta.
      - Mengarahkan jalur penyimpanan via `chrome.downloads.onDeterminingFilename` ke folder `Downloads/MetaGen_Flow/[SessionTitle]/[filename]`.
-  4. **Meta-Gen Studio Toolbar Integration**:
+  4. **Meta-Gen Studio Toolbar Integration & Background Routing**:
+     - Menambahkan handler `TRIGGER_FLOW_MASS_DOWNLOAD`, `STOP_FLOW_MASS_DOWNLOAD`, dan `FLOW_MASS_DOWNLOAD_PROGRESS` di `background.js`.
      - Menyediakan tombol `Unduh 2K` di toolbar generator prompt bersebelahan dengan `Agent Batch` dan `JSON`.
      - Menampilkan indikator loading animasi (`Loader2`) dan counter progress real-time (`Unduh (X/Total)`).
      - Menyediakan kemampuan stop / pause download yang aman.
-- **Rationale & Consequences**: Pengguna dapat merender adegan secara massal lewat mode Agen Google Flow, lalu mengunduh seluruh aset beresolusi 2K/4K ke direktori lokal terstruktur dengan sekali klik langsung dari Meta-Gen Studio.
+- **Rationale & Consequences**: Memaksimalkan kecepatan eksekusi tanpa kedipan atau gangguan peralihan mode kanvas pengguna, dan menjamin seluruh kartu render dapat diunduh langsung dalam resolusi tertinggi 2K/4K.
 
 
 

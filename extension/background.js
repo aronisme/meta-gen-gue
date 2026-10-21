@@ -339,6 +339,95 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
     return true;
   }
 
+  if (message.type === 'SET_FLOW_DOWNLOAD_FOLDER') {
+    currentFlowDownloadFolder = message.folder || 'MetaGen_Flow';
+    return true;
+  }
+
+  if (message.type === 'TRIGGER_FLOW_MASS_DOWNLOAD') {
+    if (sender.tab?.id) {
+      lastMetaGenTabId = sender.tab.id;
+    }
+    const folder = message.folder || 'MetaGen_Flow';
+    currentFlowDownloadFolder = folder;
+
+    (async () => {
+      try {
+        const tabs = await chrome.tabs.query({
+          url: ['https://labs.google/*', 'https://flow.google.com/*'],
+        });
+
+        if (!tabs || tabs.length === 0) {
+          sendResponse({
+            success: false,
+            error: 'Tab Google Flow tidak ditemukan. Harap buka Google Flow terlebih dahulu.',
+          });
+          return;
+        }
+
+        const flowTab = tabs.find((t) => t.active) || tabs[0];
+
+        // Ensure flow-bridge.js is injected
+        let isBridgeReady = false;
+        try {
+          const ping = await chrome.tabs.sendMessage(flowTab.id, { action: 'FLOW_PING' });
+          if (ping?.active) isBridgeReady = true;
+        } catch (e) {
+          isBridgeReady = false;
+        }
+
+        if (!isBridgeReady) {
+          try {
+            await chrome.scripting.executeScript({
+              target: { tabId: flowTab.id },
+              files: ['flow-bridge.js'],
+            });
+            await new Promise((r) => setTimeout(r, 400));
+          } catch (injectErr) {
+            console.warn('[Meta-Gen Extension] Script injection warning:', injectErr);
+          }
+        }
+
+        console.log('[Meta-Gen Extension] Forwarding FLOW_EXECUTE_MASS_DOWNLOAD to Flow tab:', flowTab.id);
+        const flowResponse = await chrome.tabs.sendMessage(flowTab.id, {
+          action: 'FLOW_EXECUTE_MASS_DOWNLOAD',
+          options: {
+            ...(message.payload || {}),
+            folderName: folder,
+          },
+        });
+
+        sendResponse(flowResponse || { success: true });
+      } catch (err) {
+        console.error('[Meta-Gen Extension] Error triggering mass download:', err);
+        sendResponse({ success: false, error: err.message });
+      }
+    })();
+    return true; // async sendResponse
+  }
+
+  if (message.type === 'STOP_FLOW_MASS_DOWNLOAD') {
+    chrome.tabs.query({ url: ['https://labs.google/*', 'https://flow.google.com/*'] }, (tabs) => {
+      for (const t of tabs) {
+        chrome.tabs.sendMessage(t.id, { action: 'FLOW_STOP_MASS_DOWNLOAD' }).catch(() => {});
+      }
+    });
+    return true;
+  }
+
+  if (message.type === 'FLOW_MASS_DOWNLOAD_PROGRESS') {
+    if (lastMetaGenTabId) {
+      chrome.scripting.executeScript({
+        target: { tabId: lastMetaGenTabId },
+        func: (p) => {
+          window.postMessage({ type: 'METAGEN_FLOW_MASS_DOWNLOAD_PROGRESS', payload: p }, '*');
+        },
+        args: [message.payload],
+      }).catch(() => {});
+    }
+    return true;
+  }
+
   if (message.type === 'TRIGGER_MAIN_WORLD_CLICK_NEW_PROJECT') {
     const tabId = sender.tab?.id;
     if (tabId) {
