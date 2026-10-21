@@ -73,23 +73,24 @@ Pengembangan Ekstensi Meta-Gen Assistant & Flow Bridge: Smart Tagging, Multi-Var
   - Berjalan di `http://localhost:3000`.
 
 ## Currently Working On
-- Melanjutkan ke Fase 4: Integrasi Watcher / Auto-Import ke FTP Bridge & Antrean Metadata Studio.
+- **MASALAH DOWNLOAD 2K/4K GOOGLE FLOW (BELUM SELESAI / PENDING)**:
+  - Instruksi pengguna: *"masalah download belum selesai, catat itu. nanti lanjut lagi."*
+  - Terakhir diubah: Menghapus total zoom 50% dan skroll mentok, mengalihkan lookup target ke sistem tracking Meta-Gen (`getTrackedDownloadTargets` & `findTrackedTile`).
+  - Item untuk sesi berikutnya: Lanjutkan pengujian dan penyempurnaan alur download 2K/4K pada kanvas Google Flow (pemilihan opsi resolusi, pembukaan submenu, trigger klik browser handshake) sampai benar-benar terverifikasi berjalan lancar di lingkungan live pengguna.
 
 ## Remaining Tasks (Roadmap)
-- [x] **Sinkronisasi Rasio Gambar Google Flow**: Penyesuaian aspek rasio (16:9, 1:1, 9:16, 4:3, 3:4) & jumlah output (x1-x4) otomatis.
-- [x] **Modul 2K/4K Mass Downloader**: Otomasi klik menu 3-titik (`more_vert`) pada kartu hasil render di canvas Flow, memilih resolusi tertinggi (`2K Upscaled` / `4K Ultra HD`), routing subfolder download otomatis, dan switch mode tampilan ke `Petak`.
+- [ ] **Penyelesaian & Verifikasi Tuntas 2K/4K Mass Downloader Google Flow**: Menuntaskan masalah unduhan (opsi resolusi 2K, penanganan tile kanvas, keandalan trigger download Chrome) sesuai catatan pending.
 - [ ] **Integrasi Watcher dengan FTP Bridge**: File unduhan otomatis dialirkan ke antrean penyematan ExifTool dan antrean upload FTP microstock.
 - [ ] **Modul Keyword Research**: Eksplorasi tren microstock, tag cloud interaktif, dan filter kata kunci terlarang di `components/KeywordResearchView.tsx`.
 
-## Blockers / Errors
-- None.
+## Blockers / Attention Notes
+- **Pending Download Issue**: Masalah download di Google Flow belum tuntas sepenuhnya; dipending atas permintaan pengguna untuk dilanjutkan pada sesi berikutnya.
 
 ## Files Recently Changed
 - `extension/flow-bridge.js`
 - `extension/background.js`
-- `extension/content.js`
 - `components/PromptGeneratorView.tsx`
-- `.agents/memory/sessions/2026-10-21.md`
+- `lib/prompt-agent/types.ts`
 - `.agents/memory/decisions.md`
 - `.agents/memory/current.md`
 
