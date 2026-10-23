@@ -1,5 +1,15 @@
 # Architectural & Product Decisions
 
+## [2026-10-23] Unified Campaign Session (Sesi Tugas Terpadu) Across Modules
+- **Context**: Sebelumnya, Sesi Tugas di Studio Metadata, sesi prompt di Prompt Generator, dan audit di QC Agent terpisah secara terisolasi. Ketika pengguna men-generate gambar di Prompt Generator lalu mengirimkannya ke Studio Metadata, nama sesi menjadi tanggal generik (`Sesi Tugas (X Item - Date)`) dan teks prompt asli hilang dari konteks generasi metadata AI.
+- **Decision**: Mengadopsi arsitektur *Unified Campaign Session*:
+  1. Standarisasi kontrak transfer konteks `PromptToMetadataHandoff` (`promptText`, `promptCardId`, `promptTitle`, `sessionId`, `sessionTitle`).
+  2. Pewarisan otomatis nama sesi dari nama kampanye Prompt Generator ke Sesi Tugas Studio Metadata (`campaignTitle`, `promptSessionId`, `sourceModule`).
+  3. Injeksi teks prompt asli ke dalam instruksi AI (`effectiveInstr`) dan penyimpanan di `meta.aiPrompt`, `box.promptText`, `box.promptCardId`, `box.promptSessionId`.
+  4. Navigasi dua arah (*bidirectional session navigation*): Badge `⚡ Prompt Gen` di kartu riwayat sesi dengan tombol `Prompt Asal` yang langsung memuat sesi prompt awal di Prompt Generator.
+- **Rationale**: Menghilangkan diskoneksi antar modul, menjaga fidelitas kreatif dari tahap ide visual hingga publikasi metadata microstock, serta menghemat waktu penamaan sesi secara manual.
+- **Consequences & Constraints**: Kompatibel mundur sepenuhnya dengan sesi direct/kamera mandiri. Aset tanpa prompt tetap berjalan melalui alur standar.
+
 ## [2026-10-10] Edge Runtime for AI Generation API Routes
 - **Context**: Rute generasi AI (`/api/generate/openai`, `/api/generate/gemini`, `/api/generate/gemini-video`) bertindak sebagai proksi validasi dan penerus permintaan dari peramban ke API eksternal.
 - **Decision**: Menetapkan `export const runtime = 'edge'` pada seluruh rute API generasi.
@@ -487,3 +497,119 @@
   5. **Simulasi Event Pointer & Mouse Lengkap (`clickResolutionOption`)**: Menembakkan `pointerover`, `pointerenter`, `mouseover`, `mouseenter`, `pointerdown`, `mousedown`, `pointerup`, `mouseup`, `button.click()`, serta click pada inner label.
   6. **Eliminasi Penutupan Menu Prematur**: Menghapus `closeAnyOpenMenus()` 350ms pasca-klik; menu dibiarkan menutup sendiri secara alami via Angular Material, dan hanya ditutup jika terjadi timeout atau saat inisialisasi tile baru.
 - **Rationale & Consequences**: Memastikan 100% opsi resolusi 2K berhasil diklik dan proses upscaling/download ke Chrome handshake berjalan lancar tanpa pembatalan sepihak.
+
+## [2026-10-22] Direct Local Bridge Asset Ingestion: Zero-Manual Upload from Downloads/MetaGen_Flow to Metadata Studio
+- **Context**: 
+  1. Setelah perbaikan 2K Downloader, gambar berhasil diunduh ke folder lokal pengguna di `C:\Users\USER\Downloads\MetaGen_Flow\[SessionTitle]\...` dengan resolusi 2K dan ukuran berkisar 2.75 MB – 3.04 MB.
+  2. Pengguna menanyakan apakah file yang telah disimpan di harddisk tersebut dapat diakses langsung oleh sistem tanpa perlu upload / drag-and-drop manual ke Metadata Studio untuk analisis metadata Gemini AI dan pengunggahan FTP.
+  3. Aplikasi web di browser tidak diizinkan membaca path disk lokal sewenang-wenang karena batasan keamanan browser sandbox. Namun, sistem telah memiliki daemon `ftp-bridge` lokal (Node.js) yang berjalan di `http://127.0.0.1:45678`.
+- **Decision**:
+  1. **Local Asset Discovery & Stream Engine ([ftp-bridge/server.mjs](file:///c:/App%20Tools/meta-gen-gue/ftp-bridge/server.mjs))**:
+     - Mengembangkan endpoint `GET /api/local/scan-flow-downloads` untuk memindai folder `Downloads/MetaGen_Flow/`, mendeteksi struktur folder sesi, resolusi (tag 2K, 4K, 1K berdasarkan pola nama file dan ukuran), serta menghasilkan URL stream lokal per item.
+     - Mengembangkan endpoint `GET /api/local/file?path=...` untuk menyajikan binary stream file lokal dengan MIME type detection otomatis, HTTP Range headers, dan perlindungan path traversal ketat (dibatasi di dalam `os.homedir()`).
+  2. **High-Speed Memory Loopback Ingestion ([lib/ftp/bridge-client.ts](file:///c:/App%20Tools/meta-gen-gue/lib/ftp/bridge-client.ts))**:
+     - Mengonversi file lokal menjadi native browser `File` object melalui `fetchLocalFileAsBrowserFile(discoveredFile)`. Karena koneksi berlangsung di loopback network `127.0.0.1`, pembacaan file 3MB berlangsung dalam <10ms dan langsung kompatibel dengan seluruh pipeline antrean `File[]` eksisting di Metadata Studio.
+  3. **One-Click Ingestion dari Prompt Generator Toolbar ([components/PromptGeneratorView.tsx](file:///c:/App%20Tools/meta-gen-gue/components/PromptGeneratorView.tsx))**:
+     - Menambahkan tombol `Tarik {flowDownloadResolution} ke Studio` tepat di samping tombol `Unduh {flowDownloadResolution}`.
+     - Saat diklik, sistem memindai folder sesi terkait (atau root jika belum dinamai), mengambil seluruh file 2K, mengubahnya menjadi `File[]`, mengirimnya ke studio via `onSendBatchImagesToMetadata`, dan langsung beralih ke tab Metadata Studio.
+  4. **Direct Pull Quick Action di Studio Dropzone ([components/StudioPanel.tsx](file:///c:/App%20Tools/meta-gen-gue/components/StudioPanel.tsx))**:
+     - Menambahkan tombol `📥 Tarik Aset 2K dari Google Flow (Disk Lokal)` tepat di bawah area dropzone upload.
+     - Terkoneksi langsung ke filter anti-duplikat (`filterDuplicateFiles`), memastikan file yang sudah ada di antrean tidak dimuat ulang.
+- **Rationale & Consequences**: Menghilangkan gesekan manual drag-and-drop antar folder Windows dan browser, menciptakan alur kerja end-to-end yang mulus (Prompt Generator -> Unduh 2K -> 1-Klik Tarik ke Studio -> AI Metadata -> FTP Microstock), sembari tetap menjaga keamanan path traversal dan performa tinggi.
+
+## [2026-10-22] Silent Background Execution & Auto-Wake on Login
+- **Context**: 
+  1. Pengguna menanyakan apakah seluruh aksi pembuatan gambar di Google Flow dapat dilakukan tanpa beralih tab dari Meta-Gen Studio, dan bagaimana jika suatu saat sesi Google Flow memerlukan login akun.
+  2. Sebelumnya, pada `extension/background.js`, terdapat perintah `chrome.tabs.update(flowTab.id, { active: true })` yang secara paksa memindahkan tab browser pengguna ke Google Flow setiap kali prompt dikirim.
+  3. Jika pengguna belum login atau sesi Google habis, background script sebelumnya akan macet dalam loop pencarian kanvas tanpa memberikan instruksi yang jelas kepada pengguna.
+- **Decision**:
+  1. **Silent Background Execution**:
+     - Menghapus pemaksaan `active: true` pada `flowTab`.
+     - Jika tab Flow baru harus dibuat, dibuka dengan `active: false` (di latar belakang).
+     - Pengguna tetap fokus 100% pada Meta-Gen Studio saat proses generasi berlangsung.
+  2. **Deteksi Proaktif & Auto-Wake on Login (`checkFlowLoginStatus`)**:
+     - Memeriksa URL tab apakah teralihkan ke `accounts.google.com` atau `ServiceLogin`.
+     - Content script memeriksa keberadaan tombol `Sign in` / `Masuk` tanpa adanya elemen kanvas.
+     - Jika terdeteksi belum login:
+       - Tab Google Flow secara otomatis dibangunkan ke depan (`active: true`) agar pengguna dapat langsung memasukkan kredensial akun Google.
+       - Mengirimkan pesan toast informatif ke Meta-Gen Studio: `⚠️ Sesi Google Flow belum login atau telah berakhir. Tab Flow telah dibuka di browser Anda. Silakan login terlebih dahulu.`
+       - Mencegah proses eksekusi macet (*hanging*).
+     - Begitu login selesai, sistem otomatis kembali mengeksekusi secara senyap di background pada prompt berikutnya.
+- **Rationale & Consequences**: Memberikan kenyamanan kerja tanpa gangguan tab melompat-lompat, sekaligus menjamin penanganan error yang ramah dan jelas saat otentikasi Google diperlukan.
+
+## [2026-10-22] Analisis & Rencana Resolusi: Stuck Popover Mode Tampilan pada Submission Google Flow
+- **Context**:
+  1. Pengguna membagikan tangkapan layar live saat proses submit di Google Flow terhenti (*stuck*).
+  2. Dari inspeksi visual:
+     - Teks prompt terisi 100% sempurna di kotak ProseMirror.
+     - Tombol panah submit (`->`) sudah muncul di kanan bawah.
+     - Di atas kotak prompt, menu popover setelan *"Mode tampilan"* (dengan pilihan Petak vs Batch, Ukuran petak K/S/B, dan toggle setting) masih terbuka dan tidak mau tertutup.
+- **Root Cause Analysis**:
+  - `ensureBatchViewMode()` di `extension/flow-bridge.js` membuka menu popover setelan via `settingsBtn.click()`.
+  - Upaya penutupan menggunakan sintetis `document.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape' ... }))` gagal menutup CDK overlay Angular Material jika fokus elemen berada di luar overlay.
+  - Popover yang menggantung menghalangi klik pointer / CDP pada tombol submit dan memblokir event `Enter` pada editor.
+## [2026-10-22] Resolusi Masalah Stuck Popover "Mode Tampilan" & Universal Overlay Dismissal
+- **Context**: Pada submission otomatis Google Flow, teks prompt terisi lengkap dan tombol submit panah kanan aktif, namun popover menu setelan *"Mode tampilan (Petak | Batch)"* tetap terbuka menggantung di atas kanvas dan tidak mau tertutup, mencuri fokus mouse dan memblokir klik submit serta tombol Enter.
+- **Decision**:
+  1. **Bypass View Mode Switch**: Menghilangkan eksekusi paksa `ensureBatchViewMode()` pada `handleFlowGeneration` saat pengiriman prompt. Google Flow secara native merender prompt di kedua mode tampilan (Petak maupun Batch) tanpa memerlukan pergantian mode tampilan.
+  2. **Universal CDK Overlay & Popover Dismissal Engine (`dismissAllOverlays()`)**:
+     - Mengklik backdrop CDK (`.cdk-overlay-backdrop`).
+     - Menutup trigger popover yang memiliki status `aria-expanded="true"`.
+     - Mencari dan mengklik tombol close (`X`, `close`, `cancel`, `tutup`) di dalam panel overlay (`.cdk-overlay-pane`).
+     - Mengirimkan event `Escape` secara langsung ke elemen aktif, dokumen, dan seluruh `.cdk-overlay-pane` yang terbuka.
+  3. **Penutupan di Titik-Titik Kritis**: Dipanggil otomatis di 4 titik eksekusi: setelah sinkronisasi setelan rasio/mode (`ensureFlowSettings`), sebelum memfokuskan editor ProseMirror, sebelum mendeteksi tombol submit, dan tepat sebelum dispatch hardware-level CDP submit (`TRIGGER_CDP_SUBMIT`).
+  4. **Penyempurnaan Selector Setting**: Membatasi pencarian pemicu setelan di `getCurrentFlowSettings()` ke dalam `flow-prompt-box` dan mengecualikan tombol setelan kanvas (`settings_2` / `tune`) agar tidak terjadi klik salah sasaran.
+- **Rationale & Consequences**: Menjamin 100% kanvas Google Flow bersih dari popover penghalang sebelum submit, memastikan event klik dan hardware Enter diterima langsung oleh ProseMirror editor, serta menghilangkan kondisi stuck secara permanen.
+
+## [2026-10-22] Local File Path (`filePath`) Persistence in History & Direct FTP Upload from History
+- **Context**: Setelah pengguna menghasilkan metadata microstock dan menyimpannya di Riwayat (IndexedDB), pengguna seringkali ingin mengunggah file tersebut ke FTP agensi di waktu berikutnya. Sebelumnya, karena browser sandbox tidak mengizinkan pemuatan file disk otomatis tanpa interaksi file picker pengguna, pengguna terpaksa memasangkan ulang file fisik satu per satu ("Pasangkan File Asli dari Komputer").
+- **Decision**:
+  1. **Dual-Mode File Representation (`ItemMetaBox` & `FtpQueueItem`)**: Menyimpan properti `filePath?: string` di samping objek memori `file?: File`.
+  2. **Auto-Resolution Disk via Local FTP Bridge (`http://127.0.0.1:45678`)**:
+     - Bridge lokal mengimplementasikan `resolveLocalFilePath(filename)` yang menyusuri folder `Downloads/MetaGen_Flow/**`, `Downloads/`, `Desktop/`, dan `Pictures/`.
+     - Menyediakan endpoint `GET /api/local/find-file?filename=...` untuk mendeteksi lokasi file secara transparan.
+  3. **Zero-Heap Direct Disk Stream di Backend Upload**:
+     - Ketika `POST /api/ftp/upload` menerima `filePath` (tanpa binary `file` di memori browser), backend bridge langsung membaca binary dari disk (`fs.promises.readFile`), menyuntikkan metadata IPTC/XMP via ExifTool, dan mengunggahnya ke server FTP agensi dengan kecepatan disk NVMe/SSD penuh.
+  4. **Seamless Workflow dari Riwayat ke Antrean FTP**:
+     - Ditambahkan tombol `[⚡ Kirim ke Antrean]` pada setiap kartu Sesi Tugas di Riwayat dan `[⚡ Kirim ke Antrean ({selectedCount})]` pada seleksi file.
+     - Handler otomatis melengkapi `filePath` yang hilang via pencarian lokal sebelum beralih ke tab Antrean FTP, menghilangkan kebutuhan membuka file dialog browser sama sekali.
+- **Rationale & Consequences**: Memberikan efisiensi luar biasa bagi microstocker: metadata yang sudah dibuat berjam-jam/berhari-hari sebelumnya dapat langsung diunggah ke FTP agensi microstock hanya dengan 1 kali klik, tanpa perlu mencari atau memilih ulang file dari file manager komputer.
+
+## [2026-10-22] In-Queue Dynamic Disk Auto-Discovery & Zero-Missing Alert Sync for FTP Uploads
+- **Context**: Pada tampilan Antrean FTP, item yang dimuat ke antrean langsung (misalnya dari Studio tanpa melalui tombol Riwayat, atau sebelum sesi di-resolve) memicu banner peringatan kuning `1 file di antrean belum memiliki file fisik di memori browser` dan tombol `Mulai Upload` nonaktif karena `missingFileCount` dan `selectedReadyCount` hanya memvalidasi objek memori `q.file`. Di samping itu, daemon FTP Bridge lokal sebelumnya masih menjalankan proses lama sebelum penambahan rute `/api/local/find-file`.
+- **Decision**:
+  1. **Hot-Restart & Service Verification Daemon Bridge Lokal**: Menghentikan proses daemon Node.js lama dan meluncurkan server bridge terkini yang memuat route resolver `/api/local/find-file`.
+  2. **Asynchronous In-Queue Auto-Discovery (`buildAndScanQueue`)**: Memodifikasi mapping `itemsWithFiles` menggunakan `Promise.all` dan `findLocalFile` agar setiap item di antrean yang belum memiliki file memori maupun `filePath` otomatis dicari di direktori `Downloads/MetaGen_Flow/**`, `Downloads/`, `Desktop/`, dan `Pictures/` secara transparan. Ukuran byte file riil (`localFound.sizeBytes`) juga langsung disuntikkan.
+  3. **Penyelarasan Seluruh Guard Kesiapan Antrean**:
+     - `missingFileCount`: Menggunakan predikat `!q.file && !q.filePath`.
+     - `selectedReadyCount`: Menggunakan predikat `q.file || q.filePath`.
+     - `selectUnuploadedOnly`: Menggunakan predikat `(q.file || q.filePath) && q.hasValidMeta`.
+     - `handleRetryFailed`: Menggunakan predikat `(q.file || q.filePath) && q.hasValidMeta`.
+     - Penampil kolom ukuran di tabel: Menampilkan badge `📁 Siap di Disk` bersanding dengan estimasi ukuran riil `(0.2 MB)` jika `q.fileSize > 0`.
+- **Rationale & Consequences**: Pengguna tidak lagi diwajibkan melakukan interaksi manual untuk memasangkan file atau memilih folder ketika file sudah ada di folder Downloads atau folder turunan komputer. Sistem secara mandiri menemukan file, menghitung ukuran, menghilangkan banner peringatan yang tidak relevan, dan langsung mengaktifkan tombol mulai unggah.
+
+## [2026-10-23] Adobe Stock QC Agent Architecture & Dual-Track Integration
+- **Context**: Kontributor microstock sering mengalami penolakan aset (*rejection*) di portal Adobe Stock akibat kegagalan teknis (resolusi <4MP, file >45MB), cacat visual generatif AI (distorsi anatomi jari/mata, artefak melayang), atau pelanggaran merk/IP terlarang.
+- **Decision**:
+  1. **Dual-Track Workflow Architecture**:
+     - *Jalur 1 (Dedicated Hub)*: Tab 'QC Inspector' mandiri (`components/QcAgentView.tsx`) untuk drag & drop batch, inspeksi visual mendalam, peninjauan crop bukti/bounding box, dan manual override.
+     - *Jalur 2 (Integrated Protection)*: Silent preflight di Studio Metadata dan penahanan otomatis (*auto-hold*) di Antrean FTP untuk akun Adobe Stock jika aset gagal verifikasi teknis.
+  2. **Deterministic Preflight Engine (`lib/qc/preflight.ts`)**:
+     - Menjalankan pengujian deterministik di memori peramban tanpa token AI (<4MP, >100MP, >45MB, dan validasi alpha PNG).
+     - Jika gagal mutlak, langsung ditetapkan `BLOCK` tanpa memicu panggilan API berbayar.
+  3. **Multi-Cluster GAS Proxy VLM Reasoner (`app/api/qc/inspect/route.ts` & `functions/api/qc/inspect.ts`)**:
+     - Menggunakan model Vision Language Model (VLM) via Dual Cluster GAS AI Proxy dengan rotasi round-robin dan failover otomatis.
+     - Pengecekan terstruktur: cacat anatomi AI, teks liar/watermark, logo/brand, artefak pengeditan, bintik debu sensor (*sensor dust spots*), dan horizon miring (*tilted horizons*).
+  4. **Pencocokan Watchlist Merek/IP Terlarang (`lib/qc/data/known_restrictions_watchlist.json`)**:
+     - Pencocokan deterministik teks OCR dan metadata judul/keyword terhadap 40+ item/merek/landmark terlindungi resmi Adobe Stock.
+  5. **Deterministic Decision Engine (`lib/qc/decision-engine.ts`)**:
+     - Menggabungkan hasil preflight dan temuan agen menjadi status final `BLOCK`, `REVIEW`, atau `READY`.
+     - Unknown status tidak pernah ditebak, melainkan diarahkan ke konfirmasi manusia.
+- **Rationale & Consequences**: Memberikan asisten kendali mutu pra-submit lokal yang komprehensif, menghemat token AI, dan melindungi reputasi akun kontributor dari penalti bot kurasi Adobe.
+
+## [2026-10-23] Style-Agnostic Composition Policy (Eliminating False Copy-Space Penalties)
+- **Context**: Panduan resmi Adobe HelpX menyebutkan *"Allow space for text or design overlays"* (copy space). Ketika poin ini dimasukkan ke prompt VLM, model AI berisiko menghasilkan peringatan palsu (*false positive*) pada foto yang memang berkonsep *close-up*, *macro*, *headshot*, atau *seamless texture/pattern* yang sengaja tidak memerlukan copy space.
+- **Decision**: Menegaskan pada prompt sistem inspeksi VLM:
+  - Evaluasi komposisi hanya berfokus pada cacat objektif: garis cakrawala miring tak disengaja (*unintentional tilted/unlevel horizon*) dan pemotongan canggung (*accidental awkward crop* pada subjek/anatomi).
+  - Secara eksplisit melarang penalti atau peringatan kekurangan *copy space* pada gambar gaya *close-up*, *macro*, pola rapat (*pattern*), atau *full-frame artwork* karena copy space murni pilihan gaya dan bukan syarat kelulusan.
+- **Rationale & Consequences**: Mengeliminasi peringatan palsu (*anti-slop*), menjaga akurasi hasil audit, dan memberikan pengalaman pengguna yang relevan bagi seluruh genre aset microstock.

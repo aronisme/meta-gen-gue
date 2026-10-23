@@ -193,69 +193,195 @@ function savePromptToRegistry(token, data) {
   }
 }
 
-// Helper: Hydrate existing badges from registry for recycled virtual scroll tiles
-function hydrateFlowBadges() {
+// In-memory set of tokens that have already been synced in this session to prevent redundant processing
+const syncedMediaTokensSet = new Set();
+// Track auto-retries for failed tiles to avoid infinite loops
+const autoRetriedFailedTilesMap = new Map();
+let isAutoScannerRunning = false;
+
+// Autonomous Auto-Scanner & Badge Hydration:
+// Continuously scans Google Flow canvas for rendered images whose prompt text matches active Meta-Gen prompts.
+// When a match is discovered, it IMMEDIATELY and AUTOMATICALLY extracts the image dataUrl,
+// tags the tile with a green badge, and dispatches FLOW_CARD_DISCOVERED to Meta-Gen without any manual trigger.
+async function scanAndAutoSyncFlowCanvas() {
+  if (isAutoScannerRunning) return;
   if (!chrome?.storage?.local) return;
+
+  isAutoScannerRunning = true;
   try {
-    chrome.storage.local.get(['metagen_flow_registry', 'metagen_agent_scenes'], (res) => {
-      const reg = res.metagen_flow_registry || {};
-      const agentScenes = res.metagen_agent_scenes || [];
+    chrome.storage.local.get(['metagen_flow_registry', 'metagen_session_prompts', 'metagen_agent_scenes'], async (res) => {
+      try {
+        const reg = res.metagen_flow_registry || {};
+        const sessionPrompts = res.metagen_session_prompts || [];
+        const agentScenes = res.metagen_agent_scenes || [];
 
-      document.querySelectorAll('img, video, flow-image-tile img').forEach(async (el) => {
-        const token = getMediaToken(el);
-        if (!token) return;
-
-        const tileContainer =
-          el.closest('flow-grid-tile-container') ||
-          el.closest('flow-tile-container') ||
-          el.closest('flow-image-tile') ||
-          el.closest('.tile-row') ||
-          el.closest('[data-tile-id]') ||
-          el.parentElement;
-        if (!tileContainer) return;
-
-        // 1. Direct restore from registry
-        if (reg[token]) {
-          if (!tileContainer.querySelector('.metagen-flow-badge')) {
-            tagCardWithPromptData(tileContainer, reg[token]);
-          }
+        // Combine all target prompts from both normal Prompt Gen sessions and Agent scenes
+        const candidatePrompts = [...sessionPrompts, ...agentScenes];
+        if (candidatePrompts.length === 0 && Object.keys(reg).length === 0) {
+          isAutoScannerRunning = false;
           return;
         }
 
-        // 2. Discover unbadged tile matching active agent scenes (e.g. if user pasted to Agent manually)
-        if (!tileContainer.querySelector('.metagen-flow-badge') && agentScenes.length > 0) {
-          const matchedScene = findBestMatchingScene(tileContainer, agentScenes);
-          if (matchedScene) {
-            const cardData = {
-              cardId: matchedScene.cardId,
-              ordinal: matchedScene.ordinal,
-              variation: '',
-              title: matchedScene.title || '',
-              prompt: matchedScene.prompt || '',
-              token: token,
-              mediaId: el.getAttribute('data-media-id') || '',
-            };
-            tagCardWithPromptData(tileContainer, cardData);
-            savePromptToRegistry(token, cardData);
+        // Target all media elements across Google Flow layouts (Batch, Grid, Canvas, Freeform)
+        const mediaElements = Array.from(
+          document.querySelectorAll('img, video, flow-image-tile img, flow-video-tile img, flow-asset-tile img, flow-grid-tile-container img')
+        ).filter((el) => {
+          if (!el.isConnected) return false;
+          const src = el.src || el.currentSrc || el.getAttribute('poster') || '';
+          if (!src && !el.getAttribute('data-media-id')) return false;
+          if (
+            src.includes('profile') ||
+            src.includes('avatar') ||
+            src.includes('icon') ||
+            src.includes('logo') ||
+            src.includes('data:image/svg')
+          ) {
+            return false;
+          }
+          const w = el.naturalWidth || el.videoWidth || el.width || 0;
+          const h = el.naturalHeight || el.videoHeight || el.height || 0;
+          if (w > 0 && w < 80 && h > 0 && h < 80) return false;
+          return true;
+        });
 
-            // Notify Meta-Gen Studio tab about discovered card image
-            try {
-              const dataUrl = await imageToDataUrl(el);
-              chrome.runtime.sendMessage({
-                type: 'FLOW_CARD_DISCOVERED',
-                result: {
-                  cardId: matchedScene.cardId,
-                  ordinal: matchedScene.ordinal,
-                  token: token,
-                  imageDataUrl: dataUrl,
-                },
-              });
-            } catch (e) {}
+        for (const el of mediaElements) {
+          const token = getMediaToken(el);
+          if (!token) continue;
+
+          const tileContainer =
+            el.closest('flow-grid-tile-container') ||
+            el.closest('flow-tile-container') ||
+            el.closest('flow-image-tile') ||
+            el.closest('flow-video-tile') ||
+            el.closest('.tile-row') ||
+            el.closest('flow-batch-row') ||
+            el.closest('.batch-row') ||
+            el.closest('[data-tile-id]') ||
+            el.parentElement;
+          if (!tileContainer) continue;
+
+          // 1. Direct restore from registry if already known
+          if (reg[token]) {
+            if (!tileContainer.querySelector('.metagen-flow-badge')) {
+              tagCardWithPromptData(tileContainer, reg[token]);
+            }
+            // If already recorded in registry but not yet dispatched in this session, sync it to Meta-Gen
+            if (!syncedMediaTokensSet.has(token)) {
+              syncedMediaTokensSet.add(token);
+              try {
+                const dataUrl = await imageToDataUrl(el);
+                if (dataUrl) {
+                  chrome.runtime.sendMessage({
+                    type: 'FLOW_CARD_DISCOVERED',
+                    result: {
+                      cardId: reg[token].cardId,
+                      ordinal: reg[token].ordinal,
+                      token: token,
+                      imageDataUrl: dataUrl,
+                    },
+                  });
+                }
+              } catch (e) {}
+            }
+            continue;
+          }
+
+          // 2. Already synced in memory
+          if (syncedMediaTokensSet.has(token)) {
+            continue;
+          }
+
+          // 3. Unregistered tile: Check if prompt matches any active Meta-Gen prompt
+          if (candidatePrompts.length > 0) {
+            const matchedPrompt = findBestMatchingPrompt(tileContainer, candidatePrompts);
+            if (matchedPrompt) {
+              syncedMediaTokensSet.add(token);
+
+              const cardData = {
+                cardId: matchedPrompt.cardId,
+                ordinal: matchedPrompt.ordinal,
+                variation: '',
+                title: matchedPrompt.title || '',
+                prompt: matchedPrompt.prompt || '',
+                ratio: matchedPrompt.ratio || '1:1',
+                token: token,
+                mediaId: el.getAttribute('data-media-id') || '',
+              };
+
+              tagCardWithPromptData(tileContainer, cardData);
+              savePromptToRegistry(token, cardData);
+
+              console.log('[Meta-Gen Flow Bridge] Auto-detected matching prompt card:', matchedPrompt.ordinal, matchedPrompt.title);
+
+              // Immediately notify Meta-Gen Web App tab with the image dataUrl
+              try {
+                const dataUrl = await imageToDataUrl(el);
+                if (dataUrl) {
+                  chrome.runtime.sendMessage({
+                    type: 'FLOW_CARD_DISCOVERED',
+                    result: {
+                      cardId: matchedPrompt.cardId,
+                      ordinal: matchedPrompt.ordinal,
+                      token: token,
+                      imageDataUrl: dataUrl,
+                    },
+                  });
+                  showFlowToast(
+                    '⚡ Meta-Gen Auto-Sync',
+                    `Adegan #${matchedPrompt.ordinal || ''} otomatis terhubung ke Meta-Gen!`,
+                    true
+                  );
+                }
+              } catch (err) {
+                console.warn('[Meta-Gen Flow Bridge] Auto-sync export error:', err);
+              }
+            }
+        }
+
+        // 4. Check for any failed tiles with 'Coba lagi' / 'try-again-button'
+        if (candidatePrompts.length > 0) {
+          const candidateContainers = Array.from(
+            document.querySelectorAll(
+              'flow-grid-tile-container, flow-tile-container, flow-image-tile, flow-video-tile, .tile-row, [data-tile-id]'
+            )
+          );
+
+          for (const container of candidateContainers) {
+            const tryBtn = findTryAgainButton(container);
+            if (!tryBtn) continue;
+
+            const matchedPrompt = findBestMatchingPrompt(container, candidatePrompts);
+            if (matchedPrompt) {
+              const tileKey = matchedPrompt.cardId || extractTilePromptText(container).slice(0, 40) || 'tile_err';
+              const retryCount = autoRetriedFailedTilesMap.get(tileKey) || 0;
+              if (retryCount < 2) {
+                autoRetriedFailedTilesMap.set(tileKey, retryCount + 1);
+                console.warn(`[Meta-Gen Flow Bridge] Auto-clicking 'Coba lagi' for scene #${matchedPrompt.ordinal}...`);
+                showFlowToast(
+                  '⚠️ Auto-Retry Google Flow',
+                  `Mencoba lagi render otomatis untuk adegan #${matchedPrompt.ordinal || ''} (${retryCount + 1}/2)...`,
+                  false
+                );
+                clickTryAgainButton(tryBtn);
+                break;
+              }
+            }
           }
         }
-      });
+      } catch (err) {
+        console.warn('[Meta-Gen Flow Bridge] Auto-scanner iteration error:', err);
+      } finally {
+        isAutoScannerRunning = false;
+      }
     });
-  } catch (e) {}
+  } catch (err) {
+    isAutoScannerRunning = false;
+  }
+}
+
+// Backward-compatible alias for existing calls
+function hydrateFlowBadges() {
+  scanAndAutoSyncFlowCanvas();
 }
 
 // Helper: Locate "New Project" / "Project baru" button on Google Flow dashboard
@@ -365,8 +491,33 @@ function clickNewProjectButton(btn) {
   } catch (e) {}
 }
 
+// Helper: Detect if Google Flow requires user login or session has expired
+function checkFlowLoginStatus() {
+  if (window.location.hostname.includes('accounts.google.com') || window.location.href.includes('ServiceLogin')) {
+    return false;
+  }
+  const signInEl = document.querySelector(
+    'a[href*="accounts.google.com"], button[aria-label*="Sign in" i], button[aria-label*="Masuk" i], a[href*="ServiceLogin"]'
+  );
+  const isAppLoaded = document.querySelector(
+    'button.new-project-button, .ProseMirror, flow-prompt-box, mat-sidenav-container, .flow-canvas, flow-image-tile'
+  );
+  if (signInEl && !isAppLoaded) {
+    return false;
+  }
+  return true;
+}
+
 // Helper: Ensure Google Flow has an active project open (auto-clicks "Project baru" if on dashboard)
 async function ensureActiveProject() {
+  if (!checkFlowLoginStatus()) {
+    console.warn('[Meta-Gen Flow Bridge] Google Flow session requires login!');
+    try {
+      chrome.runtime.sendMessage({ type: 'FLOW_LOGIN_REQUIRED' });
+    } catch (e) {}
+    throw new Error('Sesi Google Flow belum login atau telah berakhir. Tab Flow telah dibuka di browser Anda. Silakan login terlebih dahulu.');
+  }
+
   const isInsideProjectUrl = window.location.href.includes('/project/');
   const initialNewButton = findNewProjectButton();
 
@@ -605,11 +756,86 @@ function clickMaterialToggle(toggleEl) {
   btn.click();
 }
 
+// Helper: Thoroughly dismiss all CDK overlays, backdrops, menus, and popovers
+function dismissAllOverlays() {
+  try {
+    // 1. Click backdrop if present
+    const backdrops = document.querySelectorAll('.cdk-overlay-backdrop');
+    backdrops.forEach((bd) => {
+      try {
+        bd.dispatchEvent(new PointerEvent('pointerdown', { bubbles: true, cancelable: true }));
+        bd.dispatchEvent(new MouseEvent('mousedown', { bubbles: true, cancelable: true }));
+        bd.click();
+      } catch (e) {}
+    });
+
+    // 2. Click any buttons that are currently aria-expanded="true" (except agent chip or new project button)
+    const expandedButtons = document.querySelectorAll('button[aria-expanded="true"], [role="button"][aria-expanded="true"]');
+    expandedButtons.forEach((btn) => {
+      try {
+        if (!btn.classList.contains('agent-mode-chip') && !btn.classList.contains('new-project-button')) {
+          btn.click();
+        }
+      } catch (e) {}
+    });
+
+    // 3. Find and click any close buttons inside CDK overlays or popovers
+    const closeButtons = document.querySelectorAll(
+      '.cdk-overlay-pane button[aria-label*="tutup" i], .cdk-overlay-pane button[aria-label*="close" i], .cdk-overlay-pane button[mattooltip*="tutup" i], .cdk-overlay-pane button[mattooltip*="close" i]'
+    );
+    closeButtons.forEach((btn) => {
+      try { btn.click(); } catch (e) {}
+    });
+
+    const iconButtons = document.querySelectorAll('.cdk-overlay-pane button');
+    iconButtons.forEach((btn) => {
+      const ic = btn.querySelector('mat-icon');
+      if (ic) {
+        const txt = (ic.textContent || '').trim().toLowerCase();
+        if (txt === 'close' || txt === 'cancel' || txt === 'clear') {
+          try { btn.click(); } catch (e) {}
+        }
+      }
+    });
+
+    // 4. Dispatch Escape event directly on document.activeElement, document, and all open cdk-overlay-panes
+    const escEvent = new KeyboardEvent('keydown', {
+      key: 'Escape',
+      code: 'Escape',
+      keyCode: 27,
+      which: 27,
+      bubbles: true,
+      cancelable: true,
+      composed: true,
+    });
+    if (document.activeElement && document.activeElement !== document.body) {
+      try { document.activeElement.dispatchEvent(escEvent); } catch (e) {}
+    }
+    document.dispatchEvent(escEvent);
+
+    const panes = document.querySelectorAll('.cdk-overlay-pane');
+    panes.forEach((p) => {
+      try { p.dispatchEvent(escEvent); } catch (e) {}
+    });
+  } catch (err) {
+    console.warn('[Meta-Gen Flow Bridge] dismissAllOverlays error:', err);
+  }
+}
+
 // Helper: Inspect current setting trigger button summary
 function getCurrentFlowSettings() {
-  const triggerBtn = document.querySelector(
-    'button.settings-trigger-button, button[aria-label="Pemicu setelan" i], button[aria-label*="setelan" i]'
+  let triggerBtn = document.querySelector(
+    'flow-prompt-box button.settings-trigger-button, button.settings-trigger-button, flow-prompt-box button[aria-label*="setelan" i], flow-prompt-box button[aria-label*="setting" i], button[aria-label="Pemicu setelan" i]'
   );
+  if (!triggerBtn) {
+    const allButtons = Array.from(document.querySelectorAll('flow-prompt-box button, button'));
+    triggerBtn = allButtons.find((b) => {
+      const ic = b.querySelector('mat-icon');
+      const icText = (ic ? ic.textContent : '').trim().toLowerCase();
+      if (icText === 'settings_2' || icText === 'tune') return false;
+      return b.classList.contains('settings-trigger-button') || b.querySelector('.settings-summary') !== null;
+    });
+  }
   if (!triggerBtn) return null;
 
   const summary = triggerBtn.querySelector('.settings-summary');
@@ -793,18 +1019,17 @@ async function ensureFlowSettings(targetRatio = '16:9', targetOutput = null, tar
   }
 
   // 6. Close the overlay
-  document.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', code: 'Escape', keyCode: 27, bubbles: true }));
-  const backdrop = document.querySelector('.cdk-overlay-backdrop');
-  if (backdrop) backdrop.click();
-
-  await new Promise((r) => setTimeout(r, 250));
+  dismissAllOverlays();
+  await new Promise((r) => setTimeout(r, 200));
 
   // If overlay is still present in DOM, toggle trigger button again to dismiss
   if (document.querySelector('flow-prompt-box-settings, .settings-content-overlay')) {
     try {
       triggerBtn.click();
     } catch (e) {}
+    await new Promise((r) => setTimeout(r, 150));
   }
+  dismissAllOverlays();
 
   console.log('[Meta-Gen Flow Bridge] Konfigurasi setelan Google Flow selesai.');
   return true;
@@ -841,7 +1066,7 @@ async function ensureBatchViewMode() {
 
     // 4. Cari tombol Setelan (icon settings_2 atau aria-label Setelan)
     let settingsBtn = document.querySelector(
-      'button[aria-label="Setelan" i], button[mattooltip="Lihat setelan" i], button[aria-label*="setelan" i]'
+      'button[aria-label="Setelan" i], button[mattooltip="Lihat setelan" i]'
     );
     if (!settingsBtn) {
       const allButtons = Array.from(document.querySelectorAll('button'));
@@ -853,7 +1078,7 @@ async function ensureBatchViewMode() {
 
     if (settingsBtn) {
       settingsBtn.click();
-      await new Promise((r) => setTimeout(r, 450));
+      await new Promise((r) => setTimeout(r, 400));
 
       // 5. Cari tombol Batch dalam menu/popover yang muncul
       const allToggleButtons = Array.from(
@@ -868,13 +1093,21 @@ async function ensureBatchViewMode() {
         batchBtn.click();
         isBatchModeConfirmed = true;
         console.log('[Meta-Gen Flow Bridge] Pilihan Batch berhasil diaktifkan!');
-        await new Promise((r) => setTimeout(r, 400));
+        await new Promise((r) => setTimeout(r, 300));
       }
 
-      // 6. Tutup popover setelan dengan tombol Escape
-      document.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', code: 'Escape', keyCode: 27, bubbles: true }));
-      document.dispatchEvent(new PointerEvent('pointerdown', { bubbles: true, clientX: 0, clientY: 0 }));
-      await new Promise((r) => setTimeout(r, 250));
+      // 6. Tutup popover setelan secara menyeluruh
+      dismissAllOverlays();
+      await new Promise((r) => setTimeout(r, 150));
+
+      // Jika popover masih terbuka, klik ulang tombol settingsBtn untuk toggle close
+      if (document.querySelector('.cdk-overlay-pane, [role="dialog"], [role="menu"]')) {
+        try {
+          settingsBtn.click();
+        } catch (e) {}
+        await new Promise((r) => setTimeout(r, 150));
+      }
+      dismissAllOverlays();
     }
   } catch (err) {
     console.warn('[Meta-Gen Flow Bridge] ensureBatchViewMode warning:', err);
@@ -973,10 +1206,14 @@ function extractTilePromptText(tileElement) {
   if (taggedPrompt && taggedPrompt.length > 5) return taggedPrompt;
 
   // 1. Check Batch Mode full prompt container in the same row
-  const row = tileElement.closest('.tile-row') || tileElement.closest('flow-batch-row') || tileElement.parentElement;
+  const row =
+    tileElement.closest('.tile-row') ||
+    tileElement.closest('flow-batch-row') ||
+    tileElement.closest('.batch-row') ||
+    tileElement.parentElement;
   if (row) {
     const batchPromptEl = row.querySelector(
-      '.prompt-text .text-part, flow-expandable-prompt .text-part, .prompt-text, flow-expandable-prompt'
+      '.prompt-text .text-part, flow-expandable-prompt .text-part, .prompt-text, flow-expandable-prompt, .user-prompt, [data-prompt], .prompt-display'
     );
     if (batchPromptEl && batchPromptEl.textContent.trim().length > 5) {
       return batchPromptEl.textContent.trim();
@@ -985,19 +1222,27 @@ function extractTilePromptText(tileElement) {
 
   // 2. Direct inside tileElement
   const directPrompt = tileElement.querySelector(
-    '.prompt-text .text-part, flow-expandable-prompt .text-part, .prompt-text'
+    '.prompt-text .text-part, flow-expandable-prompt .text-part, .prompt-text, .user-prompt, [data-prompt], .prompt-display, .prompt-container, div[role="textbox"]'
   );
   if (directPrompt && directPrompt.textContent.trim().length > 5) {
     return directPrompt.textContent.trim();
   }
 
-  // 3. Grid Mode footer title
-  const footerTitle = tileElement.querySelector('.footer-title');
+  // 3. Sibling element beside the tile image
+  const siblingPrompt = tileElement.parentElement?.querySelector(
+    '.prompt-text, .text-part, flow-expandable-prompt, .footer-title, [data-prompt], .user-prompt'
+  );
+  if (siblingPrompt && siblingPrompt.textContent.trim().length > 5) {
+    return siblingPrompt.textContent.trim();
+  }
+
+  // 4. Grid Mode footer title or caption
+  const footerTitle = tileElement.querySelector('.footer-title, .title-text, .prompt-caption, span.body-medium');
   if (footerTitle && footerTitle.textContent.trim().length > 5) {
     return footerTitle.textContent.trim();
   }
 
-  // 4. Grid Mode container aria-label (EXCLUDE hardcoded placeholder "Alpaca wearing" or generic labels)
+  // 5. Grid Mode container aria-label (EXCLUDE hardcoded placeholder "Alpaca wearing" or generic labels)
   const ariaLabel = tileElement.getAttribute('aria-label') || '';
   if (
     ariaLabel.trim().length > 5 &&
@@ -1008,6 +1253,20 @@ function extractTilePromptText(tileElement) {
     !ariaLabel.includes('image')
   ) {
     return ariaLabel.trim();
+  }
+
+  // 6. Check alt or title on img element
+  const imgEl = tileElement.querySelector('img') || (tileElement.tagName === 'IMG' ? tileElement : null);
+  if (imgEl) {
+    const alt = imgEl.getAttribute('alt') || imgEl.getAttribute('title') || '';
+    if (
+      alt.trim().length > 10 &&
+      !alt.toLowerCase().includes('alpaca') &&
+      !alt.includes('card') &&
+      !alt.includes('thumbnail')
+    ) {
+      return alt.trim();
+    }
   }
 
   return '';
@@ -1023,10 +1282,10 @@ function isTileMatchingTargetPrompt(tileElement, targetPrompt) {
     return true;
   }
 
-  const tileText = extractTilePromptText(tileElement).toLowerCase();
+  const tileText = extractTilePromptText(tileElement).toLowerCase().trim();
   if (!tileText) return true; // fallback if prompt text element is not yet populated
 
-  const cleanTarget = targetPrompt.toLowerCase();
+  const cleanTarget = targetPrompt.toLowerCase().trim();
 
   // Substring match
   if (cleanTarget.includes(tileText) || tileText.includes(cleanTarget.slice(0, 30))) {
@@ -1044,42 +1303,61 @@ function isTileMatchingTargetPrompt(tileElement, targetPrompt) {
   return matchedWords.length >= 2 || matchedWords.length / targetWords.length >= 0.15;
 }
 
-// Helper: Find best matching scene for an Agent Batch multi-scene tile
-function findBestMatchingScene(tileElement, scenes) {
-  if (!scenes || !Array.isArray(scenes) || scenes.length === 0) return null;
-  const tileText = extractTilePromptText(tileElement).toLowerCase();
+// Helper: Find best matching prompt from list of candidate prompts
+function findBestMatchingPrompt(tileElement, candidatePrompts) {
+  if (!candidatePrompts || !Array.isArray(candidatePrompts) || candidatePrompts.length === 0) return null;
+  const tileText = extractTilePromptText(tileElement).toLowerCase().trim();
   if (!tileText) return null;
 
-  let bestScene = null;
+  let bestMatch = null;
   let bestScore = -1;
 
-  for (const scene of scenes) {
-    const scenePrompt = (scene.prompt || '').toLowerCase();
-    const sceneTitle = (scene.title || '').toLowerCase();
+  for (const item of candidatePrompts) {
+    const itemPrompt = (item.prompt || '').toLowerCase().trim();
+    const itemTitle = (item.title || '').toLowerCase().trim();
+    if (!itemPrompt && !itemTitle) continue;
 
-    // Direct substring or inclusion
-    if (scenePrompt && (tileText.includes(scenePrompt.slice(0, 35)) || scenePrompt.includes(tileText.slice(0, 35)))) {
-      return scene;
+    // Direct substring or prefix match (either direction)
+    const p35 = itemPrompt.slice(0, 35);
+    const t35 = tileText.slice(0, 35);
+    if ((p35 && tileText.includes(p35)) || (t35 && itemPrompt.includes(t35))) {
+      return item;
+    }
+    if (itemPrompt.includes(tileText) || tileText.includes(itemPrompt)) {
+      return item;
     }
 
     // Keyword overlap
-    const sceneWords = `${scenePrompt} ${sceneTitle}`
-      .replace(/[^a-z0-9\s]/g, '')
+    const itemWords = `${itemPrompt} ${itemTitle}`
+      .replace(/[^a-z0-9\s]/g, ' ')
       .split(/\s+/)
       .filter((w) => w.length > 3);
 
-    if (sceneWords.length === 0) continue;
+    if (itemWords.length === 0) continue;
 
-    const matched = sceneWords.filter((w) => tileText.includes(w));
-    const score = matched.length / sceneWords.length;
+    // Filter common generic prompt stop-words
+    const stopWords = new Set([
+      'with', 'from', 'that', 'this', 'have', 'more', 'very', 'into',
+      'photorealistic', 'hyperrealistic', 'high', 'quality', 'ultra', 'detailed', '4k', '8k'
+    ]);
+    const meaningfulWords = itemWords.filter((w) => !stopWords.has(w));
+    const wordsToCheck = meaningfulWords.length >= 3 ? meaningfulWords : itemWords;
 
-    if (score > bestScore && (matched.length >= 2 || score >= 0.15)) {
+    const matched = wordsToCheck.filter((w) => tileText.includes(w));
+    const score = matched.length / wordsToCheck.length;
+
+    if (score > bestScore && (matched.length >= 3 || (matched.length >= 2 && score >= 0.18))) {
       bestScore = score;
-      bestScene = scene;
+      bestMatch = item;
     }
   }
 
-  return bestScene;
+  return bestMatch;
+}
+
+// Helper: Find best matching scene for an Agent Batch multi-scene tile (backward-compatible alias)
+function findBestMatchingScene(tileElement, scenes) {
+  return findBestMatchingPrompt(tileElement, scenes);
 }
 
 // Helper: Convert image to Data URL safely
@@ -1235,6 +1513,101 @@ function clickSubmitButton(btn) {
   }
 }
 
+// Helper: Locate Google Flow "Try Again" / "Coba lagi" failure button
+function findTryAgainButton(scope = document) {
+  if (!scope) scope = document;
+
+  // Strategy 1: Specific class and attribute from Google Flow inspected DOM (matching user snippet)
+  const specificCandidates = Array.from(
+    scope.querySelectorAll(
+      'button.try-again-button, .try-again-button, button[flow-button].try-again-button, button[class*="try-again-button"], button[class*="try-again"]'
+    )
+  ).filter((b) => b && b.offsetParent !== null && !isButtonDisabled(b));
+
+  if (specificCandidates.length > 0) {
+    return specificCandidates[specificCandidates.length - 1]; // Pick most recent / relevant
+  }
+
+  // Strategy 2: Search buttons for multilingual text "Coba lagi" / "Try again"
+  const allButtons = Array.from(scope.querySelectorAll('button, [role="button"]')).filter(
+    (b) => b.offsetParent !== null && !isButtonDisabled(b)
+  );
+
+  for (const b of allButtons) {
+    const labelSpan = b.querySelector('.mdc-button__label') || b;
+    const txt = (labelSpan.textContent || b.textContent || '').trim().toLowerCase();
+    if (
+      txt === 'coba lagi' ||
+      txt === 'try again' ||
+      txt.includes('coba lagi') ||
+      txt.includes('try again') ||
+      txt.includes('réessayer') ||
+      txt.includes('reintentar') ||
+      txt.includes('nochmal versuchen')
+    ) {
+      return b;
+    }
+  }
+
+  return null;
+}
+
+// Helper: Click "Coba lagi" / "Try again" button with multi-tier pointer simulation, Zone.js, and CDP
+function clickTryAgainButton(btn) {
+  if (!btn) return false;
+  try {
+    btn.scrollIntoView({ behavior: 'instant', block: 'center', inline: 'center' });
+  } catch (e) {}
+
+  btn.focus();
+
+  const rect = btn.getBoundingClientRect();
+  const clickX = rect.width > 0 ? Math.round(rect.left + rect.width / 2) : 100;
+  const clickY = rect.height > 0 ? Math.round(rect.top + rect.height / 2) : 100;
+
+  const innerTargets = [
+    btn.querySelector('.mat-mdc-button-touch-target'),
+    btn.querySelector('.mdc-button__label'),
+    btn.querySelector('span'),
+    btn,
+  ].filter(Boolean);
+
+  const eventOpts = {
+    bubbles: true,
+    cancelable: true,
+    composed: true,
+    view: window,
+    clientX: clickX,
+    clientY: clickY,
+  };
+
+  // Tier 1: Full pointer & mouse simulation on child targets and button
+  for (const target of innerTargets) {
+    target.dispatchEvent(new PointerEvent('pointerover', eventOpts));
+    target.dispatchEvent(new PointerEvent('pointerenter', eventOpts));
+    target.dispatchEvent(new PointerEvent('pointerdown', { ...eventOpts, isPrimary: true, button: 0 }));
+    target.dispatchEvent(new MouseEvent('mousedown', { ...eventOpts, button: 0 }));
+    target.dispatchEvent(new PointerEvent('pointerup', { ...eventOpts, isPrimary: true, button: 0 }));
+    target.dispatchEvent(new MouseEvent('mouseup', { ...eventOpts, button: 0 }));
+    try {
+      target.click();
+    } catch (e) {}
+  }
+  btn.click();
+
+  // Tier 2: CDP Hardware-level mouse click via background.js if available
+  try {
+    if (rect.width > 0 && rect.height > 0 && typeof chrome !== 'undefined' && chrome.runtime?.sendMessage) {
+      chrome.runtime.sendMessage({
+        type: 'TRIGGER_CDP_MOUSE_CLICK',
+        coords: { x: clickX, y: clickY },
+      });
+    }
+  } catch (e) {}
+
+  return true;
+}
+
 // Main Flow Generation Handler
 async function handleFlowGeneration(payload) {
   const { cardId, prompt, ratio, ordinal, title, outputCount, mode, videoType } = payload;
@@ -1258,9 +1631,9 @@ async function handleFlowGeneration(payload) {
     : null;
   await ensureFlowSettings(ratio || '16:9', targetOutput, mode || 'gambar', videoType || null);
 
-  // Dismiss any blocking cookie banner & Ensure Batch View Mode
+  // Dismiss any blocking cookie banner & any lingering overlays
   dismissGoogleCookieBar();
-  await ensureBatchViewMode();
+  dismissAllOverlays();
 
   // 1. Snapshot all existing media items (Baseline) before submitting
   const baselineTokens = new Set();
@@ -1304,6 +1677,7 @@ async function handleFlowGeneration(payload) {
   console.log('[Meta-Gen Flow Bridge] Located prompt editor:', editor);
 
   // 3. Focus editor and clear previous contents
+  dismissAllOverlays();
   editor.focus();
   try {
     const sel = window.getSelection();
@@ -1379,7 +1753,11 @@ async function handleFlowGeneration(payload) {
     console.warn('[Meta-Gen Flow Bridge] Main world submit request failed:', mainErr);
   }
 
-  // 5. Locate Submit Button and wait for Angular to enable it
+  // 5. Ensure all popovers/overlays are thoroughly dismissed so they do not capture click or Enter
+  dismissAllOverlays();
+  await new Promise((r) => setTimeout(r, 120));
+
+  // Locate Submit Button and wait for Angular to enable it
   let generateBtn = findFlowSubmitButton();
   console.log('[Meta-Gen Flow Bridge] Initial submit button lookup:', generateBtn, 'Disabled:', isButtonDisabled(generateBtn));
 
@@ -1423,6 +1801,7 @@ async function handleFlowGeneration(payload) {
   }
 
   // 6.1 Trigger CDP (Chrome DevTools Protocol) hardware click & Enter (isTrusted: true)
+  dismissAllOverlays();
   editor.focus();
   try {
     console.log('[Meta-Gen Flow Bridge] Requesting CDP hardware-level submit (isTrusted: true)...');
@@ -1497,6 +1876,9 @@ async function handleFlowGeneration(payload) {
   let hasObservedStopIcon = false;
   let hasAnnouncedRenderComplete = false;
   let postStopChecks = 0;
+  let tryAgainRetries = 0;
+  const MAX_TRY_AGAIN_RETRIES = 2; // Auto-retry up to 2 times automatically
+  let lastTryAgainTimestamp = 0;
 
   while (Date.now() - pollStart < timeoutMs) {
     await new Promise((r) => setTimeout(r, 1200));
@@ -1518,6 +1900,47 @@ async function handleFlowGeneration(payload) {
       hasAnnouncedRenderComplete = true;
       console.log('[Meta-Gen Flow Bridge] Stop icon cleared! Generation has completed in Flow.');
       showFlowToast('⚡ Render Selesai!', 'Mendeteksi variasi gambar di canvas...', true);
+    }
+
+    // 9.1 Detect Google Flow Failure Button ("Coba lagi" / try-again-button)
+    // If generation has stopped or after 4s without stop icon, check if try-again-button is present
+    if (!currentlyGenerating && elapsedSec >= 4) {
+      const tryAgainBtn = findTryAgainButton();
+      if (tryAgainBtn && Date.now() - lastTryAgainTimestamp > 6000) {
+        lastTryAgainTimestamp = Date.now();
+        if (tryAgainRetries < MAX_TRY_AGAIN_RETRIES) {
+          tryAgainRetries++;
+          console.warn(
+            `[Meta-Gen Flow Bridge] Google Flow generation failed (detected 'Coba lagi' button). Executing auto-retry #${tryAgainRetries}/${MAX_TRY_AGAIN_RETRIES}...`
+          );
+          showFlowToast(
+            '⚠️ Flow Gagal Render',
+            `Tombol 'Coba lagi' terdeteksi. Mencoba lagi otomatis (${tryAgainRetries}/${MAX_TRY_AGAIN_RETRIES})...`,
+            false
+          );
+
+          clickTryAgainButton(tryAgainBtn);
+
+          // Reset waiting flags for this fresh attempt
+          hasObservedStopIcon = false;
+          hasAnnouncedRenderComplete = false;
+          postStopChecks = 0;
+          await new Promise((r) => setTimeout(r, 2000));
+          continue;
+        } else {
+          console.error(
+            `[Meta-Gen Flow Bridge] Google Flow generation failed consistently after ${MAX_TRY_AGAIN_RETRIES} retries with try-again-button.`
+          );
+          showFlowToast(
+            '❌ Google Flow: Gagal Render',
+            `Gagal membuat gambar setelah ${MAX_TRY_AGAIN_RETRIES}x 'Coba lagi'. Melaporkan ke Meta-Gen...`,
+            false
+          );
+          throw new Error(
+            `Google Flow gagal generate gambar: Muncul tombol 'Coba lagi' (Gagal setelah ${MAX_TRY_AGAIN_RETRIES}x percobaan ulang otomatis).`
+          );
+        }
+      }
     }
 
     // When rendering stops (or after 25s elapsed without active generation), scan for newly rendered images
@@ -1847,8 +2270,7 @@ function saveDownloadHistory() {
 }
 
 function closeAnyOpenMenus() {
-  document.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', code: 'Escape', keyCode: 27, which: 27, bubbles: true, cancelable: true }));
-  document.dispatchEvent(new PointerEvent('pointerdown', { bubbles: true, clientX: 0, clientY: 0 }));
+  dismissAllOverlays();
 }
 
 function getScrollContainer() {
@@ -2701,10 +3123,41 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
       });
     return true; // asynchronous response
   }
+
+  if (message.action === 'TRIGGER_SCAN_NOW') {
+    scanAndAutoSyncFlowCanvas();
+    sendResponse({ active: true });
+    return true;
+  }
 });
 
-// Auto-hydrate badges on load & periodically for virtual scrolling
-hydrateFlowBadges();
-setInterval(hydrateFlowBadges, 3500);
+// Start Continuous Autonomous Auto-Scanner & Live Badge Observer
+scanAndAutoSyncFlowCanvas();
+setInterval(scanAndAutoSyncFlowCanvas, 2000);
+
+let flowMutationDebounceTimer = null;
+const flowCanvasObserver = new MutationObserver((mutations) => {
+  let hasAddedNode = false;
+  for (const m of mutations) {
+    if (m.addedNodes.length > 0) {
+      hasAddedNode = true;
+      break;
+    }
+  }
+  if (hasAddedNode) {
+    clearTimeout(flowMutationDebounceTimer);
+    flowMutationDebounceTimer = setTimeout(() => {
+      scanAndAutoSyncFlowCanvas();
+    }, 600);
+  }
+});
+
+if (document.body) {
+  flowCanvasObserver.observe(document.body, { childList: true, subtree: true });
+} else {
+  document.addEventListener('DOMContentLoaded', () => {
+    flowCanvasObserver.observe(document.body, { childList: true, subtree: true });
+  });
+}
 
 

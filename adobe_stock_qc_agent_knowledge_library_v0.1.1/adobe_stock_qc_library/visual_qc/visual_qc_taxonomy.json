@@ -1,0 +1,498 @@
+{
+  "library": "AI Visual QC taxonomy for Adobe Stock preflight",
+  "version": "0.1.1",
+  "checked_on": "2026-10-22",
+  "scope": "Still image visual inspection. Similarity search intentionally excluded.",
+  "principle": "Each finding must provide region/evidence, explanation, detection method, confidence/calibration status, and whether it is an Adobe requirement or an internal heuristic.",
+  "checks": [
+    {
+      "id": "VQ-ANATOMY-HANDS",
+      "category": "anatomy",
+      "applies_to": [
+        "people",
+        "illustration",
+        "AI-generated photo",
+        "AI-generated illustration"
+      ],
+      "look_for": [
+        "extra/missing/fused fingers or toes",
+        "unnatural finger joints",
+        "hands merging into objects",
+        "broken nail/finger geometry",
+        "limbs that start/end inconsistently"
+      ],
+      "recommended_method": [
+        "detect human/animal regions",
+        "crop hands/feet at native resolution and 100% view",
+        "vision-language structured review",
+        "optional pose/keypoint consistency check"
+      ],
+      "evidence_required": "Crop or bounding box plus concise description of the exact defect.",
+      "decision": "REVIEW by default; BLOCK only after the defect is clearly confirmed and materially harms quality.",
+      "official_basis": "Adobe explicitly asks contributors to check accurate anatomy and proportions for AI content.",
+      "source_ids": [
+        "ADOBE_GENAI_FAQ",
+        "ADOBE_GENAI_SUBMIT"
+      ],
+      "caveats": [
+        "Occlusion and perspective can make correct anatomy look odd.",
+        "Do not insist on visible five fingers when some are intentionally hidden."
+      ]
+    },
+    {
+      "id": "VQ-ANATOMY-FACE",
+      "category": "anatomy",
+      "applies_to": [
+        "people",
+        "AI-generated images"
+      ],
+      "look_for": [
+        "melted or misaligned eyes/pupils",
+        "inconsistent teeth or mouth geometry",
+        "ears/jaw/nostrils deformed without artistic intent",
+        "facial parts merged with hair, glasses or clothing"
+      ],
+      "recommended_method": [
+        "face/landmark detection if reliable",
+        "close-up crop of face at 100%",
+        "VLM comparison of local geometry and context"
+      ],
+      "evidence_required": "Face crop and observed mismatch; avoid generic claim 'bad face'.",
+      "decision": "REVIEW; judge according to intended style and whether an actual defect is visible.",
+      "official_basis": "Adobe asks for accurate anatomy, proportions and AI visual error checking.",
+      "source_ids": [
+        "ADOBE_GENAI_FAQ",
+        "ADOBE_GENAI_SUBMIT"
+      ]
+    },
+    {
+      "id": "VQ-ANATOMY-ANIMAL",
+      "category": "anatomy",
+      "applies_to": [
+        "animals",
+        "pets",
+        "wildlife",
+        "AI-generated images"
+      ],
+      "look_for": [
+        "wrong limb count/attachment",
+        "malformed paws/hooves/beaks/wings",
+        "eyes or joints that do not fit the species",
+        "implausible contact with ground or objects"
+      ],
+      "recommended_method": [
+        "animal detection and region crop",
+        "species-aware VLM questions",
+        "check multiple viewpoints/visible anatomy only"
+      ],
+      "evidence_required": "Crop and named anatomical or geometric issue.",
+      "decision": "REVIEW.",
+      "official_basis": "Adobe's AI FAQ asks that humans and animals show no unintentional anatomical errors.",
+      "source_ids": [
+        "ADOBE_GENAI_FAQ",
+        "ADOBE_GENAI_SUBMIT"
+      ],
+      "caveats": [
+        "Stylized/fantasy animals are not judged by strict photo-real anatomy unless photorealism is intended."
+      ]
+    },
+    {
+      "id": "VQ-OBJECT-GEOMETRY",
+      "category": "object_integrity",
+      "applies_to": [
+        "products",
+        "tools",
+        "furniture",
+        "vehicles",
+        "architecture",
+        "still life"
+      ],
+      "look_for": [
+        "fused parts",
+        "impossible joins",
+        "duplicated/missing components",
+        "unclosed or melted silhouettes",
+        "perspective inconsistencies that look like defects",
+        "object parts changing material/shape without reason"
+      ],
+      "recommended_method": [
+        "object-region detection",
+        "VLM part-by-part inspection",
+        "compare object function and visible connections",
+        "crop suspicious junctions"
+      ],
+      "evidence_required": "Object name, region and why geometry is inconsistent.",
+      "decision": "REVIEW; do not infer copyright/IP status solely from visual defect detection.",
+      "official_basis": "Internal visual QC heuristic based on Adobe's general accurate-detail and production-quality requirements.",
+      "source_ids": [
+        "ADOBE_QUALITY",
+        "ADOBE_GENAI_SUBMIT",
+        "ICLR_XAIGD_2026"
+      ],
+      "caveats": [
+        "Unusual design may be intentional; ask whether the asset is a fantasy concept or a realistic product."
+      ]
+    },
+    {
+      "id": "VQ-TEXT-GLYPH",
+      "category": "text_and_signage",
+      "applies_to": [
+        "all images"
+      ],
+      "look_for": [
+        "unintended gibberish/pseudo-text",
+        "unreadable text in prominent areas",
+        "letters morphing into texture",
+        "duplicate/garbled signs or labels"
+      ],
+      "recommended_method": [
+        "OCR across full image",
+        "OCR/vision on detected text regions",
+        "VLM assess if text is intended and legible"
+      ],
+      "evidence_required": "OCR region/crop; distinguish actual text from texture, scripts unfamiliar to OCR, or intentional abstract typography.",
+      "decision": "REVIEW. If branded/logo/IP phrase is detected, also run IP checks.",
+      "official_basis": "Adobe prohibits watermarks/branding and inaccurate or irrelevant metadata; gibberish-text detection is an internal visual heuristic, not a separately enumerated universal Adobe rule.",
+      "source_ids": [
+        "ADOBE_REFUSAL",
+        "ADOBE_QUALITY",
+        "ADOBE_KNOWN_RESTRICTIONS"
+      ],
+      "caveats": [
+        "OCR failure is not proof of gibberish, especially for small, curved, decorative or non-Latin text."
+      ]
+    },
+    {
+      "id": "VQ-FOCUS-SHARP",
+      "category": "sharpness_and_focus",
+      "applies_to": [
+        "photo",
+        "AI photo-realistic images",
+        "PNG assets"
+      ],
+      "look_for": [
+        "main subject is soft/out of focus",
+        "unintended motion blur",
+        "important details softened",
+        "oversharpening halos or crunchy edges"
+      ],
+      "recommended_method": [
+        "measure sharpness over image and subject ROI separately",
+        "native-resolution/100% crop review",
+        "Laplacian variance or edge-energy only as a calibrated signal"
+      ],
+      "evidence_required": "Subject ROI, sharpness metric, calibration profile and crop.",
+      "decision": "BLOCK only for confirmed unusable technical issue; otherwise REVIEW.",
+      "official_basis": "Adobe explicitly recommends inspecting at 100%; primary subject should be sharp and defined.",
+      "source_ids": [
+        "ADOBE_QUALITY",
+        "ADOBE_REFUSAL"
+      ],
+      "caveats": [
+        "No universal Laplacian threshold. Smooth backgrounds, skin, fog and intentionally shallow depth of field naturally score differently."
+      ]
+    },
+    {
+      "id": "VQ-EXPOSURE-LIGHT",
+      "category": "exposure_and_lighting",
+      "applies_to": [
+        "photo",
+        "photorealistic AI",
+        "PNG"
+      ],
+      "look_for": [
+        "highlight clipping losing key detail",
+        "shadow clipping obscuring key subject detail",
+        "uneven/unnatural lighting",
+        "exposure inconsistent with intended subject"
+      ],
+      "recommended_method": [
+        "histogram and channel-clipping metrics",
+        "local exposure map",
+        "vision review for intended high-key/low-key styles"
+      ],
+      "evidence_required": "Highlight/shadow regions plus metric and visual explanation.",
+      "decision": "REVIEW; hard block only when required detail is clearly lost/unusable.",
+      "official_basis": "Adobe guidance covers balanced lighting and proper exposure, and warns against extremes leading to detail loss.",
+      "source_ids": [
+        "ADOBE_QUALITY",
+        "ADOBE_REFUSAL"
+      ],
+      "caveats": [
+        "Intentional silhouette, night scenes, backlighting, and high/low key images are not defects by default."
+      ]
+    },
+    {
+      "id": "VQ-COLOR-WB",
+      "category": "color_and_white_balance",
+      "applies_to": [
+        "photo",
+        "photorealistic AI",
+        "PNG"
+      ],
+      "look_for": [
+        "unintended color cast",
+        "poor white balance",
+        "excessive/unnatural saturation",
+        "posterization or banding",
+        "color fringing/chromatic aberration"
+      ],
+      "recommended_method": [
+        "inspect neutral regions only where they plausibly exist",
+        "histogram/channel comparison",
+        "edge-fringe detector",
+        "VLM contextual review"
+      ],
+      "evidence_required": "Affected region and observed condition; state whether measurement or model judgement produced the signal.",
+      "decision": "REVIEW.",
+      "official_basis": "Adobe lists poor white balance/color correction, excess saturation, and color fringing as quality issues.",
+      "source_ids": [
+        "ADOBE_QUALITY",
+        "ADOBE_REFUSAL"
+      ],
+      "caveats": [
+        "Do not assume all images contain neutral gray/white objects; creative color grading can be intentional."
+      ]
+    },
+    {
+      "id": "VQ-NOISE-COMPRESSION",
+      "category": "noise_and_compression",
+      "applies_to": [
+        "photo",
+        "AI images",
+        "PNG"
+      ],
+      "look_for": [
+        "excessive sensor-like noise",
+        "compression blocks/ringing",
+        "texture smearing",
+        "posterization/banding",
+        "detail destroyed by denoising"
+      ],
+      "recommended_method": [
+        "flat-region noise estimate",
+        "DCT/block-artifact indicators",
+        "crop review at 100%",
+        "compare source/upscaled file if supplied"
+      ],
+      "evidence_required": "Crop, region type and objective measure if any.",
+      "decision": "REVIEW; don't auto-reject on noise scores alone.",
+      "official_basis": "Adobe warns against noise and artifacts from over-editing and high ISO; PNG guidance calls for clarity and no compression artifacts.",
+      "source_ids": [
+        "ADOBE_QUALITY",
+        "ADOBE_PNG_TECH"
+      ],
+      "caveats": [
+        "Film grain, intentional texture and rough illustration are not automatically defects."
+      ]
+    },
+    {
+      "id": "VQ-OVERPROCESSING",
+      "category": "editing_artifacts",
+      "applies_to": [
+        "all raster images"
+      ],
+      "look_for": [
+        "oversharpening halos",
+        "edge ringing",
+        "plastic skin or loss of texture",
+        "visible masking/selection errors",
+        "clone/heal repetitions",
+        "unintended dust spots"
+      ],
+      "recommended_method": [
+        "edge halo detection",
+        "local texture/detail analysis",
+        "mask boundary inspection",
+        "vision crop review"
+      ],
+      "evidence_required": "Crop with defect type and location.",
+      "decision": "REVIEW.",
+      "official_basis": "Adobe warns about over-editing, oversharpening, masking errors and visible dust spots.",
+      "source_ids": [
+        "ADOBE_QUALITY",
+        "ADOBE_REFUSAL"
+      ],
+      "caveats": [
+        "Skin retouching and stylized smooth surfaces may be intentional; require context."
+      ]
+    },
+    {
+      "id": "VQ-REFLECTION-SHADOW",
+      "category": "scene_physics_heuristics",
+      "applies_to": [
+        "photorealistic AI",
+        "products",
+        "interior",
+        "still life"
+      ],
+      "look_for": [
+        "shadow directions contradicting light sources",
+        "reflections not corresponding to visible objects",
+        "floating objects without contextual explanation",
+        "contact shadows missing where expected"
+      ],
+      "recommended_method": [
+        "VLM explain light direction and object support",
+        "compare regions of reflective objects",
+        "generate annotated crop evidence"
+      ],
+      "evidence_required": "Explain the contradictory cues; avoid vague 'physics wrong'.",
+      "decision": "REVIEW; internal heuristic, not a standalone enumerated Adobe rule.",
+      "official_basis": "Internal heuristic for finding inaccurate visual details, grounded broadly in Adobe's visual quality expectations.",
+      "source_ids": [
+        "ADOBE_GENAI_SUBMIT",
+        "ADOBE_QUALITY",
+        "ICLR_XAIGD_2026"
+      ],
+      "caveats": [
+        "Stylized lighting, multiple light sources, mirror arrangements or surreal concepts can be intentional."
+      ]
+    },
+    {
+      "id": "VQ-COMPOSITION",
+      "category": "composition_and_crop",
+      "applies_to": [
+        "photo",
+        "illustration",
+        "PNG"
+      ],
+      "look_for": [
+        "unintentional awkward crop",
+        "important subject clipped",
+        "unnecessary excessive empty space for isolated PNG",
+        "subject not clearly separated for intended use",
+        "unlevel horizon where unintended"
+      ],
+      "recommended_method": [
+        "subject segmentation and subject-to-canvas ratio",
+        "rule-based margin measurement for PNG",
+        "VLM assess intentionality and use case"
+      ],
+      "evidence_required": "Preview with canvas bounds or subject mask.",
+      "decision": "REVIEW unless it violates explicit technical/use-case constraints.",
+      "official_basis": "Adobe quality guidance covers composition, excessive cropping, level horizons; PNG best practices recommend minimal excess space.",
+      "source_ids": [
+        "ADOBE_QUALITY",
+        "ADOBE_PNG_BEST"
+      ],
+      "caveats": [
+        "Negative space may be intentional and commercially useful in copy-space images."
+      ]
+    },
+    {
+      "id": "VQ-PNG-ALPHA",
+      "category": "transparency_and_edges",
+      "applies_to": [
+        "transparent PNG"
+      ],
+      "look_for": [
+        "checkerboard baked into pixels",
+        "opaque/matte background instead of alpha transparency",
+        "white/black fringe or halo",
+        "jagged/contaminated cutout edges",
+        "unwanted semi-transparent pixels or shadows"
+      ],
+      "recommended_method": [
+        "verify alpha channel and alpha bounds",
+        "composite over light/dark/mid-gray/checkerboard backgrounds",
+        "inspect edge crops at 100%",
+        "find near-empty margins"
+      ],
+      "evidence_required": "Alpha-channel stats plus previews on contrasting backgrounds.",
+      "decision": "BLOCK if no true transparency when transparency is required; REVIEW for halos or intended shadows.",
+      "official_basis": "Adobe requires transparent PNG backgrounds and clean isolation, recommends true transparency and minimal borders/space.",
+      "source_ids": [
+        "ADOBE_PNG_TECH",
+        "ADOBE_PNG_BEST"
+      ],
+      "caveats": [
+        "Do not discard purposeful translucent material, glass, smoke, or soft shadow assets solely because alpha is partial."
+      ]
+    },
+    {
+      "id": "VQ-IP-LOGO-OBJECT",
+      "category": "ip_visual_screening",
+      "applies_to": [
+        "all images"
+      ],
+      "look_for": [
+        "watermarks, timestamps, logos, branding, wordmarks and visible trademark text",
+        "wordmarks, logos, brand labels, packaging, uniforms/insignia, distinctive protected product design, artwork/murals, recognizable locations"
+      ],
+      "recommended_method": [
+        "OCR and logo detection",
+        "object/landmark model",
+        "context-aware VLM explanation",
+        "cross-check current Adobe Known Restrictions"
+      ],
+      "evidence_required": "Box/crop + OCR text or object description + policy-source reference + focal-point context.",
+      "decision": "REVIEW by default; confirmed restriction/policy issue may BLOCK. Never automatically inpaint-and-pass.",
+      "official_basis": "Adobe lists watermarks, timestamps and branding as prohibited for photos/PNGs and identifies logos/brands/IP as common refusal reasons. Detection is screening, not legal clearance.",
+      "source_ids": [
+        "ADOBE_REFUSAL",
+        "ADOBE_PROPERTY_RELEASE",
+        "ADOBE_KNOWN_RESTRICTIONS"
+      ],
+      "caveats": [
+        "Known Restrictions is explicitly not all-inclusive. No match does not mean cleared; generic logo detection can create false positives."
+      ]
+    },
+    {
+      "id": "VQ-METADATA-VISUAL-ALIGNMENT",
+      "category": "visual_semantics",
+      "applies_to": [
+        "all images"
+      ],
+      "look_for": [
+        "title/keywords claim visible subjects not present",
+        "wrong species/material/location/age/person count",
+        "metadata includes prohibited IP terms for AI content",
+        "AI content mislabeled as 3D render or photograph without basis"
+      ],
+      "recommended_method": [
+        "vision caption grounded in visible objects",
+        "cross-check each key metadata claim against image",
+        "entity scan over title/keywords/prompt"
+      ],
+      "evidence_required": "Metadata term plus corresponding visual evidence or absence; mark uncertain claims.",
+      "decision": "REVIEW; correct unsupported metadata before submission.",
+      "official_basis": "Adobe requires accurate/relevant metadata and content-type choice consistent with visual characteristics.",
+      "source_ids": [
+        "ADOBE_TITLE_KEYWORDS",
+        "ADOBE_REFUSAL",
+        "ADOBE_GENAI_FAQ"
+      ],
+      "caveats": [
+        "Abstract/conceptual keywords can be valid when the concept is genuinely represented; don't enforce only literal object labels."
+      ]
+    },
+    {
+      "id": "VQ-CONTENT-POLICY-REVIEW",
+      "category": "content_policy_screening",
+      "applies_to": [
+        "all images"
+      ],
+      "look_for": [
+        "visible hateful symbols or text in context",
+        "potentially defamatory portrayal or caption relationship",
+        "content with sensitive subject matter requiring policy review"
+      ],
+      "recommended_method": [
+        "OCR and visual concept recognition",
+        "context review of full image and associated title/keywords",
+        "apply official policy rules, not model preference"
+      ],
+      "evidence_required": "Specific visual/textual evidence and context; no unsupported inference from identity, nationality, religion or political symbols alone.",
+      "decision": "REVIEW by default; BLOCK only when the applicable policy violation is confirmed.",
+      "official_basis": "Adobe's common refusal reasons include hateful or defamatory content under non-compliance; this is context-sensitive and cannot be judged by keyword/image label alone.",
+      "source_ids": [
+        "ADOBE_REFUSAL"
+      ],
+      "caveats": [
+        "Do not treat mere presence of political, religious, historical or controversial content as a violation; require contextual evidence and human review."
+      ]
+    }
+  ],
+  "check_count": 16
+}

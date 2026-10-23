@@ -15,6 +15,18 @@ window.addEventListener(
   true
 );
 
+document.addEventListener(
+  'pointerdown',
+  (event) => {
+    if (event.button === 2) {
+      lastContextMenuTarget = event.target;
+      lastClickX = event.clientX;
+      lastClickY = event.clientY;
+    }
+  },
+  true
+);
+
 // Helper: Normalize relative or protocol-relative URL to absolute HTTP/HTTPS
 function toAbsoluteUrl(rawUrl) {
   if (!rawUrl || typeof rawUrl !== 'string') return null;
@@ -179,11 +191,11 @@ window.__metaGenExtractLastClickedImage = function () {
     } catch {}
   }
 
-  // Strategy 2: Check recorded target and its ancestry
+  // Strategy 2: Check recorded target and its ancestry or card container
   if (lastContextMenuTarget) {
     let curr = lastContextMenuTarget;
     let depth = 0;
-    while (curr && depth < 6) {
+    while (curr && depth < 8) {
       const url = extractImageFromNode(curr);
       if (url) return { url, alt: curr.getAttribute('alt') || document.title };
 
@@ -196,6 +208,19 @@ window.__metaGenExtractLastClickedImage = function () {
       curr = curr.parentElement;
       depth++;
     }
+
+    try {
+      const card = lastContextMenuTarget.closest(
+        'a, [data-automation*="Card" i], [data-automation*="grid" i], [class*="card" i], [class*="item" i], [class*="thumb" i], [class*="tile" i], article, figure'
+      );
+      if (card) {
+        const cardImg = card.querySelector('img, picture, [style*="background-image"]');
+        if (cardImg) {
+          const cardUrl = extractImageFromNode(cardImg);
+          if (cardUrl) return { url: cardUrl, alt: cardImg.getAttribute('alt') || document.title };
+        }
+      }
+    } catch {}
   }
 
   return null;
@@ -476,6 +501,15 @@ if (isMetaGenTab) {
       try {
         chrome.runtime.sendMessage({
           type: 'REGISTER_AGENT_SCENES',
+          payload: event.data.payload,
+        });
+      } catch (e) {}
+    }
+
+    if (event.data?.type === 'METAGEN_SYNC_ACTIVE_PROMPTS') {
+      try {
+        chrome.runtime.sendMessage({
+          type: 'SYNC_ACTIVE_PROMPTS',
           payload: event.data.payload,
         });
       } catch (e) {}

@@ -1,6 +1,49 @@
 export type EngineType = 'midjourney' | 'flux' | 'sdxl' | 'imagen3' | 'nanobanana';
 export type AspectRatio = 'none' | '16:9' | '3:2' | '1:1' | '4:3' | '9:16';
-export type VisualDirection = 'photorealistic' | '3d_render' | 'vector' | 'cinematic' | 'editorial' | 'auto';
+
+export type VisualCategory = 'photo' | 'illustration' | 'agent_decide' | 'smart_random';
+
+export type PhotoSubStyle =
+  | 'photo_commercial_lifestyle'
+  | 'photo_studio_isolated'
+  | 'photo_flatlay_knolling'
+  | 'photo_macro_texture'
+  | 'photo_cinematic_narrative'
+  | 'photo_editorial_documentary'
+  | 'photo_interior_architecture'
+  | 'photo_drone_aerial';
+
+export type IllustrationSubStyle =
+  | 'vector_flat_isolated'
+  | 'vector_lineart_minimal'
+  | 'render_3d_isometric'
+  | 'render_3d_clay_glass'
+  | 'art_watercolor_handdrawn'
+  | 'art_vintage_engraving'
+  | 'graphic_sticker_clipart'
+  | 'graphic_infographic_asset';
+
+export type VisualDirection =
+  | 'agent_decide'
+  | 'smart_random'
+  | PhotoSubStyle
+  | IllustrationSubStyle
+  // Legacy backwards compatibility
+  | 'photorealistic'
+  | '3d_render'
+  | 'vector'
+  | 'cinematic'
+  | 'editorial'
+  | 'auto';
+
+export interface ContextualTwistItem {
+  id: string;
+  label: string;
+  category: string;
+  modifierText: string;
+  isSelected?: boolean;
+}
+
 export type CreativeFocus =
   | 'composition_lighting'
   | 'environment_props'
@@ -40,6 +83,7 @@ export interface VCPASettings {
   commercialSafety: boolean;
   promptLanguage: 'en' | 'id';
   negativePrompt?: string;
+  selectedTwists?: string[];
 }
 
 export interface PromptCardItem {

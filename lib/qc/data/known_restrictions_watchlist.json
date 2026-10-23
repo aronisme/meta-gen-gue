@@ -1,0 +1,219 @@
+{
+  "library": "Adobe Stock Known Restrictions starter watchlist",
+  "version": "0.1.0",
+  "checked_on": "2026-10-22",
+  "important_warning": "PARTIAL EXAMPLE LIST ONLY. Adobe says the live Known Restrictions list is updated periodically and is not all-inclusive. This local watchlist is not a legal clearance database. Always refresh the official page and review context/focus conditions. Absence from this file does not mean an item is permitted.",
+  "official_sources": [
+    {
+      "source_id": "ADOBE_KNOWN_RESTRICTIONS",
+      "url": "https://helpx.adobe.com/stock/contributor/content-policies-guidelines/content-policies/known-restrictions.html"
+    },
+    {
+      "source_id": "ADOBE_PROPERTY_RELEASE",
+      "url": "https://helpx.adobe.com/stock/contributor/content-policies-guidelines/model-property-releases/property-release-requirements.html"
+    }
+  ],
+  "match_actions": {
+    "possible_match": "REVIEW",
+    "confirmed_restriction_with_matching_context": "BLOCK_OR_DO_NOT_SUBMIT",
+    "no_match": "NO_CLEARANCE_INFERENCE"
+  },
+  "items": [
+    {
+      "id": "KR-001",
+      "name": "Absolut Vodka bottle",
+      "match_type": "distinctive product/bottle design",
+      "scope": "Commercial-use content that includes the bottle in the visual is stated as unacceptable.",
+      "match_hints": [
+        "distinctive bottle silhouette",
+        "recognizable cap/label arrangement"
+      ],
+      "action": "REVIEW; if confirmed match under official entry, block commercial submission.",
+      "source_id": "ADOBE_KNOWN_RESTRICTIONS"
+    },
+    {
+      "id": "KR-002",
+      "name": "Academy Awards Oscar statuette",
+      "match_type": "award statuette/design",
+      "scope": "Commercial-use content that includes the statuette in the visual is stated as unacceptable.",
+      "match_hints": [
+        "recognizable gold human-form award statuette"
+      ],
+      "action": "REVIEW; confirm object and current listing.",
+      "source_id": "ADOBE_KNOWN_RESTRICTIONS"
+    },
+    {
+      "id": "KR-003",
+      "name": "Adidas three-stripe design/logo",
+      "match_type": "brand/logo/design pattern",
+      "scope": "The Adidas logo and three-stripe design are listed as unacceptable for commercial submissions.",
+      "match_hints": [
+        "Adidas wordmark",
+        "three-stripe signature arrangement"
+      ],
+      "action": "REVIEW; do not assume generic parallel stripes always mean Adidas.",
+      "source_id": "ADOBE_KNOWN_RESTRICTIONS"
+    },
+    {
+      "id": "KR-004",
+      "name": "Airstream trailer",
+      "match_type": "distinctive product design",
+      "scope": "The distinctive silver bullet-shaped trailer is listed as unacceptable even without visible brands/logos/symbols.",
+      "match_hints": [
+        "rounded polished aluminum trailer",
+        "distinctive silver bullet silhouette"
+      ],
+      "action": "REVIEW; verify whether the design matches the restricted item.",
+      "source_id": "ADOBE_KNOWN_RESTRICTIONS"
+    },
+    {
+      "id": "KR-005",
+      "name": "Nike/Jordan/Swoosh/Just Do It",
+      "match_type": "brand/logo/design/slogan",
+      "scope": "Nike logo, Jordan design, Just Do It and Swoosh design are listed as unacceptable in the visual.",
+      "match_hints": [
+        "Swoosh logo",
+        "Jordan Jumpman-style design",
+        "Just Do It phrase"
+      ],
+      "action": "REVIEW; exact phrase/mark and visual context needed.",
+      "source_id": "ADOBE_KNOWN_RESTRICTIONS"
+    },
+    {
+      "id": "KR-006",
+      "name": "Burberry Haymarket/classic check",
+      "match_type": "distinctive pattern",
+      "scope": "The black, tan and red Haymarket/classic check pattern is listed as unacceptable.",
+      "match_hints": [
+        "distinctive black tan red check pattern"
+      ],
+      "action": "REVIEW; generic plaid is not automatically a match.",
+      "source_id": "ADOBE_KNOWN_RESTRICTIONS"
+    },
+    {
+      "id": "KR-007",
+      "name": "Rubik's Cube",
+      "match_type": "distinctive product design",
+      "scope": "Design, colors and shape are listed as unacceptable, with or without visible brand/logo/symbol.",
+      "match_hints": [
+        "multi-color 3x3 twistable cube puzzle"
+      ],
+      "action": "REVIEW; compare against current official entry.",
+      "source_id": "ADOBE_KNOWN_RESTRICTIONS"
+    },
+    {
+      "id": "KR-008",
+      "name": "Apple devices",
+      "match_type": "recognizable product design",
+      "scope": "Adobe's property-release guidance lists Apple devices as examples of universally recognizable products that may remain unacceptable without logos.",
+      "match_hints": [
+        "recognizable iPhone/iPad/Mac device shape or characteristic design"
+      ],
+      "action": "REVIEW; do not infer clearance merely because logo removed.",
+      "source_id": "ADOBE_PROPERTY_RELEASE"
+    },
+    {
+      "id": "KR-009",
+      "name": "LEGO/Duplo building sets and figures",
+      "match_type": "recognizable product/toy design",
+      "scope": "Adobe's property-release guidance names LEGO and Duplo sets/figures as recognizable product examples.",
+      "match_hints": [
+        "distinctive interlocking bricks",
+        "minifigures or Duplo figures"
+      ],
+      "action": "REVIEW; confirm item and current restriction context.",
+      "source_id": "ADOBE_PROPERTY_RELEASE"
+    },
+    {
+      "id": "KR-010",
+      "name": "Christian Louboutin red-bottom shoes",
+      "match_type": "distinctive fashion product design",
+      "scope": "Adobe lists Christian Louboutin red-bottomed shoes as a product whose recognizable design may not be acceptable.",
+      "match_hints": [
+        "luxury heel with distinctive red outsole"
+      ],
+      "action": "REVIEW; do not classify every red sole as a confirmed match without context.",
+      "source_id": "ADOBE_PROPERTY_RELEASE"
+    },
+    {
+      "id": "KR-011",
+      "name": "Petronas Twin Towers",
+      "match_type": "location/architecture",
+      "scope": "Known restrictions list states content created on the property or depicting the building as main focal point is unacceptable.",
+      "match_hints": [
+        "two connected twin skyscrapers in Kuala Lumpur"
+      ],
+      "action": "REVIEW; verify location, source and focal-point conditions.",
+      "source_id": "ADOBE_KNOWN_RESTRICTIONS"
+    },
+    {
+      "id": "KR-012",
+      "name": "Merlion statue at Merlion Park",
+      "match_type": "sculpture/location",
+      "scope": "Known restrictions list states the statue is unacceptable as the main focal point.",
+      "match_hints": [
+        "lion-headed fish statue/fountain at Singapore waterfront"
+      ],
+      "action": "REVIEW; focus/context condition matters.",
+      "source_id": "ADOBE_KNOWN_RESTRICTIONS"
+    },
+    {
+      "id": "KR-013",
+      "name": "Notre-Dame de Paris interior",
+      "match_type": "location/interior",
+      "scope": "Known restrictions list states content created in the interior is unacceptable.",
+      "match_hints": [
+        "recognizable interior nave/stained glass/arches of the cathedral"
+      ],
+      "action": "REVIEW; need reliable location/context identification.",
+      "source_id": "ADOBE_KNOWN_RESTRICTIONS"
+    },
+    {
+      "id": "KR-014",
+      "name": "New York City Subway (MTA)",
+      "match_type": "transport logo/signage/design",
+      "scope": "Known restrictions list includes MTA name/logo/signage/route indicators.",
+      "match_hints": [
+        "MTA signs",
+        "route circles/indicators",
+        "recognizable subway train branding"
+      ],
+      "action": "REVIEW; signs can be incidental; verify the exact official restriction and context.",
+      "source_id": "ADOBE_KNOWN_RESTRICTIONS"
+    },
+    {
+      "id": "KR-015",
+      "name": "Police forces and military insignia",
+      "match_type": "uniform/emblem/government insignia",
+      "scope": "Known restrictions page includes police insignia and military insignia/government logos in visual or metadata.",
+      "match_hints": [
+        "badges/shields/emblems",
+        "distinct official uniform markings"
+      ],
+      "action": "REVIEW; avoid broad false positives on generic uniforms or fictional symbols.",
+      "source_id": "ADOBE_KNOWN_RESTRICTIONS"
+    },
+    {
+      "id": "KR-016",
+      "name": "Private home clearly visible",
+      "match_type": "private property",
+      "scope": "Adobe property-release table says a clearly visible private home requires a property release.",
+      "match_hints": [
+        "distinctive private residence as recognizable subject"
+      ],
+      "action": "REVIEW; ask whether owner release exists and context is correct.",
+      "source_id": "ADOBE_PROPERTY_RELEASE"
+    },
+    {
+      "id": "KR-017",
+      "name": "Artwork in gallery/street mural/modern public sculpture",
+      "match_type": "artwork/copyright",
+      "scope": "Adobe property-release guidance says artwork in a gallery or street mural needs release; modern public-space artwork/murals/sculptures require property release.",
+      "match_hints": [
+        "recognizable painting/sculpture/mural is a focal point"
+      ],
+      "action": "REVIEW; require release or assess whether artwork is incidental/unrecognizable under current guidance.",
+      "source_id": "ADOBE_PROPERTY_RELEASE"
+    }
+  ]
+}

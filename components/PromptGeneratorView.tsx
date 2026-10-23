@@ -13,6 +13,7 @@ import {
   Edit2,
   Eye,
   FileSpreadsheet,
+  FolderDown,
   History,
   ImageIcon,
   Layers,
@@ -47,11 +48,15 @@ import {
   exportPromptsToQueueText,
   exportPromptsToText,
   formatPromptForEngine,
+  getVisualDirectionLabel,
   normalizeVisualDna,
+  VISUAL_DIRECTION_LIST,
 } from '@/lib/prompt-agent/engine';
 import {
   brainstormBriefIdeas,
   executeVCPAGeneration,
+  FALLBACK_STOCK_TWISTS,
+  generateContextualTwists,
   regenerateSinglePromptCard,
 } from '@/lib/prompt-agent/client';
 import {
@@ -60,13 +65,17 @@ import {
   loadActivePromptSession,
   saveActivePromptSession,
   savePromptSession,
+  getPromptSession,
 } from '@/lib/prompt-agent/store';
 import { PromptSessionModal } from '@/components/PromptSessionModal';
 import { getRandomCuratedIdeas, type InspirationIdea } from '@/lib/prompt-agent/inspirations';
+import { scanFlowDownloads, fetchLocalFileAsBrowserFile } from '@/lib/ftp/bridge-client';
 import type {
   AspectRatio,
+  ContextualTwistItem,
   CreativeFocus,
   EngineType,
+  FlowVariationItem,
   PromptCardItem,
   PromptGenerationSession,
   PromptQueueItem,
@@ -77,9 +86,20 @@ import type {
   VisualDNAProfile,
 } from '@/lib/prompt-agent/types';
 
+export interface PromptToMetadataHandoff {
+  file: File;
+  promptText: string;
+  promptCardId: string;
+  promptTitle?: string;
+  sessionId: string;
+  sessionTitle: string;
+}
+
 export interface PromptGeneratorViewProps {
   onSwitchToMetadata?: () => void;
-  onSendImageToMetadata?: (file: File) => void;
+  onSendImageToMetadata?: (file: File, context?: PromptToMetadataHandoff) => void;
+  onSendBatchImagesToMetadata?: (files: File[], contextList?: PromptToMetadataHandoff[]) => void;
+  targetSessionId?: string;
 }
 
 const STORAGE_KEY_PROMPTS = 'vcpa_prompts_v1';
@@ -129,13 +149,7 @@ async function copyToClipboardSafe(text: string): Promise<boolean> {
   return false;
 }
 
-const VISUAL_DIRECTION_OPTIONS: Array<{ id: VisualDirection; label: string; desc: string }> = [
-  { id: 'photorealistic', label: 'Foto Komersial (Stock Photo)', desc: 'Sony A7R V, 85mm f/1.4, tekstur natural 8K' },
-  { id: 'editorial', label: 'Editorial & High Fashion', desc: 'Pencahayaan terkontrol, estetika majalah premium' },
-  { id: '3d_render', label: '3D Render & Clay', desc: 'Blender Cycles, ambient occlusion halus, modern' },
-  { id: 'vector', label: 'Vektor & Flat Design', desc: 'Scalable graphic, tepi tajam, palet modern' },
-  { id: 'cinematic', label: 'Sinematik 4K Still', desc: 'Anamorphic lens flare, film color grading' },
-];
+const VISUAL_DIRECTION_OPTIONS = VISUAL_DIRECTION_LIST;
 
 const ENGINE_ITEMS: Array<{ id: EngineType; label: string; badge: string }> = [
   { id: 'midjourney', label: 'Midjourney v6.1', badge: '--v 6.1' },
@@ -154,7 +168,12 @@ const ASPECT_RATIO_ITEMS: Array<{ id: AspectRatio; label: string; desc: string }
   { id: '9:16', label: '9:16', desc: 'Vertikal Story' },
 ];
 
-export function PromptGeneratorView({ onSwitchToMetadata, onSendImageToMetadata }: PromptGeneratorViewProps) {
+export function PromptGeneratorView({
+  onSwitchToMetadata,
+  onSendImageToMetadata,
+  onSendBatchImagesToMetadata,
+  targetSessionId,
+}: PromptGeneratorViewProps) {
   // 1. Session & History State
   const [session, setSession] = useState<PromptGenerationSession>(() => createNewPromptSession());
   const [isSessionModalOpen, setIsSessionModalOpen] = useState<boolean>(false);
@@ -211,6 +230,7 @@ export function PromptGeneratorView({ onSwitchToMetadata, onSendImageToMetadata 
     saved: number;
   }>({ current: 0, total: 0, saved: 0 });
   const [flowDownloadResolution, setFlowDownloadResolution] = useState<'2K' | '4K' | '1K'>('2K');
+  const [isPullingLocalAssets, setIsPullingLocalAssets] = useState<boolean>(false);
 
   // 7. Inspirations & Brainstorm
   const [inspirations, setInspirations] = useState<InspirationIdea[]>(() => getRandomCuratedIdeas(10));
@@ -218,6 +238,11 @@ export function PromptGeneratorView({ onSwitchToMetadata, onSendImageToMetadata 
   const [isBrainstormOpen, setIsBrainstormOpen] = useState<boolean>(false);
   const [brainstormTopic, setBrainstormTopic] = useState<string>('');
   const [brainstormCount, setBrainstormCount] = useState<number>(10);
+
+  // 7b. Contextual Image Ref Twists State
+  const [contextualTwists, setContextualTwists] = useState<ContextualTwistItem[]>(() => [...FALLBACK_STOCK_TWISTS]);
+  const [isGeneratingTwists, setIsGeneratingTwists] = useState<boolean>(false);
+  const [visualCategoryTab, setVisualCategoryTab] = useState<'photo' | 'illustration'>('photo');
 
   // 8. Automated Multi-Image Queue System State
   const [queue, setQueue] = useState<PromptQueueItem[]>([]);
@@ -269,6 +294,31 @@ export function PromptGeneratorView({ onSwitchToMetadata, onSendImageToMetadata 
     };
   }, []);
 
+  // Switch to target session if requested by external module (e.g. HistoryCard "Prompt Asal")
+  useEffect(() => {
+    if (!targetSessionId) return;
+    let cancelled = false;
+    void (async () => {
+      try {
+        const found = await getPromptSession(targetSessionId);
+        if (found && !cancelled) {
+          setSession(found);
+          setPrompts(found.prompts || []);
+          if (found.settings) setSettings(found.settings);
+          if (found.visualDna) setVisualDna(normalizeVisualDna(found.visualDna));
+          if (found.mode) setMode(found.mode);
+          void saveActivePromptSession(found);
+          toast.success(`Sesi Prompt "${found.title}" dimuat!`);
+        }
+      } catch (e) {
+        console.error('Failed to load target prompt session:', e);
+      }
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, [targetSessionId]);
+
   // Sync state changes to localStorage backup
   useEffect(() => {
     try {
@@ -280,7 +330,28 @@ export function PromptGeneratorView({ onSwitchToMetadata, onSendImageToMetadata 
     try {
       localStorage.setItem(STORAGE_KEY_PROMPTS, JSON.stringify(prompts));
     } catch {}
-  }, [prompts]);
+
+    // Synchronize active prompts with browser extension so Google Flow auto-scanner
+    // can continuously & automatically match and sync generated images without manual trigger
+    if (typeof window !== 'undefined') {
+      window.postMessage(
+        {
+          type: 'METAGEN_SYNC_ACTIVE_PROMPTS',
+          payload: {
+            prompts: prompts.map((p) => ({
+              cardId: p.id,
+              ordinal: p.ordinal,
+              title: p.title || '',
+              prompt: p.prompt || '',
+              ratio: settings.aspectRatio || '1:1',
+              hasImage: Boolean(p.generatedImageUrl),
+            })),
+          },
+        },
+        '*'
+      );
+    }
+  }, [prompts, settings.aspectRatio]);
 
   useEffect(() => {
     try {
@@ -570,21 +641,42 @@ export function PromptGeneratorView({ onSwitchToMetadata, onSendImageToMetadata 
       }
       if (event.data?.type === 'METAGEN_FLOW_CARD_DISCOVERED') {
         const disc = event.data.payload;
-        if (disc?.cardId && disc?.imageDataUrl) {
-          setPrompts((prev) =>
-            prev.map((c) =>
-              c.id === disc.cardId && !c.generatedImageUrl
-                ? {
-                    ...c,
-                    generatedImageUrl: disc.imageDataUrl,
-                    variations: [{ letter: 'A', dataUrl: disc.imageDataUrl, token: disc.token }],
-                    selectedVariationIndex: 0,
-                    flowStatus: 'completed',
-                  }
-                : c
-            )
-          );
-          toast.success(`✓ Gambar adegan #${disc.ordinal || ''} terhubung dari Google Flow!`);
+        if ((disc?.cardId || disc?.ordinal) && disc?.imageDataUrl) {
+          setPrompts((prev) => {
+            let matched = false;
+            return prev.map((c) => {
+              const isTarget =
+                (disc.cardId && c.id === disc.cardId) ||
+                (!matched && !c.generatedImageUrl && disc.ordinal && c.ordinal === disc.ordinal);
+              if (!isTarget) return c;
+              matched = true;
+
+              const existingVars = c.variations || [];
+              const tokenExists = disc.token && existingVars.some((v) => v.token === disc.token);
+              if (tokenExists) {
+                return c.generatedImageUrl
+                  ? c
+                  : { ...c, generatedImageUrl: disc.imageDataUrl, flowStatus: 'completed' as const };
+              }
+
+              const nextLetter = String.fromCharCode(65 + existingVars.length);
+              const newVar: FlowVariationItem = {
+                letter: nextLetter,
+                dataUrl: disc.imageDataUrl,
+                token: disc.token,
+              };
+              const combinedVars = [...existingVars, newVar];
+
+              return {
+                ...c,
+                generatedImageUrl: c.generatedImageUrl || disc.imageDataUrl,
+                variations: combinedVars,
+                selectedVariationIndex: c.selectedVariationIndex ?? 0,
+                flowStatus: 'completed' as const,
+              };
+            });
+          });
+          toast.success(`✓ Gambar adegan #${disc.ordinal || ''} otomatis terhubung dari Google Flow!`);
         }
       }
       if (event.data?.type === 'METAGEN_FLOW_GEN_RESULT') {
@@ -592,8 +684,10 @@ export function PromptGeneratorView({ onSwitchToMetadata, onSendImageToMetadata 
 
         // Support for Agent Batch Multi-Scene payload with multiple results
         if (payload?.success && payload?.isAgentBatch && Array.isArray(payload?.results) && payload.results.length > 0) {
-          const resultsMap = new Map<string, any>(payload.results.map((r: any) => [r.cardId, r]));
-          const finishedIds = new Set(payload.results.map((r: any) => r.cardId));
+          type BatchResultItem = Record<string, unknown> & { cardId: string; variations?: FlowVariationItem[]; imageDataUrl?: string; token?: string };
+          const batchResults = payload.results as BatchResultItem[];
+          const resultsMap = new Map<string, BatchResultItem>(batchResults.map((r) => [r.cardId, r]));
+          const finishedIds = new Set(batchResults.map((r) => r.cardId));
 
           setGeneratingFlowCardId((prev) => (prev && finishedIds.has(prev) ? null : prev));
           setFlowQueueCardIds((prev) => prev.filter((id) => !finishedIds.has(id)));
@@ -602,11 +696,11 @@ export function PromptGeneratorView({ onSwitchToMetadata, onSendImageToMetadata 
             prev.map((c) => {
               const res = resultsMap.get(c.id);
               if (res) {
-                const variations = res.variations || (res.imageDataUrl ? [{ letter: 'A', dataUrl: res.imageDataUrl, token: res.token }] : []);
+                const variations: FlowVariationItem[] = res.variations || (res.imageDataUrl ? [{ letter: 'A', dataUrl: res.imageDataUrl, token: res.token }] : []);
                 return {
                   ...c,
                   generatedImageUrl: res.imageDataUrl || c.generatedImageUrl,
-                  variations: variations,
+                  variations,
                   selectedVariationIndex: 0,
                   flowStatus: 'completed',
                 };
@@ -645,8 +739,20 @@ export function PromptGeneratorView({ onSwitchToMetadata, onSendImageToMetadata 
               ? `Semua ${varCount} variasi gambar (A, B, C...) dapat dipratinjau langsung di kartu prompt.`
               : 'Hasil render siap dipratinjau langsung di kartu prompt.',
           });
+        } else if (payload?.requiresLogin || payload?.error?.toLowerCase().includes('login')) {
+          toast.error('⚠️ Sesi Google Flow belum login!', {
+            description: payload.error || 'Tab Google Flow telah dibuka. Silakan login ke akun Google Anda terlebih dahulu.',
+            duration: 8000,
+          });
         } else if (payload?.error) {
-          toast.error(`Google Flow: ${payload.error}`);
+          if (payload?.error?.includes('Coba lagi') || payload?.error?.toLowerCase().includes('try again')) {
+            toast.error('❌ Google Flow Gagal Render', {
+              description: payload.error,
+              duration: 8000,
+            });
+          } else {
+            toast.error(`Google Flow: ${payload.error}`);
+          }
         }
       }
 
@@ -749,6 +855,48 @@ export function PromptGeneratorView({ onSwitchToMetadata, onSendImageToMetadata 
       toast.error(`Gagal merancang ide: ${msg}`, { id: toastId });
     } finally {
       setIsBrainstorming(false);
+    }
+  };
+
+  // Contextual Twist Handlers (for Image Reference Mode)
+  const handleToggleTwist = (twistId: string) => {
+    setContextualTwists((prev) => {
+      const updated = prev.map((t) => (t.id === twistId ? { ...t, isSelected: !t.isSelected } : t));
+      const activeModifiers = updated.filter((t) => t.isSelected).map((t) => t.modifierText);
+      setSettings((s) => ({ ...s, selectedTwists: activeModifiers }));
+      return updated;
+    });
+  };
+
+  const handleClearSelectedTwists = () => {
+    setContextualTwists((prev) => prev.map((t) => ({ ...t, isSelected: false })));
+    setSettings((s) => ({ ...s, selectedTwists: [] }));
+    toast.info('Pilihan ide variasi dibersihkan.');
+  };
+
+  const handleGenerateImageTwists = async () => {
+    const activeImage = refImageDataUrl || queue[0]?.imageDataUrl;
+    if (!activeImage) {
+      toast.error('Silakan unggah gambar referensi terlebih dahulu.');
+      return;
+    }
+    setIsGeneratingTwists(true);
+    const toastId = toast.loading('Menganalisis gambar & meracik ide variasi kontekstual...');
+    try {
+      const twists = await generateContextualTwists({
+        imageDataUrl: activeImage,
+        visualDna: visualDna || undefined,
+        currentBrief: brief,
+        count: 8,
+      });
+      setContextualTwists(twists);
+      setSettings((s) => ({ ...s, selectedTwists: [] }));
+      toast.success(`${twists.length} ide variasi khusus untuk gambar ini siap dipilih!`, { id: toastId });
+    } catch {
+      toast.error('Gagal meracik ide variasi, memuat opsi rekomendasi stok.', { id: toastId });
+      setContextualTwists([...FALLBACK_STOCK_TWISTS]);
+    } finally {
+      setIsGeneratingTwists(false);
     }
   };
 
@@ -1296,6 +1444,106 @@ export function PromptGeneratorView({ onSwitchToMetadata, onSendImageToMetadata 
     toast.info('Pengunduhan massal Google Flow dihentikan.');
   };
 
+  // Pull local 2K/4K/1K files directly from Downloads/MetaGen_Flow via local bridge (port 45678)
+  const handlePullLocalAssetsToMetadata = async () => {
+    setIsPullingLocalAssets(true);
+    const toastId = toast.loading('Memindai folder unduhan Google Flow di disk lokal...');
+
+    try {
+      const cleanFolder = session.title?.replace(/[^a-zA-Z0-9_\-]/g, '_') || '';
+      // 1. Scan target session folder first, or entire MetaGen_Flow if empty/not found
+      let scanRes = cleanFolder ? await scanFlowDownloads(cleanFolder) : await scanFlowDownloads();
+      if (!scanRes.ok || scanRes.files.length === 0) {
+        // Fallback: scan without session folder
+        scanRes = await scanFlowDownloads();
+      }
+
+      if (!scanRes.ok) {
+        toast.error('Gagal menghubungkan Local FTP Bridge (port 45678)', {
+          id: toastId,
+          description: scanRes.error || 'Pastikan local bridge server berjalan.',
+        });
+        return;
+      }
+
+      if (scanRes.files.length === 0) {
+        toast.warning('Tidak ditemukan file unduhan di folder lokal Downloads/MetaGen_Flow.', {
+          id: toastId,
+          description: 'Lakukan unduh 2K di Google Flow terlebih dahulu.',
+        });
+        return;
+      }
+
+      // Prioritize files matching the selected resolution (e.g. '2K'), or take all if none match tag
+      const matched = scanRes.files.filter((f) => f.resolutionTag === flowDownloadResolution);
+      const chosen = matched.length > 0 ? matched : scanRes.files;
+
+      toast.loading(`Mengambil ${chosen.length} file visual dari disk lokal...`, { id: toastId });
+
+      const browserFiles: File[] = [];
+      for (const item of chosen) {
+        try {
+          const file = await fetchLocalFileAsBrowserFile(item);
+          browserFiles.push(file);
+        } catch (err) {
+          console.warn(`[PromptGeneratorView] Gagal stream file ${item.filename}:`, err);
+        }
+      }
+
+      if (browserFiles.length === 0) {
+        toast.error('Gagal memuat stream file gambar dari bridge lokal.', { id: toastId });
+        return;
+      }
+
+      toast.dismiss(toastId);
+
+      if (onSendBatchImagesToMetadata) {
+        const contextList: PromptToMetadataHandoff[] = browserFiles.map((file) => {
+          const matchingCard = prompts.find(
+            (p) =>
+              (p.title && file.name.toLowerCase().includes(p.title.toLowerCase().replace(/[^a-z0-9]/g, '_'))) ||
+              file.name.toLowerCase().includes(p.id.slice(0, 6).toLowerCase())
+          );
+          return {
+            file,
+            promptText: matchingCard?.prompt || '',
+            promptCardId: matchingCard?.id || '',
+            promptTitle: matchingCard?.title || '',
+            sessionId: session.id,
+            sessionTitle: session.title,
+          };
+        });
+        onSendBatchImagesToMetadata(browserFiles, contextList);
+      } else if (onSendImageToMetadata) {
+        for (const file of browserFiles) {
+          const matchingCard = prompts.find(
+            (p) =>
+              (p.title && file.name.toLowerCase().includes(p.title.toLowerCase().replace(/[^a-z0-9]/g, '_'))) ||
+              file.name.toLowerCase().includes(p.id.slice(0, 6).toLowerCase())
+          );
+          onSendImageToMetadata(file, {
+            file,
+            promptText: matchingCard?.prompt || '',
+            promptCardId: matchingCard?.id || '',
+            promptTitle: matchingCard?.title || '',
+            sessionId: session.id,
+            sessionTitle: session.title,
+          });
+        }
+        if (onSwitchToMetadata) onSwitchToMetadata();
+      } else if (onSwitchToMetadata) {
+        onSwitchToMetadata();
+      }
+    } catch (err) {
+      toast.error('Terjadi kesalahan saat menarik file lokal', {
+        id: toastId,
+        description: err instanceof Error ? err.message : String(err),
+      });
+    } finally {
+      setIsPullingLocalAssets(false);
+    }
+  };
+
   // Push generated image into Metadata Studio queue
   const handleSendCardImageToMetadata = (card: PromptCardItem) => {
     if (!card.generatedImageUrl) return;
@@ -1313,8 +1561,17 @@ export function PromptGeneratorView({ onSwitchToMetadata, onSendImageToMetadata 
       const filename = `${cleanTitle}_${card.id.slice(0, 6)}.${ext}`;
       const file = new File([u8arr], filename, { type: mime });
 
+      const context: PromptToMetadataHandoff = {
+        file,
+        promptText: card.prompt,
+        promptCardId: card.id,
+        promptTitle: card.title,
+        sessionId: session.id,
+        sessionTitle: session.title,
+      };
+
       if (onSendImageToMetadata) {
-        onSendImageToMetadata(file);
+        onSendImageToMetadata(file, context);
       } else if (onSwitchToMetadata) {
         onSwitchToMetadata();
         toast.info('Beralih ke tab Metadata Studio.');
@@ -1705,139 +1962,240 @@ export function PromptGeneratorView({ onSwitchToMetadata, onSendImageToMetadata 
                     className="text-xs bg-white border-2 border-[#2c1810] rounded-xl focus:border-[#ff6b35] placeholder:text-stone-400 font-medium"
                   />
 
-                  {/* Inspirasi Ide Komersial Toolbar */}
-                  <div className="pt-1 space-y-2">
-                    <div className="flex items-center justify-between">
-                      <span className="text-[11px] font-black text-[#2c1810] flex items-center gap-1.5">
-                        <Sparkles className="w-3.5 h-3.5 text-[#ff6b35]" />
-                        <span>Inspirasi Ide Komersial</span>
-                      </span>
-
-                      <div className="flex items-center gap-1">
-                        <button
-                          type="button"
-                          onClick={handleShuffleInspirations}
-                          className="h-6 px-2 rounded-md border border-[#2c1810] bg-white hover:bg-[#fff5e6] text-[#2c1810] text-[10px] font-bold flex items-center gap-1 cursor-pointer shadow-[1px_1px_0_#2c1810]"
-                          title="Acak inspirasi katalog"
-                        >
-                          <Shuffle className="w-3 h-3 text-[#ff6b35]" />
-                          <span>Acak</span>
-                        </button>
-
-                        <button
-                          type="button"
-                          onClick={() => setIsBrainstormOpen((v) => !v)}
-                          className="h-6 px-2 rounded-md border border-[#2c1810] bg-[#fff5e6] hover:bg-amber-100 text-[#2c1810] text-[10px] font-black flex items-center gap-1 cursor-pointer shadow-[1px_1px_0_#2c1810]"
-                        >
-                          <Wand2 className="w-3 h-3 text-[#ff6b35]" />
-                          <span>Rancang AI</span>
-                          {isBrainstormOpen ? <ChevronUp className="w-3 h-3" /> : <ChevronDown className="w-3 h-3" />}
-                        </button>
-                      </div>
-                    </div>
-
-                    {/* AI Brainstorm Input Drawer */}
-                    {isBrainstormOpen && (
-                      <div className="p-2.5 rounded-xl border-2 border-[#2c1810] bg-[#fff5e6] space-y-2 shadow-[2px_2px_0_#2c1810]">
-                        <div className="text-[11px] font-black text-[#2c1810] flex items-center justify-between">
-                          <span>Generator Ide Tema Microstock</span>
-                          <span className="text-[10px] font-bold text-[#ff6b35]">AI Assistant</span>
+                  {/* Mode-Specific Inspiration / Twist Section */}
+                  {mode === 'reference_to_prompt' ? (
+                    <div className="pt-2 space-y-2.5 bg-[#fff8f0] p-3 rounded-xl border-2 border-[#2c1810]/40 shadow-[2px_2px_0_#2c1810]">
+                      <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2">
+                        <div>
+                          <span className="text-[11px] font-black text-[#2c1810] flex items-center gap-1.5">
+                            <Sparkles className="w-3.5 h-3.5 text-[#ff6b35]" />
+                            <span>Kombinasi Sudut Variasi (Creative Twists)</span>
+                          </span>
+                          <p className="text-[10px] text-[#6b5344] font-medium leading-tight mt-0.5">
+                            Pilih 1 atau lebih ide twist di bawah untuk dikombinasikan dengan gambar referensi ini
+                          </p>
                         </div>
-                        <Input
-                          value={brainstormTopic}
-                          onChange={(e) => setBrainstormTopic(e.target.value)}
-                          placeholder="Ketik topik (e.g. ramadhan, sustainable eco, tech ai) atau kosongkan..."
-                          className="h-8 text-xs bg-white border border-[#2c1810] rounded-lg"
-                        />
-                        <div className="flex items-center justify-between gap-2">
-                          <div className="flex items-center gap-1 text-[11px] font-bold text-[#2c1810]">
-                            <span>Jumlah:</span>
-                            {[5, 10, 20].map((cnt) => (
-                              <button
-                                key={cnt}
-                                type="button"
-                                onClick={() => setBrainstormCount(cnt)}
-                                className={`px-1.5 py-0.5 rounded text-[10px] font-black border cursor-pointer ${
-                                  brainstormCount === cnt
-                                    ? 'bg-[#2c1810] text-white border-[#2c1810]'
-                                    : 'bg-white text-stone-700 border-stone-300'
-                                }`}
-                              >
-                                {cnt}
-                              </button>
-                            ))}
-                          </div>
 
+                        <div className="flex items-center gap-1 self-end sm:self-auto shrink-0">
+                          {contextualTwists.some((t) => t.isSelected) && (
+                            <button
+                              type="button"
+                              onClick={handleClearSelectedTwists}
+                              className="text-[10px] font-bold text-red-600 hover:underline px-1.5 cursor-pointer"
+                            >
+                              Bersihkan
+                            </button>
+                          )}
                           <Button
                             type="button"
                             size="sm"
-                            disabled={isBrainstorming}
-                            onClick={() => handleBrainstormIdeas(brainstormTopic, brainstormCount)}
-                            className="h-7.5 px-3 text-[11px] font-black bg-[#ff6b35] hover:bg-[#e55a2b] text-white border-2 border-[#2c1810] shadow-[1px_1px_0_#2c1810] cursor-pointer"
+                            disabled={isGeneratingTwists || (!refImageDataUrl && queue.length === 0)}
+                            onClick={handleGenerateImageTwists}
+                            className="h-6.5 px-2.5 text-[10px] font-black bg-[#ff6b35] hover:bg-[#e55a2b] text-white border border-[#2c1810] shadow-[1px_1px_0_#2c1810] cursor-pointer"
                           >
-                            {isBrainstorming ? (
+                            {isGeneratingTwists ? (
                               <>
                                 <Loader2 className="w-3 h-3 animate-spin mr-1" />
-                                <span>Merancang {brainstormCount} Ide...</span>
+                                <span>Menganalisis...</span>
                               </>
                             ) : (
                               <>
-                                <Wand2 className="w-3 h-3 mr-1" />
-                                <span>Rancang {brainstormCount} Ide via AI</span>
+                                <RefreshCw className="w-3 h-3 mr-1" />
+                                <span>{contextualTwists.length > 0 ? 'Racik Ide Baru' : 'Cari Ide Variasi'}</span>
                               </>
                             )}
                           </Button>
                         </div>
                       </div>
-                    )}
 
-                    {/* Inspirations Pills List */}
-                    <div className="flex flex-wrap gap-1.5">
-                      {inspirations.map((idea) => (
-                        <div
-                          key={idea.id}
-                          className={`inline-flex items-center rounded-lg border border-[#2c1810] text-[11px] font-bold shadow-[1px_1px_0_#2c1810] transition-all overflow-hidden ${
-                            idea.isAiGenerated
-                              ? 'bg-gradient-to-r from-[#fff5e6] to-[#fff0e0] border-[#ff6b35]'
-                              : 'bg-white hover:bg-[#fff5e6]'
-                          }`}
-                        >
+                      {/* Interactive Twist Chips */}
+                      <div className="flex flex-wrap gap-1.5">
+                        {contextualTwists.map((twist) => {
+                          const isSelected = Boolean(twist.isSelected);
+                          return (
+                            <button
+                              key={twist.id}
+                              type="button"
+                              onClick={() => handleToggleTwist(twist.id)}
+                              title={twist.modifierText}
+                              className={`px-2 py-1 rounded-lg border-2 text-[11px] font-bold transition-all flex items-center gap-1.5 cursor-pointer text-left ${
+                                isSelected
+                                  ? 'bg-[#2c1810] text-white border-[#2c1810] shadow-[2px_2px_0_#ff6b35]'
+                                  : 'bg-white hover:bg-[#fff5e6] text-[#2c1810] border-[#2c1810]/60 shadow-[1px_1px_0_#2c1810]'
+                              }`}
+                            >
+                              {isSelected ? (
+                                <Check className="w-3 h-3 text-[#ff6b35]" />
+                              ) : (
+                                <Plus className="w-3 h-3 text-stone-400" />
+                              )}
+                              <span>{twist.label}</span>
+                              <span
+                                className={`text-[8.5px] px-1 py-0.2 rounded font-black uppercase tracking-wider ${
+                                  isSelected ? 'bg-stone-800 text-stone-300' : 'bg-stone-100 text-stone-600'
+                                }`}
+                              >
+                                {twist.category}
+                              </span>
+                            </button>
+                          );
+                        })}
+                      </div>
+
+                      {settings.selectedTwists && settings.selectedTwists.length > 0 && (
+                        <div className="text-[10px] text-[#2c1810] font-bold bg-white px-2.5 py-1.5 rounded-lg border border-[#ff6b35] flex items-center justify-between gap-1 shadow-[1px_1px_0_#ff6b35]">
+                          <span className="flex items-center gap-1.5">
+                            <CheckCircle2 className="w-3.5 h-3.5 text-emerald-600 shrink-0" />
+                            <span>
+                              <b>{settings.selectedTwists.length} twist terpilih:</b> akan dilebur bersama referensi gambar saat menekan Generate Prompt.
+                            </span>
+                          </span>
                           <button
                             type="button"
-                            onClick={() => {
-                              setBrief(idea.brief);
-                              toast.success(`Inspirasi "${idea.title}" diterapkan ke brief.`);
-                            }}
-                            title={idea.brief}
-                            className="px-2 py-1 text-[#2c1810] cursor-pointer flex items-center gap-1 text-left"
+                            onClick={handleClearSelectedTwists}
+                            className="text-stone-400 hover:text-stone-700 ml-1"
+                            title="Reset pilihan"
                           >
-                            {idea.isAiGenerated ? (
-                              <span className="text-[9px] px-1 py-0.2 rounded bg-[#ff6b35] text-white font-black leading-none">
-                                AI
-                              </span>
-                            ) : (
-                              <span className="text-[#ff6b35]">⚡</span>
-                            )}
-                            <span>{idea.title}</span>
+                            <X className="w-3 h-3" />
+                          </button>
+                        </div>
+                      )}
+                    </div>
+                  ) : (
+                    /* Mode 2 (Text Ideation): Classic Brainstorm & Pool */
+                    <div className="pt-1 space-y-2">
+                      <div className="flex items-center justify-between">
+                        <span className="text-[11px] font-black text-[#2c1810] flex items-center gap-1.5">
+                          <Sparkles className="w-3.5 h-3.5 text-[#ff6b35]" />
+                          <span>Inspirasi Ide Komersial (Text Ideation)</span>
+                        </span>
+
+                        <div className="flex items-center gap-1">
+                          <button
+                            type="button"
+                            onClick={handleShuffleInspirations}
+                            className="h-6 px-2 rounded-md border border-[#2c1810] bg-white hover:bg-[#fff5e6] text-[#2c1810] text-[10px] font-bold flex items-center gap-1 cursor-pointer shadow-[1px_1px_0_#2c1810]"
+                            title="Acak inspirasi katalog"
+                          >
+                            <Shuffle className="w-3 h-3 text-[#ff6b35]" />
+                            <span>Acak</span>
                           </button>
 
-                          {brief.trim() && (
+                          <button
+                            type="button"
+                            onClick={() => setIsBrainstormOpen((v) => !v)}
+                            className="h-6 px-2 rounded-md border border-[#2c1810] bg-[#fff5e6] hover:bg-amber-100 text-[#2c1810] text-[10px] font-black flex items-center gap-1 cursor-pointer shadow-[1px_1px_0_#2c1810]"
+                          >
+                            <Wand2 className="w-3 h-3 text-[#ff6b35]" />
+                            <span>Rancang AI</span>
+                            {isBrainstormOpen ? <ChevronUp className="w-3 h-3" /> : <ChevronDown className="w-3 h-3" />}
+                          </button>
+                        </div>
+                      </div>
+
+                      {/* AI Brainstorm Input Drawer */}
+                      {isBrainstormOpen && (
+                        <div className="p-2.5 rounded-xl border-2 border-[#2c1810] bg-[#fff5e6] space-y-2 shadow-[2px_2px_0_#2c1810]">
+                          <div className="text-[11px] font-black text-[#2c1810] flex items-center justify-between">
+                            <span>Generator Ide Tema Microstock</span>
+                            <span className="text-[10px] font-bold text-[#ff6b35]">AI Assistant</span>
+                          </div>
+                          <Input
+                            value={brainstormTopic}
+                            onChange={(e) => setBrainstormTopic(e.target.value)}
+                            placeholder="Ketik topik (e.g. ramadhan, sustainable eco, tech ai) atau kosongkan..."
+                            className="h-8 text-xs bg-white border border-[#2c1810] rounded-lg"
+                          />
+                          <div className="flex items-center justify-between gap-2">
+                            <div className="flex items-center gap-1 text-[11px] font-bold text-[#2c1810]">
+                              <span>Jumlah:</span>
+                              {[5, 10, 20].map((cnt) => (
+                                <button
+                                  key={cnt}
+                                  type="button"
+                                  onClick={() => setBrainstormCount(cnt)}
+                                  className={`px-1.5 py-0.5 rounded text-[10px] font-black border cursor-pointer ${
+                                    brainstormCount === cnt
+                                      ? 'bg-[#2c1810] text-white border-[#2c1810]'
+                                      : 'bg-white text-stone-700 border-stone-300'
+                                  }`}
+                                >
+                                  {cnt}
+                                </button>
+                              ))}
+                            </div>
+
+                            <Button
+                              type="button"
+                              size="sm"
+                              disabled={isBrainstorming}
+                              onClick={() => handleBrainstormIdeas(brainstormTopic, brainstormCount)}
+                              className="h-7.5 px-3 text-[11px] font-black bg-[#ff6b35] hover:bg-[#e55a2b] text-white border-2 border-[#2c1810] shadow-[1px_1px_0_#2c1810] cursor-pointer"
+                            >
+                              {isBrainstorming ? (
+                                <>
+                                  <Loader2 className="w-3 h-3 animate-spin mr-1" />
+                                  <span>Merancang {brainstormCount} Ide...</span>
+                                </>
+                              ) : (
+                                <>
+                                  <Wand2 className="w-3 h-3 mr-1" />
+                                  <span>Rancang {brainstormCount} Ide via AI</span>
+                                </>
+                              )}
+                            </Button>
+                          </div>
+                        </div>
+                      )}
+
+                      {/* Inspirations Pills List */}
+                      <div className="flex flex-wrap gap-1.5">
+                        {inspirations.map((idea) => (
+                          <div
+                            key={idea.id}
+                            className={`inline-flex items-center rounded-lg border border-[#2c1810] text-[11px] font-bold shadow-[1px_1px_0_#2c1810] transition-all overflow-hidden ${
+                              idea.isAiGenerated
+                                ? 'bg-gradient-to-r from-[#fff5e6] to-[#fff0e0] border-[#ff6b35]'
+                                : 'bg-white hover:bg-[#fff5e6]'
+                            }`}
+                          >
                             <button
                               type="button"
                               onClick={() => {
-                                setBrief((prev) => `${prev.trim()}, ${idea.brief}`);
-                                toast.info(`Ditambahkan ke brief: "${idea.title}"`);
+                                setBrief(idea.brief);
+                                toast.success(`Inspirasi "${idea.title}" diterapkan ke brief.`);
                               }}
-                              title="Tambahkan ke akhir brief saat ini"
-                              className="px-1.5 py-1 border-l border-[#2c1810]/30 text-[#6b5344] hover:text-[#ff6b35] hover:bg-[#ffe0cc] cursor-pointer"
+                              title={idea.brief}
+                              className="px-2 py-1 text-[#2c1810] cursor-pointer flex items-center gap-1 text-left"
                             >
-                              <Plus className="w-3 h-3" />
+                              {idea.isAiGenerated ? (
+                                <span className="text-[9px] px-1 py-0.2 rounded bg-[#ff6b35] text-white font-black leading-none">
+                                  AI
+                                </span>
+                              ) : (
+                                <span className="text-[#ff6b35]">⚡</span>
+                              )}
+                              <span>{idea.title}</span>
                             </button>
-                          )}
-                        </div>
-                      ))}
+
+                            {brief.trim() && (
+                              <button
+                                type="button"
+                                onClick={() => {
+                                  setBrief((prev) => `${prev.trim()}, ${idea.brief}`);
+                                  toast.info(`Ditambahkan ke brief: "${idea.title}"`);
+                                }}
+                                title="Tambahkan ke akhir brief saat ini"
+                                className="px-1.5 py-1 border-l border-[#2c1810]/30 text-[#6b5344] hover:text-[#ff6b35] hover:bg-[#ffe0cc] cursor-pointer"
+                              >
+                                <Plus className="w-3 h-3" />
+                              </button>
+                            )}
+                          </div>
+                        ))}
+                      </div>
                     </div>
-                  </div>
+                  )}
                 </div>
               </div>
             )}
@@ -2002,13 +2360,13 @@ export function PromptGeneratorView({ onSwitchToMetadata, onSendImageToMetadata 
                     3. Gaya Visual & Sumbu Fokus
                   </span>
                   <span className="text-[10px] text-[#6b5344] font-medium block">
-                    {VISUAL_DIRECTION_OPTIONS.find((v) => v.id === settings.visualDirection)?.label || settings.visualDirection}
+                    {getVisualDirectionLabel(settings.visualDirection)}
                   </span>
                 </div>
               </div>
               <div className="flex items-center gap-2">
                 <span className="text-[10px] font-black px-2 py-0.5 rounded-full border border-[#2c1810] bg-[#fff5e6] text-[#2c1810]">
-                  {settings.visualDirection}
+                  {getVisualDirectionLabel(settings.visualDirection)}
                 </span>
                 {foldedSections.visual ? (
                   <ChevronDown className="w-4 h-4 text-[#2c1810]" />
@@ -2020,27 +2378,203 @@ export function PromptGeneratorView({ onSwitchToMetadata, onSendImageToMetadata 
 
             {!foldedSections.visual && (
               <div className="p-4 pt-0 space-y-4 border-t border-stone-200/80 mt-1">
-                {/* Visual Direction / Style */}
+                {/* 1. Special Automation Modes (Agent Decide & Smart Variety Pack) */}
                 <div className="space-y-1.5 pt-3">
-                  <Label className="text-xs font-black text-[#2c1810]">Gaya Visual Utama</Label>
-                  <div className="grid grid-cols-1 sm:grid-cols-2 gap-1.5">
-                    {VISUAL_DIRECTION_OPTIONS.map((opt) => (
-                      <button
-                        key={opt.id}
-                        type="button"
-                        onClick={() => setSettings((s) => ({ ...s, visualDirection: opt.id }))}
-                        className={`p-2 rounded-lg border-2 text-left transition-all cursor-pointer ${
-                          settings.visualDirection === opt.id
-                            ? 'bg-[#fff5e6] border-[#2c1810] shadow-[2px_2px_0_#2c1810] font-black'
-                            : 'bg-white border-stone-200 hover:border-stone-400 font-semibold text-stone-700'
-                        }`}
-                      >
-                        <span className="text-xs text-[#2c1810] block">{opt.label}</span>
-                        <span className="text-[10px] text-stone-500 font-normal block truncate">{opt.desc}</span>
-                      </button>
-                    ))}
+                  <div className="flex items-center justify-between">
+                    <Label className="text-xs font-black text-[#2c1810]">Mode Otomasi Gaya</Label>
+                    <span className="text-[10px] font-bold text-[#ff6b35]">Rekomendasi AI</span>
+                  </div>
+                  <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
+                    {VISUAL_DIRECTION_LIST.filter((v) => v.category === 'special').map((opt) => {
+                      const isSelected = settings.visualDirection === opt.id;
+                      return (
+                        <button
+                          key={opt.id}
+                          type="button"
+                          onClick={() => setSettings((s) => ({ ...s, visualDirection: opt.id as VisualDirection }))}
+                          className={`p-2.5 rounded-xl border-2 text-left transition-all cursor-pointer relative ${
+                            isSelected
+                              ? 'bg-[#2c1810] text-white border-[#2c1810] shadow-[3px_3px_0_#ff6b35]'
+                              : 'bg-white hover:bg-[#fff5e6] border-[#2c1810] shadow-[2px_2px_0_#2c1810]'
+                          }`}
+                        >
+                          <div className="flex items-center justify-between gap-1">
+                            <span
+                              className={`text-xs font-black flex items-center gap-1.5 ${
+                                isSelected ? 'text-amber-300' : 'text-[#2c1810]'
+                              }`}
+                            >
+                              <span>{opt.id === 'agent_decide' ? '🤖' : '🎲'}</span>
+                              <span>{opt.label}</span>
+                            </span>
+                            <span
+                              className={`text-[8.5px] font-black px-1.5 py-0.5 rounded uppercase tracking-wider ${
+                                isSelected ? 'bg-amber-400 text-stone-900' : 'bg-amber-100 text-[#ff6b35]'
+                              }`}
+                            >
+                              {opt.badge}
+                            </span>
+                          </div>
+                          <span
+                            className={`text-[10px] font-medium block mt-1 leading-snug ${
+                              isSelected ? 'text-stone-300' : 'text-[#6b5344]'
+                            }`}
+                          >
+                            {opt.desc}
+                          </span>
+                        </button>
+                      );
+                    })}
                   </div>
                 </div>
+
+                {/* 2. Hierarki 2 Kategori: Fotografi vs Ilustrasi & Grafis */}
+                {(() => {
+                  const isAutomated =
+                    settings.visualDirection === 'agent_decide' || settings.visualDirection === 'smart_random';
+                  const activeAutoLabel =
+                    settings.visualDirection === 'agent_decide'
+                      ? 'Agent Decide (Otomatis)'
+                      : 'Smart Variety Pack (Acak)';
+
+                  return (
+                    <div className="space-y-2 pt-1 border-t border-stone-200/80">
+                      <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-1.5">
+                        <div className="flex items-center gap-2">
+                          <Label className="text-xs font-black text-[#2c1810]">
+                            Katalog Gaya Spesifik Microstock
+                          </Label>
+                          {isAutomated ? (
+                            <span className="text-[9px] font-bold px-1.5 py-0.5 rounded bg-stone-200 text-stone-700">
+                              🔒 Terkunci
+                            </span>
+                          ) : (
+                            <span className="text-[9px] font-black px-1.5 py-0.5 rounded bg-emerald-100 text-emerald-800 border border-emerald-300">
+                              ✓ Mode Manual
+                            </span>
+                          )}
+                        </div>
+
+                        <div className="flex bg-stone-100 p-0.5 rounded-lg border border-[#2c1810]/40 self-start sm:self-auto">
+                          <button
+                            type="button"
+                            onClick={() => setVisualCategoryTab('photo')}
+                            className={`px-2.5 py-1 rounded-md text-[11px] font-black transition-all cursor-pointer flex items-center gap-1 ${
+                              visualCategoryTab === 'photo'
+                                ? 'bg-[#2c1810] text-white shadow-[1px_1px_0_#ff6b35]'
+                                : 'text-stone-600 hover:text-stone-900'
+                            }`}
+                          >
+                            <span>📷 Fotografi (8)</span>
+                          </button>
+                          <button
+                            type="button"
+                            onClick={() => setVisualCategoryTab('illustration')}
+                            className={`px-2.5 py-1 rounded-md text-[11px] font-black transition-all cursor-pointer flex items-center gap-1 ${
+                              visualCategoryTab === 'illustration'
+                                ? 'bg-[#2c1810] text-white shadow-[1px_1px_0_#ff6b35]'
+                                : 'text-stone-600 hover:text-stone-900'
+                            }`}
+                          >
+                            <span>🎨 Ilustrasi & Vektor (8)</span>
+                          </button>
+                        </div>
+                      </div>
+
+                      {/* Info / Unlock Banner saat Mode Otomasi Aktif */}
+                      {isAutomated ? (
+                        <div className="p-3 rounded-xl border-2 border-dashed border-[#ff6b35]/60 bg-amber-50/90 flex flex-col sm:flex-row sm:items-center justify-between gap-2.5 shadow-[1px_1px_0_#2c1810]">
+                          <div className="flex items-start sm:items-center gap-2.5">
+                            <div className="w-7 h-7 rounded-lg bg-[#2c1810] text-amber-300 flex items-center justify-center font-black text-sm shrink-0">
+                              🔒
+                            </div>
+                            <div>
+                              <span className="text-xs font-black text-[#2c1810] block">
+                                Kartu Katalog Dinonaktifkan ({activeAutoLabel})
+                              </span>
+                              <span className="text-[10px] text-[#6b5344] font-medium block leading-tight">
+                                Gaya ditentukan otomatis oleh AI. Jika ingin mengunci ke 1 sub-gaya tertentu, buka kunci katalog di samping.
+                              </span>
+                            </div>
+                          </div>
+
+                          <Button
+                            type="button"
+                            size="sm"
+                            onClick={() => {
+                              const fallbackStyle =
+                                visualCategoryTab === 'photo'
+                                  ? 'photo_commercial_lifestyle'
+                                  : 'vector_flat_isolated';
+                              setSettings((s) => ({ ...s, visualDirection: fallbackStyle }));
+                              toast.success(`Mode Manual aktif: ${getVisualDirectionLabel(fallbackStyle)}`);
+                            }}
+                            className="h-7 px-3 text-[10px] font-black bg-[#ff6b35] hover:bg-[#e55a2b] text-white border-2 border-[#2c1810] shadow-[1px_1px_0_#2c1810] shrink-0 cursor-pointer self-start sm:self-auto"
+                          >
+                            🔓 Buka Kunci Katalog & Pilih Gaya
+                          </Button>
+                        </div>
+                      ) : (
+                        <div className="px-2.5 py-1 bg-emerald-50 rounded-lg border border-emerald-200 flex items-center justify-between text-[10px]">
+                          <span className="text-emerald-900 font-bold">
+                            Gaya terpilih saat ini:{' '}
+                            <b>{getVisualDirectionLabel(settings.visualDirection)}</b>
+                          </span>
+                          <button
+                            type="button"
+                            onClick={() => {
+                              setSettings((s) => ({ ...s, visualDirection: 'agent_decide' }));
+                              toast.info('Kembali ke mode Agent Decide (Auto)');
+                            }}
+                            className="text-[#ff6b35] font-black hover:underline cursor-pointer"
+                          >
+                            Kembalikan ke Auto
+                          </button>
+                        </div>
+                      )}
+
+                      {/* Grid Sub-Gaya Berdasarkan Tab yang Dipilih */}
+                      <div
+                        className={`grid grid-cols-1 sm:grid-cols-2 gap-1.5 max-h-[300px] overflow-y-auto pr-1 transition-all ${
+                          isAutomated ? 'opacity-35 pointer-events-none select-none grayscale-[40%]' : ''
+                        }`}
+                      >
+                        {VISUAL_DIRECTION_LIST.filter((v) => v.category === visualCategoryTab).map((opt) => {
+                          const isSelected = settings.visualDirection === opt.id;
+                          return (
+                            <button
+                              key={opt.id}
+                              type="button"
+                              disabled={isAutomated}
+                              onClick={() =>
+                                setSettings((s) => ({ ...s, visualDirection: opt.id as VisualDirection }))
+                              }
+                              className={`p-2 rounded-lg border-2 text-left transition-all cursor-pointer ${
+                                isSelected
+                                  ? 'bg-[#fff5e6] border-[#2c1810] shadow-[2px_2px_0_#2c1810] font-black'
+                                  : 'bg-white border-stone-200 hover:border-stone-400 font-semibold text-stone-700'
+                              }`}
+                            >
+                              <div className="flex items-center justify-between gap-1">
+                                <span className="text-xs text-[#2c1810] font-black truncate">{opt.label}</span>
+                                <span
+                                  className={`text-[8.5px] px-1.5 py-0.2 rounded font-black shrink-0 ${
+                                    isSelected ? 'bg-[#ff6b35] text-white' : 'bg-stone-100 text-stone-600'
+                                  }`}
+                                >
+                                  {opt.badge}
+                                </span>
+                              </div>
+                              <span className="text-[10px] text-stone-500 font-normal block leading-tight mt-0.5 line-clamp-2">
+                                {opt.desc}
+                              </span>
+                            </button>
+                          );
+                        })}
+                      </div>
+                    </div>
+                  );
+                })()}
 
                 {/* Creative Focus */}
                 <div className="space-y-1.5">
@@ -2797,6 +3331,29 @@ export function PromptGeneratorView({ onSwitchToMetadata, onSendImageToMetadata 
                       <>
                         <Download className="w-3.5 h-3.5 mr-1 text-emerald-700" />
                         <span>Unduh {flowDownloadResolution}</span>
+                      </>
+                    )}
+                  </Button>
+
+                  {/* Flow Local Puller to Metadata Studio */}
+                  <Button
+                    type="button"
+                    size="sm"
+                    variant="outline"
+                    disabled={isPullingLocalAssets}
+                    onClick={handlePullLocalAssetsToMetadata}
+                    className="h-7.5 px-2 text-xs font-bold border-2 border-indigo-800 shadow-[1px_1px_0_#2c1810] cursor-pointer bg-indigo-50 hover:bg-indigo-100 text-indigo-950 transition-all"
+                    title={`Tarik otomatis aset ${flowDownloadResolution} dari folder lokal ke Metadata Studio`}
+                  >
+                    {isPullingLocalAssets ? (
+                      <>
+                        <Loader2 className="w-3.5 h-3.5 mr-1 animate-spin text-indigo-700" />
+                        <span>Menarik...</span>
+                      </>
+                    ) : (
+                      <>
+                        <FolderDown className="w-3.5 h-3.5 mr-1 text-indigo-700" />
+                        <span>Tarik {flowDownloadResolution} ke Studio</span>
                       </>
                     )}
                   </Button>

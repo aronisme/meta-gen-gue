@@ -10,14 +10,17 @@ import { HistoryCard } from '@/components/HistoryCard';
 import { FtpQueueView } from '@/components/FtpQueueView';
 import { FtpAccountsView } from '@/components/FtpAccountsView';
 import { AppSideRail, type AppModuleId } from '@/components/AppSideRail';
-import { PromptGeneratorView } from '@/components/PromptGeneratorView';
+import { PromptGeneratorView, type PromptToMetadataHandoff } from '@/components/PromptGeneratorView';
 import { KeywordResearchView } from '@/components/KeywordResearchView';
 import { LandingBerandaView } from '@/components/LandingBerandaView';
+import { QcAgentView } from '@/components/QcAgentView';
+import { AgentStudioView } from '@/components/AgentStudioView';
 import { GoogleAuthModal } from '@/components/GoogleAuthModal';
 import { loadFtpProfiles } from '@/lib/ftp/store';
 import type { AuthUser } from '@/lib/auth/types';
 import { clearStoredUser, getStoredUser, onAuthChange, refreshUserStatus, saveStoredUser } from '@/lib/auth/store';
 import { runInitialSilentSync, syncDeleteHistoryItems, syncDeleteSession, SYNC_COMPLETED_EVENT } from '@/lib/sync/engine';
+import { findLocalFile } from '@/lib/ftp/bridge-client';
 
 import { resizeImageToMax1024 } from '@/lib/resize';
 import { extractVideoKeyframes, isVideoFile } from '@/lib/video';
@@ -415,6 +418,9 @@ export default function App() {
   const [currentUser, setCurrentUser] = useState<AuthUser | null>(null);
   const [showAuthModal, setShowAuthModal] = useState(false);
   const isSettingsInitialized = useRef(false);
+  // Unified Campaign: Map to preserve originating prompt text and prompt session context across files
+  const promptContextMapRef = useRef<Map<string, PromptToMetadataHandoff>>(new Map());
+  const [targetPromptSessionId, setTargetPromptSessionId] = useState<string | null>(null);
 
   // Logout handler with comprehensive state sanitization
   const handleLogout = useCallback(() => {
@@ -507,6 +513,29 @@ export default function App() {
     };
   }, []);
 
+  // Handle Extension Incoming Events & URL Actions at Root Level
+  useEffect(() => {
+    if (typeof window !== 'undefined') {
+      const params = new URLSearchParams(window.location.search);
+      if (params.get('action') === 'enqueue_prompt' || params.get('module') === 'prompt-gen') {
+        setActiveModule('prompt-gen');
+      }
+    }
+
+    const handleExtensionGlobalMessage = (event: MessageEvent) => {
+      if (event.data?.type === 'METAGEN_ENQUEUE_PROMPT_IMAGE') {
+        // Silent background receipt: do NOT force switch activeModule to 'prompt-gen'.
+        // PromptGeneratorView is always mounted and enqueues the image seamlessly in the background.
+        toast.info('Aset baru ditambahkan ke antrean Prompt Generator.', {
+          description: 'Aset siap diproses di tab Prompt Img Generator.',
+        });
+      }
+    };
+
+    window.addEventListener('message', handleExtensionGlobalMessage);
+    return () => window.removeEventListener('message', handleExtensionGlobalMessage);
+  }, []);
+
   // Load saved settings on mount
   useEffect(() => {
     const saved = loadSettings();
@@ -578,6 +607,49 @@ export default function App() {
     setFiles([]);
     setSessionFiles([]);
     setTab('generate');
+  }, []);
+
+  const handleSendSessionToUpload = useCallback(async (session: GenerationSession) => {
+    const loadedItems = await loadSessionItems(session.itemIds);
+    const resolvedItems = await Promise.all(
+      loadedItems.map(async (it) => {
+        if (it.filePath) return it;
+        try {
+          const found = await findLocalFile(it.filename);
+          if (found?.found && found.fullPath) {
+            const updated = { ...it, filePath: found.fullPath };
+            void saveHistoryItem(updated).catch(() => {});
+            return updated;
+          }
+        } catch {}
+        return it;
+      })
+    );
+    setItems(resolvedItems);
+    setCurrentSession(session);
+    setTab('upload');
+    toast.success(`Sesi "${session.title}" (${resolvedItems.length} item) dimuat ke Antrean Upload!`);
+  }, []);
+
+  const handleSendSelectedToUpload = useCallback(async (targetItems: ItemMetaBox[]) => {
+    if (targetItems.length === 0) return;
+    const resolvedItems = await Promise.all(
+      targetItems.map(async (it) => {
+        if (it.filePath) return it;
+        try {
+          const found = await findLocalFile(it.filename);
+          if (found?.found && found.fullPath) {
+            const updated = { ...it, filePath: found.fullPath };
+            void saveHistoryItem(updated).catch(() => {});
+            return updated;
+          }
+        } catch {}
+        return it;
+      })
+    );
+    setItems(resolvedItems);
+    setTab('upload');
+    toast.success(`${resolvedItems.length} item dari riwayat dikirim ke Antrean Upload!`);
   }, []);
 
   const handleDeleteSession = useCallback(
@@ -674,9 +746,20 @@ export default function App() {
       minute: '2-digit',
     });
 
+    const firstPromptCtx = acceptedFiles
+      .map((f) => promptContextMapRef.current.get(f.name.toLowerCase()))
+      .find(Boolean);
+    const campaignTitle = currentSession?.campaignTitle || firstPromptCtx?.sessionTitle;
+    const promptSessionId = currentSession?.promptSessionId || firstPromptCtx?.sessionId;
+
     const activeSession: GenerationSession = currentSession || {
       id: activeSessionId,
-      title: `Sesi Tugas (${baseItems.length + acceptedFiles.length} Item - ${sessionDateStr})`,
+      title: campaignTitle
+        ? `${campaignTitle} (${baseItems.length + acceptedFiles.length} Item)`
+        : `Sesi Tugas (${baseItems.length + acceptedFiles.length} Item - ${sessionDateStr})`,
+      campaignTitle,
+      promptSessionId,
+      sourceModule: promptSessionId ? 'prompt-gen' : 'direct',
       createdAt: Date.now(),
       updatedAt: Date.now(),
       status: 'running',
@@ -702,6 +785,7 @@ export default function App() {
 
     const genOne = async (file: File): Promise<ItemMetaBox> => {
       const isVideo = isVideoFile(file);
+      const promptCtx = promptContextMapRef.current.get(file.name.toLowerCase());
       let capturedDataUrl: string | undefined;
       let capturedDuration: number | undefined;
       let capturedKeyframes: string[] | undefined;
@@ -733,10 +817,18 @@ export default function App() {
           setProgress((prev) => Math.max(prev, 40));
         }
 
+        let effectiveExtra = extra;
+        if (promptCtx?.promptText) {
+          const promptContextNote = `\n[ORIGINAL GENERATION PROMPT]\nUse this original AI image prompt as high-priority creative context for hyper-relevant title, description, and keywords:\n"${promptCtx.promptText.trim()}"`;
+          effectiveExtra = extra ? `${extra}\n${promptContextNote}` : promptContextNote;
+        }
+
         const effectiveInstr = isVideo
-          ? defaultInstruction({ fileType, titleLength, descriptionLength, keywordsCount, extra, isVideo: true })
-          : instr;
-        const effectiveHash = isVideo ? await sha256(effectiveInstr) : instructionHash;
+          ? defaultInstruction({ fileType, titleLength, descriptionLength, keywordsCount, extra: effectiveExtra, isVideo: true })
+          : (promptCtx?.promptText
+              ? defaultInstruction({ fileType, titleLength, descriptionLength, keywordsCount, extra: effectiveExtra })
+              : instr);
+        const effectiveHash = isVideo || promptCtx?.promptText ? await sha256(effectiveInstr) : instructionHash;
 
         const body = {
           apiKey,
@@ -811,6 +903,7 @@ export default function App() {
           shutterstockCategory: normalized.shutterstockCategory,
           illustration: detectedIllustration,
           aiGenerated: true,
+          aiPrompt: promptCtx?.promptText || normalized.aiPrompt,
           aiModel: normalized.aiModel || (model === 'auto' ? 'Auto (GAS Proxy)' : model),
         };
 
@@ -820,10 +913,23 @@ export default function App() {
             ? (detectedIllustration ? 'illustration' : 'photo')
             : fileType;
 
+        let detectedFilePath =
+          (file as unknown as { filePath?: string; path?: string }).filePath ||
+          (file as unknown as { filePath?: string; path?: string }).path;
+        if (!detectedFilePath) {
+          try {
+            const localFound = await findLocalFile(file.name);
+            if (localFound?.found && localFound.fullPath) {
+              detectedFilePath = localFound.fullPath;
+            }
+          } catch {}
+        }
+
         const box: ItemMetaBox = {
           id: nanoid(),
           sessionId: activeSessionId,
           filename: file.name,
+          filePath: detectedFilePath,
           fileType: resolvedFileType,
           assetType: isVideo ? 'video' : 'image',
           status: 'success',
@@ -832,6 +938,9 @@ export default function App() {
           videoDuration: capturedDuration,
           videoKeyframes: isVideo ? capturedKeyframes : undefined,
           meta: fixed,
+          promptText: promptCtx?.promptText,
+          promptCardId: promptCtx?.promptCardId,
+          promptSessionId: promptCtx?.sessionId,
         };
         await saveHistoryItem(box);
         return box;
@@ -848,11 +957,24 @@ export default function App() {
           } catch {}
         }
 
+        let detectedFilePath =
+          (file as unknown as { filePath?: string; path?: string }).filePath ||
+          (file as unknown as { filePath?: string; path?: string }).path;
+        if (!detectedFilePath) {
+          try {
+            const localFound = await findLocalFile(file.name);
+            if (localFound?.found && localFound.fullPath) {
+              detectedFilePath = localFound.fullPath;
+            }
+          } catch {}
+        }
+
         const msg = err instanceof Error ? err.message : String(err);
         const box: ItemMetaBox = {
           id: nanoid(),
           sessionId: activeSessionId,
           filename: file.name,
+          filePath: detectedFilePath,
           fileType: isVideo ? 'video' : (fileType === 'auto' ? 'photo' : fileType),
           assetType: isVideo ? 'video' : 'image',
           status: 'error',
@@ -861,6 +983,9 @@ export default function App() {
           videoDuration: capturedDuration,
           videoKeyframes: isVideo ? capturedKeyframes : undefined,
           error: msg,
+          promptText: promptCtx?.promptText,
+          promptCardId: promptCtx?.promptCardId,
+          promptSessionId: promptCtx?.sessionId,
         };
         await saveHistoryItem(box);
         return box;
@@ -1114,6 +1239,8 @@ export default function App() {
             onNavigateToStudio={() => setActiveModule('metadata')}
             onNavigateToPromptGen={() => setActiveModule('prompt-gen')}
             onNavigateToKeywords={() => setActiveModule('keyword-research')}
+            onNavigateToQc={() => setActiveModule('qc-agent')}
+            onNavigateToAgent={() => setActiveModule('ai-copilot')}
           />
         </div>
 
@@ -1276,6 +1403,7 @@ export default function App() {
                   hasVideoFiles={hasVideoFiles}
                   onFilesChange={setFiles}
                   onGenerate={runGeneration}
+                  onOpenQc={() => setActiveModule('qc-agent')}
                   existingItemFilenames={items.map((it) => it.filename)}
                   model={model}
                   onModelChange={setModel}
@@ -1332,6 +1460,15 @@ export default function App() {
               sessions={sessions}
               onLoadSession={handleLoadSession}
               onDeleteSession={handleDeleteSession}
+              onSendSessionToUpload={handleSendSessionToUpload}
+              onSendToUpload={handleSendSelectedToUpload}
+              onOpenPromptSession={(promptSessionId) => {
+                setTargetPromptSessionId(promptSessionId);
+                setActiveModule('prompt-gen');
+                toast.info('Beralih ke Sesi Prompt Generator', {
+                  description: `Sesi prompt terhubung: ${promptSessionId}`,
+                });
+              }}
             />
           </div>
 
@@ -1366,12 +1503,103 @@ export default function App() {
         {/* Module 2: AI Stock Prompt Generator */}
         <div className={activeModule === 'prompt-gen' ? 'block' : 'hidden'}>
           <PromptGeneratorView
+            targetSessionId={targetPromptSessionId || undefined}
             onSwitchToMetadata={() => setActiveModule('metadata')}
-            onSendImageToMetadata={(file) => {
+            onSendImageToMetadata={(file, context) => {
+              if (context) {
+                promptContextMapRef.current.set(file.name.toLowerCase(), context);
+              }
+              if (context?.sessionTitle && (!currentSession || items.length === 0)) {
+                const newSessId = nanoid();
+                const sessionDateStr = new Date().toLocaleDateString('id-ID', {
+                  day: 'numeric',
+                  month: 'short',
+                  hour: '2-digit',
+                  minute: '2-digit',
+                });
+                const sessionTitle = `${context.sessionTitle} (1 Item - ${sessionDateStr})`;
+                const newSess: GenerationSession = {
+                  id: newSessId,
+                  title: sessionTitle,
+                  campaignTitle: context.sessionTitle,
+                  promptSessionId: context.sessionId,
+                  sourceModule: 'prompt-gen',
+                  createdAt: Date.now(),
+                  updatedAt: Date.now(),
+                  status: 'draft',
+                  settings: {
+                    provider,
+                    model,
+                    fileType,
+                    titleLength,
+                    descriptionLength,
+                    keywordsCount,
+                    extraInstructions: extra,
+                  },
+                  itemIds: [],
+                  totalFiles: 1,
+                  successCount: 0,
+                  errorCount: 0,
+                };
+                setCurrentSession(newSess);
+                void saveSession(newSess);
+              }
               setFiles((prev) => [...prev, file]);
               setActiveModule('metadata');
-              toast.success(`Gambar "${file.name}" ditambahkan ke Metadata Studio!`, {
-                description: 'File siap dianalisis untuk menghasilkan judul, deskripsi, dan keyword stock.',
+              toast.success(`Gambar "${file.name}" dimuat ke Metadata Studio!`, {
+                description: context?.sessionTitle
+                  ? `Sesi Tugas Terpadu: "${context.sessionTitle}". Konteks prompt terhubung.`
+                  : 'File siap dianalisis untuk menghasilkan judul, deskripsi, dan keyword stock.',
+              });
+            }}
+            onSendBatchImagesToMetadata={(batchFiles, contextList) => {
+              if (contextList && contextList.length > 0) {
+                for (const ctx of contextList) {
+                  promptContextMapRef.current.set(ctx.file.name.toLowerCase(), ctx);
+                }
+              }
+              const firstCtx = contextList?.[0];
+              if (firstCtx?.sessionTitle && (!currentSession || items.length === 0)) {
+                const newSessId = nanoid();
+                const sessionDateStr = new Date().toLocaleDateString('id-ID', {
+                  day: 'numeric',
+                  month: 'short',
+                  hour: '2-digit',
+                  minute: '2-digit',
+                });
+                const sessionTitle = `${firstCtx.sessionTitle} (${batchFiles.length} Item - ${sessionDateStr})`;
+                const newSess: GenerationSession = {
+                  id: newSessId,
+                  title: sessionTitle,
+                  campaignTitle: firstCtx.sessionTitle,
+                  promptSessionId: firstCtx.sessionId,
+                  sourceModule: 'prompt-gen',
+                  createdAt: Date.now(),
+                  updatedAt: Date.now(),
+                  status: 'draft',
+                  settings: {
+                    provider,
+                    model,
+                    fileType,
+                    titleLength,
+                    descriptionLength,
+                    keywordsCount,
+                    extraInstructions: extra,
+                  },
+                  itemIds: [],
+                  totalFiles: batchFiles.length,
+                  successCount: 0,
+                  errorCount: 0,
+                };
+                setCurrentSession(newSess);
+                void saveSession(newSess);
+              }
+              setFiles((prev) => [...prev, ...batchFiles]);
+              setActiveModule('metadata');
+              toast.success(`${batchFiles.length} aset berhasil dimuat ke Metadata Studio!`, {
+                description: firstCtx?.sessionTitle
+                  ? `Sesi Tugas Terpadu: "${firstCtx.sessionTitle}". Konteks prompt terhubung.`
+                  : 'Semua file siap dianalisis untuk menghasilkan judul, deskripsi, dan keyword stock.',
               });
             }}
           />
@@ -1380,6 +1608,41 @@ export default function App() {
         {/* Module 3: Microstock Keyword Research */}
         <div className={activeModule === 'keyword-research' ? 'block' : 'hidden'}>
           <KeywordResearchView onSwitchToMetadata={() => setActiveModule('metadata')} />
+        </div>
+
+        {/* Module 4: Adobe Stock QC Inspector */}
+        <div className={activeModule === 'qc-agent' ? 'block' : 'hidden'}>
+          <QcAgentView
+            studioFiles={files}
+            gasProxyModels={GAS_PROXY_MODELS}
+            onSwitchToMetadata={() => setActiveModule('metadata')}
+            onSendItemsToMetadata={(readyFiles) => {
+              setFiles((prev) => [...prev, ...readyFiles]);
+              setActiveModule('metadata');
+              toast.success(`${readyFiles.length} file lolos QC dimuat ke Studio Metadata!`);
+            }}
+            onSendItemsToUpload={(readyBatch) => {
+              const readyFiles = readyBatch.map((it) => it.file).filter(Boolean) as File[];
+              setSessionFiles((prev) => {
+                const map = new Map<string, File>();
+                for (const f of prev) map.set(f.name.toLowerCase(), f);
+                for (const f of readyFiles) map.set(f.name.toLowerCase(), f);
+                return Array.from(map.values());
+              });
+              setActiveModule('metadata');
+              setTab('upload');
+              toast.success(`${readyBatch.length} file lolos QC siap di Antrean Upload!`);
+            }}
+          />
+        </div>
+
+        {/* Module 5: Omnigent Live AI Agent Studio */}
+        <div className={activeModule === 'ai-copilot' ? 'block' : 'hidden'}>
+          <AgentStudioView
+            onSwitchToMetadata={() => setActiveModule('metadata')}
+            onSwitchToPromptGen={() => setActiveModule('prompt-gen')}
+            onSwitchToQc={() => setActiveModule('qc-agent')}
+          />
         </div>
 
         {/* Floating Background Upload Toast Pill */}

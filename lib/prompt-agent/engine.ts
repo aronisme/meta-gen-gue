@@ -16,6 +16,47 @@ export const ENGINE_LABELS: Record<EngineType, string> = {
 };
 
 export const VISUAL_DIRECTION_SUFFIXES: Record<string, string> = {
+  // --- SPECIAL AGENT MODES ---
+  agent_decide: '',
+  smart_random: '',
+
+  // --- 1. FOTOGRAFI (Photography Sub-styles) ---
+  photo_commercial_lifestyle:
+    'authentic commercial stock photography, candid real people, natural soft morning light, shot on Sony A7R V, 85mm f/1.4 lens, natural skin textures, 8k resolution, genuine emotion',
+  photo_studio_isolated:
+    'clean commercial studio product photography, isolated on pure neutral white background, professional softbox studio lighting, crisp razor-sharp focus, generous negative copy space, 8k resolution',
+  photo_flatlay_knolling:
+    'overhead 90-degree flatlay tabletop photography, organized knolling composition, clean aesthetic arrangement, soft diffused ambient daylight, ample negative copy space for typography, high resolution',
+  photo_macro_texture:
+    'extreme macro close-up photography, microscopic tactile textures and details, shallow depth of field, delicate rim lighting, crisp focal plane, 8k masterwork',
+  photo_cinematic_narrative:
+    'cinematic 4k still frame from dramatic film footage, anamorphic lens flare, rich shadows, arri alexa color grading, atmospheric depth, cinematic storytelling',
+  photo_editorial_documentary:
+    'authentic editorial documentary photography, spontaneous candid realism, natural available lighting, photojournalistic framing, true-to-life colors, Leica M11 lens',
+  photo_interior_architecture:
+    'modern architectural and interior photography, clean straight perspective lines, Japandi minimalist design, soft natural window sunbeam, balanced interior lighting, spacious composition',
+  photo_drone_aerial:
+    'dramatic top-down drone aerial photography, bird-eye perspective, geometric landscape patterns, high-altitude wide angle, sharp environmental details',
+
+  // --- 2. ILUSTRASI & GRAFIS (Illustration & Graphics Sub-styles) ---
+  vector_flat_isolated:
+    'clean vector illustration, modern flat 2d graphic design, isolated on pure white background, crisp vector outlines, balanced modern color palette, microstock asset, scalable SVG aesthetics',
+  vector_lineart_minimal:
+    'minimalist vector line art illustration, continuous monoline drawing, subtle pastel color accents, modern aesthetic boho style, clean negative space, elegant graphic',
+  render_3d_isometric:
+    'clean 3d isometric render, 30-degree orthographic view, Blender Cycles, smooth plastic and matte ceramic materials, soft ambient occlusion, minimalist tech aesthetic',
+  render_3d_clay_glass:
+    'cute 3d claymorphism and frosted glassmorphism render, soft translucent glass reflections, smooth tactile clay shapes, vibrant pastel lighting, modern playful asset',
+  art_watercolor_handdrawn:
+    'hand-painted watercolor illustration, soft wet-on-wet paint washes, authentic textured cold-press cotton paper, delicate fluid brushstrokes, artisanal organic feel',
+  art_vintage_engraving:
+    'classic vintage engraving and woodcut illustration, detailed cross-hatching linework, antique copperplate printing aesthetic, timeless monochrome or sepia ink drawing',
+  graphic_sticker_clipart:
+    'die-cut graphic sticker design, thick clean white contour outline border, playful vibrant colors, soft subtle drop shadow, isolated clipart asset, print-ready',
+  graphic_infographic_asset:
+    'modern business infographic asset, clean structured visual diagram, sleek data visualization style, crisp geometric icons, high contrast professional corporate graphic',
+
+  // --- LEGACY BACKWARDS COMPATIBILITY ---
   photorealistic:
     'authentic commercial stock photography, shot on Sony A7R V, 85mm f/1.4 lens, natural skin textures, 8k resolution, crisp focus',
   '3d_render':
@@ -28,6 +69,159 @@ export const VISUAL_DIRECTION_SUFFIXES: Record<string, string> = {
     'high-end editorial design, tactile art direction, sophisticated negative space, museum quality, refined color contrast',
   auto: '',
 };
+
+export interface VisualDirectionMeta {
+  id: string;
+  category: 'photo' | 'illustration' | 'special';
+  label: string;
+  desc: string;
+  badge: string;
+}
+
+export const VISUAL_DIRECTION_LIST: VisualDirectionMeta[] = [
+  // Special Agent Modes
+  {
+    id: 'agent_decide',
+    category: 'special',
+    label: 'Agent Decide (Otomatis)',
+    desc: 'AI menganalisis gambar dan otomatis memilih gaya paling bernilai komersial tinggi',
+    badge: 'Smart Auto',
+  },
+  {
+    id: 'smart_random',
+    category: 'special',
+    label: 'Smart Variety Pack',
+    desc: 'Menyebarkan ragam sudut gaya berbeda di setiap kartu prompt (Mix Series)',
+    badge: 'Multi-Style',
+  },
+
+  // 1. Fotografi
+  {
+    id: 'photo_commercial_lifestyle',
+    category: 'photo',
+    label: 'Commercial & Lifestyle',
+    desc: 'Candid manusia autentik, pencahayaan alami, ramah komersial',
+    badge: 'Bestseller',
+  },
+  {
+    id: 'photo_studio_isolated',
+    category: 'photo',
+    label: 'Studio Product Isolated',
+    desc: 'Subjek terisolasi di background putih/netral, softbox, copy space iklan',
+    badge: 'Isolated',
+  },
+  {
+    id: 'photo_flatlay_knolling',
+    category: 'photo',
+    label: 'Flatlay & Tabletop Knolling',
+    desc: 'Sudut tegak lurus 90° overhead, rapi, ruang teks banner',
+    badge: 'Copy Space',
+  },
+  {
+    id: 'photo_macro_texture',
+    category: 'photo',
+    label: 'Macro & Extreme Close-Up',
+    desc: 'Tekstur material tajam, tetesan air, detail mikro memukau',
+    badge: 'Macro 8K',
+  },
+  {
+    id: 'photo_cinematic_narrative',
+    category: 'photo',
+    label: 'Cinematic & Film Still',
+    desc: 'Pencahayaan dramatis, anamorphic flare, suasana filmis',
+    badge: 'Sinematik',
+  },
+  {
+    id: 'photo_editorial_documentary',
+    category: 'photo',
+    label: 'Editorial & Street Candid',
+    desc: 'Jurnalistik spontan, warna alami tanpa editan berlebihan',
+    badge: 'Candid',
+  },
+  {
+    id: 'photo_interior_architecture',
+    category: 'photo',
+    label: 'Interior & Arsitektur',
+    desc: 'Garis lurus presisi, Japandi/Skandinavia, cahaya jendela luas',
+    badge: 'Interior',
+  },
+  {
+    id: 'photo_drone_aerial',
+    category: 'photo',
+    label: 'Drone & Aerial Top-Down',
+    desc: 'Sudut pandang mata burung, geometri lanskap dan tata kota',
+    badge: 'Aerial',
+  },
+
+  // 2. Ilustrasi & Grafis
+  {
+    id: 'vector_flat_isolated',
+    category: 'illustration',
+    label: 'Vector Flat - Isolated',
+    desc: 'Tepi tajam, terisolasi latar putih murni, mudah di-cutout untuk desainer',
+    badge: 'Vector SVG',
+  },
+  {
+    id: 'vector_lineart_minimal',
+    category: 'illustration',
+    label: 'Line Art & Monoline',
+    desc: 'Garis kontur bersih elegan, aksen pastel, modern boho',
+    badge: 'Line Art',
+  },
+  {
+    id: 'render_3d_isometric',
+    category: 'illustration',
+    label: '3D Isometric Render',
+    desc: 'Sudut 30°, material matte halus, ikonik untuk tech & SaaS',
+    badge: '3D Render',
+  },
+  {
+    id: 'render_3d_clay_glass',
+    category: 'illustration',
+    label: '3D Clay & Glassmorphism',
+    desc: 'Kaca buram transparan, gradien lembut, bentuk clay lucu',
+    badge: 'Clay 3D',
+  },
+  {
+    id: 'art_watercolor_handdrawn',
+    category: 'illustration',
+    label: 'Watercolor Cat Air',
+    desc: 'Sapuan kuas cat air lembut, tekstur kertas basah, organik',
+    badge: 'Artisan',
+  },
+  {
+    id: 'art_vintage_engraving',
+    category: 'illustration',
+    label: 'Vintage Engraving & Woodcut',
+    desc: 'Arsiran klasik tembaga/buku tua, gaya ukiran retro monokrom',
+    badge: 'Vintage',
+  },
+  {
+    id: 'graphic_sticker_clipart',
+    category: 'illustration',
+    label: 'Sticker & Clipart Pack',
+    desc: 'Die-cut border putih tebal, warna cerah, siap cetak',
+    badge: 'Sticker',
+  },
+  {
+    id: 'graphic_infographic_asset',
+    category: 'illustration',
+    label: 'Infographic & Diagram',
+    desc: 'Bagan visual terstruktur, ikon bisnis tajam, korporat',
+    badge: 'Infografis',
+  },
+];
+
+export function getVisualDirectionLabel(id: string): string {
+  const found = VISUAL_DIRECTION_LIST.find((v) => v.id === id);
+  if (found) return found.label;
+  if (id === 'photorealistic') return 'Foto Komersial (Legacy)';
+  if (id === '3d_render') return '3D Render (Legacy)';
+  if (id === 'vector') return 'Vektor (Legacy)';
+  if (id === 'cinematic') return 'Sinematik (Legacy)';
+  if (id === 'editorial') return 'Editorial (Legacy)';
+  return id || 'Auto';
+}
 
 export const CREATIVE_FOCUS_LABELS: Record<string, string> = {
   composition_lighting: 'Komposisi & Pencahayaan Komersial',
@@ -197,6 +391,31 @@ export function buildVCPAPromptInstruction(params: {
   const { mode, brief, visualDna, settings } = params;
   const count = Math.min(Math.max(settings.count, 1), 50);
 
+  const twistsBlock =
+    settings.selectedTwists && settings.selectedTwists.length > 0
+      ? `\n=== USER SELECTED CREATIVE COMBINATIONS & TWISTS (MUST INTEGRATE) ===\n` +
+        settings.selectedTwists.map((t, i) => `${i + 1}. ${t}`).join('\n') +
+        `\nCRITICAL: Tastefully blend and harmonize these user-selected creative twists into the concepts generated for this reference image.\n`
+      : '';
+
+  let visualDirectionInstruction = '';
+  if (settings.visualDirection === 'agent_decide') {
+    visualDirectionInstruction = `Visual Direction: AGENT DECIDE (AUTO-ANALYZE)
+- Carefully examine the subject matter, texture, and composition.
+- Automatically diagnose whether Photography (e.g. Commercial Lifestyle, Studio Isolated, Flatlay, Macro) or Illustration (e.g. Vector Flat Isolated, 3D Isometric, Line Art, Watercolor) provides the HIGHEST COMMERCIAL VALUE and buyer demand on microstock agencies.
+- State your chosen visual style clearly in 'creativeStrategy' and reflect it concretely in each prompt.`;
+  } else if (settings.visualDirection === 'smart_random') {
+    visualDirectionInstruction = `Visual Direction: SMART VARIETY PACK (MULTI-STYLE MIX)
+- Generate a diverse, balanced series across the ${count} prompt concepts.
+- Do NOT use the exact same visual angle for every card. Distribute distinct complementary sub-genres across the batch (e.g. Card 1: Hero Commercial Lifestyle; Card 2: Overhead Flatlay with copy space; Card 3: Macro Texture Detail; Card 4: Studio Product Isolated on white; Card 5: Editorial Candid).
+- Mention the chosen sub-genre in each card's 'creativeStrategy'.`;
+  } else {
+    const dirLabel = getVisualDirectionLabel(settings.visualDirection);
+    const dirSuffix = VISUAL_DIRECTION_SUFFIXES[settings.visualDirection] || '';
+    visualDirectionInstruction = `Visual Direction: ${dirLabel} (${settings.visualDirection})
+Style characteristics to embody: ${dirSuffix || settings.visualDirection}`;
+  }
+
   let contextIntro = '';
   if (mode === 'reference_to_prompt') {
     if (visualDna) {
@@ -215,7 +434,8 @@ ${safeDna.semanticProfile?.metaphor ? `Metaphors: ${safeStr(safeDna.semanticProf
 Similarity Level: ${settings.similarity}% (0 = wide creative exploration while preserving core essence; 100 = strict visual fidelity to subject and style).
 Semantic Preservation Mode: ${settings.semanticMode}
 ${brief ? `User's Additional Creative Exploration / Focus Request: "${brief}"` : ''}
-Visual Direction: ${settings.visualDirection}`;
+${twistsBlock}
+${visualDirectionInstruction}`;
     } else {
       contextIntro = `=== ATTACHED REFERENCE IMAGE ANALYSIS & VISUAL DNA REMIX (MODE 1) ===
 The user has attached an image as the primary visual reference (Anchor).
@@ -231,6 +451,7 @@ Thoroughly examine the attached image pixels and extract its full Visual DNA int
 YOUR MANDATORY SECOND STEP:
 Generate ${count} distinct commercial stock image prompt concepts grounded in the reference image's visual DNA.
 ${brief ? `User's Creative Direction / Exploration Focus: "${brief}"` : 'Deconstruct the reference image directly and generate diverse commercial microstock variations.'}
+${twistsBlock}
 Similarity Level: ${settings.similarity}% (${
         settings.similarity < 40
           ? 'Creative Departure: Retain only core mood/essence, freely explore new subjects, settings, and lighting'
@@ -245,13 +466,14 @@ Semantic Preservation Mode: ${
           ? 'Visual Replication (Replicate physical visual features, materials, and composition closely)'
           : 'Free Ideation (Creative exploration sparked by the reference image)'
       }.
-Visual Direction: ${settings.visualDirection}`;
+${visualDirectionInstruction}`;
     }
   } else {
     contextIntro = `=== CREATIVE BRIEF (TEXT-ONLY IDEATION) ===
 User Brief: "${brief || 'Versatile modern commercial concept'}"
 Creative Focus: ${CREATIVE_FOCUS_LABELS[settings.creativeFocus] || settings.creativeFocus}
-Visual Direction: ${settings.visualDirection}`;
+${twistsBlock}
+${visualDirectionInstruction}`;
   }
 
   return `You are VCPA (Visual Concept Prompt Agent), an elite AI art director and prompt composer for commercial microstock and top-tier AI image generators (Midjourney, FLUX, SDXL).

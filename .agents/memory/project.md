@@ -76,6 +76,12 @@
    - Menghasilkan batch N prompt beragam secara konseptual (1, 5, 10, 20) dengan slider kemiripan (0–100%) dan preservasi makna.
    - Format sintaks otomatis untuk Midjourney v6.1, FLUX.1, dan SDXL.
    - Feed kartu prompt interaktif dengan edit inline, regenerasi kartu tunggal, favorit, serta ekspor batch ke TXT & JSON.
+6. **Adobe Stock QC Inspector Module**:
+   - Asisten kendali mutu pra-submit mandiri untuk aset still image (JPEG & PNG transparan).
+   - *Deterministic Preflight Engine*: Memvalidasi batasan teknis mutlak (resolusi minimum 4 MP, maksimum 100 MP, ukuran maksimum 45 MB, dan transparansi alpha PNG) di browser tanpa kuota AI.
+   - *VLM Inspection*: Integrasi Dual-Cluster GAS Proxy untuk menganalisis cacat visual AI (anatomi, distorsi, floating objects), bintik debu sensor (*sensor dust spots*), horizon miring (*tilted horizons*), pemotongan canggung (*awkward crop*), artefak pengeditan/penajaman, dan teks/merk liar (OCR).
+   - *Known Restrictions Watchlist*: Pencocokan otomatis terhadap 40+ item/merek/landmark terlarang resmi Adobe Stock.
+   - *Deterministic Decision Engine*: Mengeluarkan keputusan objektif (`BLOCK`, `REVIEW`, `READY`) dengan bukti visual, alasan regulasi, dan tombol 1-klik handoff ke Studio atau Antrean Upload FTP.
 
 ## Project Conventions
 - **Path Aliasing**: `@/*` dipetakan ke root proyek (contoh: `@/lib/types`, `@/components/ui/button`).
@@ -94,5 +100,6 @@
 
 ## Current Milestone
 - Status stabil dan *production hardened*.
-- Seluruh 18 pengujian unit (Vitest) berhasil lulus (100% pass).
-- Server pengembangan berjalan aktif di `http://localhost:3000`.
+- Seluruh 118 pengujian unit (Vitest) berhasil lulus (100% pass).
+- Live production deployment aktif di Cloudflare Pages: [https://meta-gen-gue.pages.dev](https://meta-gen-gue.pages.dev).
+- Server pengembangan lokal berjalan aktif di `http://localhost:3000`.

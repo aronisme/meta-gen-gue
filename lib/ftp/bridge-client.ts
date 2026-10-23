@@ -163,3 +163,118 @@ export function useFtpBridgeStatus() {
     bridgeUrl: status.baseUrl || getStoredBridgeUrl(),
   };
 }
+
+export interface DiscoveredFlowFile {
+  filename: string;
+  fullPath: string;
+  sessionFolder: string;
+  sizeBytes: number;
+  lastModified: number;
+  resolutionTag: '4K' | '2K' | '1K';
+  streamUrl: string;
+}
+
+export interface FlowDownloadsScanResult {
+  ok: boolean;
+  flowRootDir: string;
+  sessions: { sessionFolder: string; count: number; mtime: number }[];
+  files: DiscoveredFlowFile[];
+  error?: string;
+}
+
+/**
+ * Memindai file unduhan Google Flow di disk lokal melalui local bridge (port 45678)
+ */
+export async function scanFlowDownloads(
+  sessionFolder?: string,
+  customBridgeUrl?: string
+): Promise<FlowDownloadsScanResult> {
+  const baseUrl = (customBridgeUrl || getStoredBridgeUrl() || DEFAULT_BRIDGE_URL).replace(/\/+$/, '');
+  const url = new URL(`${baseUrl}/api/local/scan-flow-downloads`);
+  if (sessionFolder && sessionFolder.trim()) {
+    url.searchParams.set('sessionFolder', sessionFolder.trim());
+  }
+
+  try {
+    const res = await fetch(url.toString(), {
+      method: 'GET',
+      headers: { Accept: 'application/json' },
+    });
+    if (!res.ok) {
+      const errJson = await res.json().catch(() => ({}));
+      return {
+        ok: false,
+        flowRootDir: '',
+        sessions: [],
+        files: [],
+        error: errJson.error || `HTTP ${res.status}: Gagal memindai folder lokal`,
+      };
+    }
+    return await res.json();
+  } catch (err) {
+    return {
+      ok: false,
+      flowRootDir: '',
+      sessions: [],
+      files: [],
+      error: err instanceof Error ? err.message : String(err),
+    };
+  }
+}
+
+/**
+ * Mengonversi file lokal dari stream bridge menjadi native browser File object
+ */
+export async function fetchLocalFileAsBrowserFile(
+  discoveredFile: DiscoveredFlowFile
+): Promise<File> {
+  const res = await fetch(discoveredFile.streamUrl);
+  if (!res.ok) {
+    throw new Error(`Gagal mengambil stream file "${discoveredFile.filename}": HTTP ${res.status}`);
+  }
+  const blob = await res.blob();
+  const mimeType = res.headers.get('content-type') || 'image/jpeg';
+  const file = new File([blob], discoveredFile.filename, {
+    type: mimeType,
+    lastModified: discoveredFile.lastModified || Date.now(),
+  });
+  // Pasangkan path disk lokal asli ke objek file
+  if (discoveredFile.fullPath) {
+    (file as unknown as { filePath: string }).filePath = discoveredFile.fullPath;
+  }
+  return file;
+}
+
+export interface FindLocalFileResult {
+  ok: boolean;
+  found: boolean;
+  fullPath?: string;
+  filename?: string;
+  sizeBytes?: number;
+  lastModified?: number;
+}
+
+/**
+ * Mencari path absolut file lokal melalui backend bridge port 45678
+ */
+export async function findLocalFile(
+  filename: string,
+  customBridgeUrl?: string
+): Promise<FindLocalFileResult | null> {
+  if (!filename || typeof filename !== 'string') return null;
+  const baseUrl = (customBridgeUrl || getStoredBridgeUrl() || DEFAULT_BRIDGE_URL).replace(/\/+$/, '');
+  const url = new URL(`${baseUrl}/api/local/find-file`);
+  url.searchParams.set('filename', filename.trim());
+
+  try {
+    const res = await fetch(url.toString(), {
+      method: 'GET',
+      headers: { Accept: 'application/json' },
+    });
+    if (!res.ok) return null;
+    return await res.json();
+  } catch {
+    return null;
+  }
+}
+

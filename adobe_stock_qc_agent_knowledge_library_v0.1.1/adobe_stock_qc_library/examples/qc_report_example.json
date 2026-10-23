@@ -1,0 +1,93 @@
+{
+  "schema_version": "0.1.0",
+  "asset_id": "example_asset_001",
+  "file_name": "example.png",
+  "asset_type": "transparent_png",
+  "decision": "REVIEW",
+  "decision_summary": "Technical preflight passes; two visual checks need human confirmation. This is an example, not an actual inspection.",
+  "technical": {
+    "format": "PNG",
+    "width_px": 3000,
+    "height_px": 3000,
+    "megapixels": 9.0,
+    "file_size_bytes": 4200000,
+    "icc_profile": "sRGB",
+    "has_alpha": true,
+    "checks_run": [
+      "format",
+      "dimensions",
+      "file_size",
+      "alpha_channel"
+    ]
+  },
+  "checks": [
+    {
+      "check_id": "VQ-PNG-ALPHA",
+      "rule_id": "AS-PNG-002",
+      "status": "REVIEW",
+      "severity": "MEDIUM",
+      "confidence": 0.78,
+      "confidence_calibrated": false,
+      "source_class": "official_adobe",
+      "source_ids": [
+        "ADOBE_PNG_TECH",
+        "ADOBE_PNG_BEST"
+      ],
+      "evidence_type": "crop",
+      "region": {
+        "x": 0.12,
+        "y": 0.74,
+        "width": 0.27,
+        "height": 0.19
+      },
+      "observation": "Possible light matte fringe visible on the subject edge when composited on dark background.",
+      "why_it_matters": "Transparent assets should isolate cleanly without visible edge contamination.",
+      "suggested_action": "Inspect edge crop at 100% and verify against dark/light backgrounds before editing.",
+      "requires_human_review": true
+    },
+    {
+      "check_id": "VQ-ANATOMY-HANDS",
+      "rule_id": "AS-VIS-004",
+      "status": "PASS",
+      "severity": "INFO",
+      "confidence": 0.83,
+      "confidence_calibrated": false,
+      "source_class": "official_adobe",
+      "source_ids": [
+        "ADOBE_GENAI_FAQ"
+      ],
+      "evidence_type": "crop",
+      "region": null,
+      "observation": "No clear unintended hand defect found in the inspected regions.",
+      "why_it_matters": "AI content requires review of accurate anatomy and proportions.",
+      "suggested_action": "None; note that no detection is not proof of perfection.",
+      "requires_human_review": false
+    }
+  ],
+  "provenance": {
+    "is_generative_ai": true,
+    "tool_name": null,
+    "model_name": null,
+    "prompt_available": false,
+    "license_status": "unknown",
+    "people_property_status": "unknown",
+    "model_release_status": "unknown",
+    "property_release_status": "unknown"
+  },
+  "metadata_review": {
+    "title": null,
+    "keywords": [],
+    "claims_to_verify": [
+      "AI tool/license not provided",
+      "whether any identifiable person/property is depicted"
+    ],
+    "suspected_prohibited_terms": []
+  },
+  "limitations": [
+    "Synthetic example only; no real image was evaluated.",
+    "Similarity checks are excluded.",
+    "Review status is not a prediction of Adobe's final decision."
+  ],
+  "policy_version": "0.1.0",
+  "reviewed_at": "2026-10-22T12:00:00Z"
+}

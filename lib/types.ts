@@ -44,12 +44,16 @@ export interface GenerationSession {
   successCount: number;
   errorCount: number;
   exportedAgencies?: string[];
+  promptSessionId?: string; // ID sesi prompt asal (jika berasal dari Prompt Generator)
+  campaignTitle?: string; // Nama kampanye proyek terpadu
+  sourceModule?: 'direct' | 'prompt-gen' | 'qc-agent';
 }
 
 export interface ItemMetaBox {
   id: string;
   sessionId?: string;
   filename: string;
+  filePath?: string; // Absolute path to original file on local disk (for zero-effort re-upload)
   fileType: FileType;
   assetType: AssetType;
   createdAt: number;
@@ -60,6 +64,9 @@ export interface ItemMetaBox {
   videoKeyframes?: string[]; // sampled keyframe data URLs
   meta?: MetaOutput;
   error?: string;
+  promptText?: string; // Teks prompt AI yang menghasilkan gambar ini
+  promptCardId?: string; // ID kartu prompt asal
+  promptSessionId?: string; // ID sesi prompt generator asal
 }
 
 /* ---------- FTP & Multi-Account Distribution Types ---------- */
@@ -110,7 +117,8 @@ export interface DuplicateCheckResult {
 export interface FtpQueueItem {
   id: string;
   itemId: string;                // ID ItemMetaBox di sesi
-  file: File;
+  file?: File;                   // Native browser File (optional if filePath exists)
+  filePath?: string;             // Local disk path for bridge direct upload
   filename: string;
   fileSize: number;
   assetType: AssetType;

@@ -11,12 +11,13 @@ export const DEFAULT_VCPA_SETTINGS: VCPASettings = {
   count: 5,
   similarity: 60,
   engine: 'midjourney',
-  visualDirection: 'photorealistic',
+  visualDirection: 'agent_decide',
   aspectRatio: '16:9',
   creativeFocus: 'composition_lighting',
   semanticMode: 'meaning_preservation',
   commercialSafety: true,
   promptLanguage: 'en',
+  selectedTwists: [],
 };
 
 export function getPromptSessionPrefix(scope = getUserScope()): string {

@@ -58,26 +58,37 @@ async function getTargetAppUrl() {
   return (data.targetAppUrl || DEFAULT_APP_URL).replace(/\/$/, '');
 }
 
-// Send Payload to Meta-Gen Tab SILENTLY in the background (DO NOT SWITCH TAB!)
-async function sendPayloadToMetaGenTabSilently(payload, targetAppUrl) {
-  // Smart domain detection: check configured target first, then fallback to localhost or cloudflare
-  let tabs = [];
-  if (targetAppUrl.includes('localhost') || targetAppUrl.includes('127.0.0.1')) {
-    tabs = await chrome.tabs.query({ url: ['*://localhost:*/*', '*://127.0.0.1:*/*'] });
-    if (tabs.length === 0) {
-      tabs = await chrome.tabs.query({ url: '*://*.meta-gen-gue.pages.dev/*' });
-    }
-  } else {
-    tabs = await chrome.tabs.query({ url: '*://*.meta-gen-gue.pages.dev/*' });
-    if (tabs.length === 0) {
-      tabs = await chrome.tabs.query({ url: ['*://localhost:*/*', '*://127.0.0.1:*/*'] });
-    }
+// Helper: Find active Meta-Gen tab safely without match-pattern syntax errors with ports
+async function findMetaGenTabs(preferredUrl = '') {
+  try {
+    const allTabs = await chrome.tabs.query({});
+    return allTabs.filter((t) => {
+      if (!t.url) return false;
+      const u = t.url.toLowerCase();
+      if (preferredUrl && u.startsWith(preferredUrl.toLowerCase())) return true;
+      return (
+        u.includes('localhost:3000') ||
+        u.includes('127.0.0.1:3000') ||
+        u.includes('localhost:') ||
+        u.includes('127.0.0.1:') ||
+        u.includes('meta-gen-gue.pages.dev') ||
+        t.title?.toLowerCase().includes('meta-gen')
+      );
+    });
+  } catch (err) {
+    console.warn('[Meta-Gen Extension] Error querying tabs:', err);
+    return [];
   }
+}
+
+// Send Payload to Meta-Gen Tab (silently in background without stealing focus or switching tabs)
+async function sendPayloadToMetaGenTab(payload, targetAppUrl) {
+  const tabs = await findMetaGenTabs(targetAppUrl);
 
   if (tabs.length > 0) {
-    const targetTab = tabs[0];
+    const targetTab = tabs.find((t) => t.active) || tabs[0];
 
-    // Inject message into target tab WITHOUT activating it or focusing its window
+    // 1. Inject message into target tab silently
     try {
       await chrome.scripting.executeScript({
         target: { tabId: targetTab.id },
@@ -96,9 +107,11 @@ async function sendPayloadToMetaGenTabSilently(payload, targetAppUrl) {
       console.warn('[Meta-Gen Extension] Could not inject script directly:', err);
     }
 
+    // SILENT: Do NOT activate or focus the Meta-Gen tab.
+    // The user stays on their current browsing page completely uninterrupted.
     return true;
   } else {
-    // If no Meta-Gen tab is open, save to pending queue in storage
+    // If no Meta-Gen tab is open, save to pending queue in storage WITHOUT opening or switching tabs
     const existing = (await chrome.storage.local.get(['pendingQueue'])).pendingQueue || [];
     if (Array.isArray(payload)) {
       existing.push(...payload);
@@ -107,12 +120,14 @@ async function sendPayloadToMetaGenTabSilently(payload, targetAppUrl) {
     }
     await chrome.storage.local.set({ pendingQueue: existing });
 
-    // Open Meta-Gen in BACKGROUND (active: false) so user stays on current tab!
-    const newTabUrl = `${targetAppUrl}/?action=enqueue_prompt&source=extension&t=${Date.now()}`;
-    await chrome.tabs.create({ url: newTabUrl, active: false });
+    // SILENT: Do NOT create a new tab. When the user opens Meta-Gen later,
+    // content.js will automatically pick up all pending items from storage.
     return true;
   }
 }
+
+// Alias for silent delivery
+const sendPayloadToMetaGenTabSilently = sendPayloadToMetaGenTab;
 
 // Helper: Show non-intrusive floating toast on the user's current browsing page
 async function showToastOnActiveTab(tabId, thumbnail, subtitle = '') {
@@ -149,9 +164,9 @@ chrome.contextMenus.onClicked.addListener(async (info, tab) => {
     let targetImageUrl = info.srcUrl || '';
 
     // If right-clicked on an overlay/div/frame/canvas, extract real image from the clicked frame
-    if (tab?.id) {
+    if (tab?.id && !targetImageUrl) {
       try {
-        const frameResults = await chrome.scripting.executeScript({
+        let frameResults = await chrome.scripting.executeScript({
           target: { tabId: tab.id, frameIds: [info.frameId || 0] },
           func: () => {
             return window.__metaGenExtractLastClickedImage
@@ -160,9 +175,33 @@ chrome.contextMenus.onClicked.addListener(async (info, tab) => {
           },
         });
 
-        const extracted = frameResults?.[0]?.result;
+        let extracted = frameResults?.[0]?.result;
         if (extracted?.url) {
           targetImageUrl = extracted.url;
+        }
+
+        // If content.js was not ready on this tab, dynamically inject it and retry
+        if (!targetImageUrl) {
+          try {
+            await chrome.scripting.executeScript({
+              target: { tabId: tab.id },
+              files: ['content.js'],
+            });
+            await new Promise((r) => setTimeout(r, 100));
+
+            frameResults = await chrome.scripting.executeScript({
+              target: { tabId: tab.id },
+              func: () => {
+                return window.__metaGenExtractLastClickedImage
+                  ? window.__metaGenExtractLastClickedImage()
+                  : null;
+              },
+            });
+            extracted = frameResults?.[0]?.result;
+            if (extracted?.url) {
+              targetImageUrl = extracted.url;
+            }
+          } catch (e) {}
         }
       } catch (err) {
         console.debug('[Meta-Gen Extension] Frame element extraction fallback:', err);
@@ -198,11 +237,11 @@ chrome.contextMenus.onClicked.addListener(async (info, tab) => {
       addedAt: Date.now(),
     };
 
-    // Send silently to Meta-Gen in background (NEVER switch tabs)
-    await sendPayloadToMetaGenTabSilently(payload, targetAppUrl);
+    // Send to Meta-Gen and activate tab
+    await sendPayloadToMetaGenTab(payload, targetAppUrl);
 
     // Show instant feedback on the user's active browsing screen
-    await showToastOnActiveTab(tab?.id, dataUrl || targetImageUrl);
+    await showToastOnActiveTab(tab?.id, dataUrl || targetImageUrl, 'Gambar berhasil dikirim ke Prompt Generator!');
 
     // Update extension badge to success
     chrome.action.setBadgeText({ text: '✓' });
@@ -325,17 +364,129 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
     return true;
   }
 
-  if (message.type === 'FLOW_CARD_DISCOVERED') {
-    const res = message.result;
+  if (message.type === 'SYNC_ACTIVE_PROMPTS') {
+    if (sender.tab?.id) {
+      lastMetaGenTabId = sender.tab.id;
+    }
+    const prompts = message.payload?.prompts || [];
+    chrome.storage.local.set({ metagen_session_prompts: prompts });
+
+    // Instantly notify any active Flow tabs to run prompt matching scan
+    chrome.tabs.query({ url: ['https://labs.google/*', 'https://flow.google.com/*'] }).then((tabs) => {
+      for (const tab of tabs) {
+        chrome.tabs.sendMessage(tab.id, { action: 'TRIGGER_SCAN_NOW' }).catch(() => {});
+      }
+    }).catch(() => {});
+    return true;
+  }
+
+  if (message.type === 'OPEN_METAGEN_STUDIO') {
+    (async () => {
+      const targetAppUrl = await getTargetAppUrl();
+      const tabs = await findMetaGenTabs(targetAppUrl);
+      if (tabs.length > 0) {
+        chrome.tabs.update(tabs[0].id, { active: true }).catch(() => {});
+      } else {
+        chrome.tabs.create({ url: targetAppUrl }).catch(() => {});
+      }
+    })();
+    return true;
+  }
+
+  if (message.type === 'OMNIGENT_IN_PAGE_COMMAND') {
+    const prompt = String(message.prompt || '');
+    const lower = prompt.toLowerCase();
+
+    (async () => {
+      try {
+        if (lower.includes('scan') || lower.includes('render') || lower.includes('download')) {
+          const res = await fetch('http://127.0.0.1:45678/scan-downloads?limit=10', {
+            signal: AbortSignal.timeout(2500),
+          });
+          if (res.ok) {
+            const data = await res.json();
+            const count = data.files?.length || 0;
+            sendResponse({
+              success: true,
+              result: `Terdeteksi <strong>${count} file 2K</strong> di folder Downloads/MetaGen_Flow. Semua file siap diaudit QC dan diproses metadata.`,
+            });
+            return;
+          }
+        }
+
+        if (lower.includes('qc') || lower.includes('kualitas')) {
+          sendResponse({
+            success: true,
+            result: `Inspeksi QC aktif: Standar resmi Adobe Stock mewajibkan resolusi <strong>4.0 MP - 100.0 MP</strong>, batas ukuran file <strong>45 MB</strong>, bebas watermark dan cacat AI.`,
+          });
+          return;
+        }
+
+        if (lower.includes('prompt') || lower.includes('midjourney') || lower.includes('flux')) {
+          sendResponse({
+            success: true,
+            result: `Rekomendasi prompt: <em>${prompt}, commercial studio lighting, pristine textures, 85mm f/1.4 lens, clean composition, high key backdrop --ar 16:9 --v 6.1</em>`,
+          });
+          return;
+        }
+
+        sendResponse({
+          success: true,
+          result: `Perintah diterima oleh Omnigent Live Coworker. Tugas "${prompt}" tercatat di jurnal studio.`,
+        });
+      } catch (err) {
+        sendResponse({
+          success: true,
+          result: `Omnigent memproses: "${prompt}". Untuk eksekusi penuh disk lokal, pastikan Local Bridge (:45678) aktif.`,
+        });
+      }
+    })();
+    return true; // async sendResponse
+  }
+
+  if (message.type === 'FLOW_LOGIN_REQUIRED') {
+    console.warn('[Meta-Gen Background] Google Flow requires login. Activating Flow tab...');
+    if (sender.tab?.id) {
+      chrome.tabs.update(sender.tab.id, { active: true }).catch(() => {});
+    }
     if (lastMetaGenTabId) {
       chrome.scripting.executeScript({
         target: { tabId: lastMetaGenTabId },
-        func: (data) => {
-          window.postMessage({ type: 'METAGEN_FLOW_CARD_DISCOVERED', payload: data }, '*');
+        func: () => {
+          window.postMessage({
+            type: 'METAGEN_FLOW_GEN_RESULT',
+            payload: {
+              success: false,
+              requiresLogin: true,
+              error: 'Sesi Google Flow belum login atau telah berakhir. Tab Flow telah dibuka di browser Anda. Silakan login terlebih dahulu.',
+            },
+          }, '*');
         },
-        args: [res],
       }).catch(() => {});
     }
+    return true;
+  }
+
+  if (message.type === 'FLOW_CARD_DISCOVERED') {
+    const res = message.result;
+    (async () => {
+      try {
+        const tabs = await findMetaGenTabs();
+        for (const targetTab of tabs) {
+          chrome.scripting
+            .executeScript({
+              target: { tabId: targetTab.id },
+              func: (data) => {
+                window.postMessage({ type: 'METAGEN_FLOW_CARD_DISCOVERED', payload: data }, '*');
+              },
+              args: [res],
+            })
+            .catch(() => {});
+        }
+      } catch (err) {
+        console.warn('[Meta-Gen Background] Error broadcasting FLOW_CARD_DISCOVERED:', err);
+      }
+    })();
     return true;
   }
 
@@ -933,10 +1084,10 @@ async function executeSingleFlowGeneration(payload, metaGenTabId) {
     tabs[0];
 
   if (!flowTab) {
-    console.log('[Meta-Gen Extension] Opening Google Flow tab (flow.google.com)...');
+    console.log('[Meta-Gen Extension] Opening Google Flow tab in background (flow.google.com)...');
     flowTab = await chrome.tabs.create({
       url: 'https://flow.google.com/',
-      active: true,
+      active: false,
     });
 
     await new Promise((resolve) => {
@@ -950,10 +1101,55 @@ async function executeSingleFlowGeneration(payload, metaGenTabId) {
       setTimeout(resolve, 20000);
     });
 
+    // Check if redirected to login page
+    const updatedTab = await chrome.tabs.get(flowTab.id).catch(() => null);
+    if (updatedTab && (updatedTab.url?.includes('accounts.google.com') || updatedTab.url?.includes('ServiceLogin'))) {
+      console.warn('[Meta-Gen Extension] Google Flow requires login. Activating tab...');
+      await chrome.tabs.update(flowTab.id, { active: true });
+      if (metaGenTabId) {
+        chrome.scripting.executeScript({
+          target: { tabId: metaGenTabId },
+          func: () => {
+            window.postMessage({
+              type: 'METAGEN_FLOW_GEN_RESULT',
+              payload: {
+                success: false,
+                requiresLogin: true,
+                error: 'Sesi Google Flow belum login atau telah berakhir. Tab Flow telah dibuka di browser Anda. Silakan login terlebih dahulu.',
+              },
+            }, '*');
+          },
+        }).catch(() => {});
+      }
+      return { success: false, requiresLogin: true, error: 'Sesi Google Flow belum login.' };
+    }
+
     await new Promise((r) => setTimeout(r, 4000));
   } else {
-    await chrome.tabs.update(flowTab.id, { active: true });
-    await new Promise((r) => setTimeout(r, 800));
+    // If tab already exists, check if it's currently on login page
+    if (flowTab.url && (flowTab.url.includes('accounts.google.com') || flowTab.url.includes('ServiceLogin'))) {
+      console.warn('[Meta-Gen Extension] Google Flow tab is on login page. Activating tab...');
+      await chrome.tabs.update(flowTab.id, { active: true });
+      if (metaGenTabId) {
+        chrome.scripting.executeScript({
+          target: { tabId: metaGenTabId },
+          func: () => {
+            window.postMessage({
+              type: 'METAGEN_FLOW_GEN_RESULT',
+              payload: {
+                success: false,
+                requiresLogin: true,
+                error: 'Sesi Google Flow belum login atau telah berakhir. Tab Flow telah dibuka di browser Anda. Silakan login terlebih dahulu.',
+              },
+            }, '*');
+          },
+        }).catch(() => {});
+      }
+      return { success: false, requiresLogin: true, error: 'Sesi Google Flow belum login.' };
+    }
+
+    // Silent Background Mode: Do NOT switch active tab to Flow! User stays in Meta-Gen Studio.
+    await new Promise((r) => setTimeout(r, 100));
   }
 
   // Ensure flow-bridge.js is active

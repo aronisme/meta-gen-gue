@@ -2,7 +2,7 @@
 
 import { memo, useMemo, useState } from 'react';
 import { Input } from '@/components/ui/input';
-import { Download, Search, CheckSquare, Square, Trash2, History, FolderOpen, Layers } from 'lucide-react';
+import { Download, Search, CheckSquare, Square, Trash2, History, FolderOpen, Layers, Upload, Sparkles } from 'lucide-react';
 import { MetadataItem } from '@/components/MetadataItem';
 import { downloadAgencyCSV, type Agency } from '@/lib/csv';
 import type { ItemMetaBox, MetaOutput, GenerationSession } from '@/lib/types';
@@ -26,6 +26,9 @@ interface HistoryCardProps {
   sessions?: GenerationSession[];
   onLoadSession?: (session: GenerationSession) => void;
   onDeleteSession?: (sessionId: string) => void;
+  onSendSessionToUpload?: (session: GenerationSession) => void;
+  onSendToUpload?: (items: ItemMetaBox[]) => void;
+  onOpenPromptSession?: (promptSessionId: string) => void;
 }
 
 const AGENCIES: { key: Agency; label: string }[] = [
@@ -55,6 +58,9 @@ function HistoryCardComponent({
   sessions = [],
   onLoadSession,
   onDeleteSession,
+  onSendSessionToUpload,
+  onSendToUpload,
+  onOpenPromptSession,
 }: HistoryCardProps) {
   const [historyMode, setHistoryMode] = useState<'sessions' | 'files'>('sessions');
   const [searchQuery, setSearchQuery] = useState('');
@@ -172,6 +178,19 @@ function HistoryCardComponent({
                     <span>Hapus Terpilih</span>
                   </button>
                 )}
+                {selectedCount > 0 && onSendToUpload && (
+                  <button
+                    onClick={() => {
+                      const selectedItems = items.filter((i) => selectedIds.has(i.id));
+                      onSendToUpload(selectedItems);
+                    }}
+                    className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-[#22c55e] hover:bg-[#16a34a] text-white border-2 border-[#2c1810] shadow-[2px_2px_0_#2c1810] font-bold text-xs cursor-pointer transition-all"
+                    title="Kirim item terpilih ke antrean FTP Upload"
+                  >
+                    <Upload className="w-3.5 h-3.5" />
+                    <span>Kirim ke Antrean ({selectedCount})</span>
+                  </button>
+                )}
               </>
             )}
           </div>
@@ -192,6 +211,12 @@ function HistoryCardComponent({
                     <span className="font-extrabold text-[#2c1810] text-sm sm:text-base">
                       {session.title}
                     </span>
+                    {session.promptSessionId && (
+                      <span className="text-[10px] font-black px-2 py-0.5 rounded-md border bg-amber-50 text-amber-800 border-amber-400 flex items-center gap-1 shadow-xs">
+                        <Sparkles className="w-3 h-3 text-[#ff6b35]" />
+                        <span>Prompt Gen</span>
+                      </span>
+                    )}
                     <span
                       className={`text-[10px] font-bold px-2 py-0.5 rounded-md border ${
                         session.status === 'completed'
@@ -231,6 +256,34 @@ function HistoryCardComponent({
                 </div>
 
                 <div className="flex items-center gap-2 shrink-0 flex-wrap">
+                  {onOpenPromptSession && session.promptSessionId && (
+                    <button
+                      type="button"
+                      onClick={() => onOpenPromptSession(session.promptSessionId!)}
+                      className="bg-[#fff5e6] hover:bg-[#ffe4d6] text-[#ff6b35] border-2 border-[#2c1810]
+                                 shadow-[2px_2px_0_#2c1810] hover:shadow-[1px_1px_0_#2c1810]
+                                 hover:translate-x-[1px] hover:translate-y-[1px]
+                                 font-bold text-xs py-2 px-3.5 rounded-lg flex items-center gap-1.5 cursor-pointer transition-all"
+                      title="Buka prompt aslinya di tab Prompt Generator"
+                    >
+                      <Sparkles className="w-3.5 h-3.5" />
+                      <span>Prompt Asal</span>
+                    </button>
+                  )}
+                  {onSendSessionToUpload && (
+                    <button
+                      type="button"
+                      onClick={() => onSendSessionToUpload(session)}
+                      className="bg-[#22c55e] hover:bg-[#16a34a] text-white border-2 border-[#2c1810]
+                                 shadow-[2px_2px_0_#2c1810] hover:shadow-[1px_1px_0_#2c1810]
+                                 hover:translate-x-[1px] hover:translate-y-[1px]
+                                 font-bold text-xs py-2 px-3.5 rounded-lg flex items-center gap-1.5 cursor-pointer transition-all"
+                      title="Kirim semua file dalam sesi tugas ini ke antrean FTP Upload"
+                    >
+                      <Upload className="w-3.5 h-3.5" />
+                      <span>Kirim ke Antrean</span>
+                    </button>
+                  )}
                   {onLoadSession && (
                     <button
                       type="button"

@@ -8,6 +8,7 @@
 import http from 'http';
 import fs from 'fs';
 import path from 'path';
+import os from 'os';
 import { fileURLToPath } from 'url';
 import { Readable } from 'stream';
 import { embedMetadataInFile } from './embed.mjs';
@@ -46,6 +47,58 @@ function sanitizeFtpHost(rawHost) {
   host = host.split('/')[0];
   host = host.split(':')[0];
   return host.trim();
+}
+
+/**
+ * Mencari path file lokal di disk secara cerdas:
+ * 1. Path absolut yang ada
+ * 2. Di dalam folder Downloads/MetaGen_Flow (termasuk seluruh subfolder sesi)
+ * 3. Di dalam Downloads, Desktop, dan Pictures
+ */
+function resolveLocalFilePath(input) {
+  if (!input || typeof input !== 'string') return null;
+  const trimmed = input.trim();
+
+  // 1. Jika path absolut dan file ada di disk
+  if (path.isAbsolute(trimmed) && fs.existsSync(trimmed)) {
+    try {
+      if (fs.statSync(trimmed).isFile()) return trimmed;
+    } catch {}
+  }
+
+  const filename = path.basename(trimmed);
+  const userHome = os.homedir();
+
+  // 2. Cari di dalam folder Downloads/MetaGen_Flow (dan subfoldernya)
+  const flowRootDir = path.join(userHome, 'Downloads', 'MetaGen_Flow');
+  if (fs.existsSync(flowRootDir)) {
+    try {
+      const direct = path.join(flowRootDir, filename);
+      if (fs.existsSync(direct) && fs.statSync(direct).isFile()) return direct;
+
+      const entries = fs.readdirSync(flowRootDir, { withFileTypes: true });
+      for (const entry of entries) {
+        if (entry.isDirectory()) {
+          const subPath = path.join(flowRootDir, entry.name, filename);
+          if (fs.existsSync(subPath) && fs.statSync(subPath).isFile()) return subPath;
+        }
+      }
+    } catch {}
+  }
+
+  // 3. Cari di Downloads
+  const dlPath = path.join(userHome, 'Downloads', filename);
+  if (fs.existsSync(dlPath) && fs.statSync(dlPath).isFile()) return dlPath;
+
+  // 4. Cari di Desktop
+  const deskPath = path.join(userHome, 'Desktop', filename);
+  if (fs.existsSync(deskPath) && fs.statSync(deskPath).isFile()) return deskPath;
+
+  // 5. Cari di Pictures
+  const picsPath = path.join(userHome, 'Pictures', filename);
+  if (fs.existsSync(picsPath) && fs.statSync(picsPath).isFile()) return picsPath;
+
+  return null;
 }
 
 /**
@@ -794,16 +847,12 @@ const server = http.createServer(async (req, res) => {
 
       const formData = await webReq.formData();
       const file = formData.get('file');
+      const filePath = formData.get('filePath');
       const configStr = formData.get('config');
-      const remoteFilename = formData.get('remoteFilename') || file?.name || '';
+      const remoteFilename =
+        formData.get('remoteFilename') || file?.name || (filePath ? path.basename(filePath) : '');
       const metadataStr = formData.get('metadata');
       const shouldEmbed = formData.get('embedMetadata') !== 'false';
-
-      if (!file) {
-        res.writeHead(400, { 'Content-Type': 'application/json' });
-        res.end(JSON.stringify({ ok: false, error: 'Tidak ada file yang dikirim untuk diunggah.' }));
-        return;
-      }
 
       if (!configStr) {
         res.writeHead(400, { 'Content-Type': 'application/json' });
@@ -822,8 +871,40 @@ const server = http.createServer(async (req, res) => {
 
       const slotIndex = Number(config.slotIndex) || 0;
 
-      const arrayBuf = await file.arrayBuffer();
-      let buffer = Buffer.from(arrayBuf);
+      let buffer;
+      let effectiveFilePath = null;
+
+      if (file && typeof file.arrayBuffer === 'function') {
+        const arrayBuf = await file.arrayBuffer();
+        buffer = Buffer.from(arrayBuf);
+      } else if (filePath && typeof filePath === 'string' && filePath.trim()) {
+        effectiveFilePath = resolveLocalFilePath(filePath.trim());
+        if (!effectiveFilePath || !fs.existsSync(effectiveFilePath)) {
+          res.writeHead(404, { 'Content-Type': 'application/json' });
+          res.end(
+            JSON.stringify({
+              ok: false,
+              error: `File fisik tidak ditemukan di disk lokal: ${filePath}`,
+            })
+          );
+          return;
+        }
+        buffer = await fs.promises.readFile(effectiveFilePath);
+        log(
+          'UPLOAD',
+          `[Slot #${slotIndex}] Membaca file langsung dari disk: ${effectiveFilePath} (${(buffer.length / 1024 / 1024).toFixed(2)} MB)`,
+          c.cyan
+        );
+      } else {
+        res.writeHead(400, { 'Content-Type': 'application/json' });
+        res.end(
+          JSON.stringify({
+            ok: false,
+            error: 'Tidak ada file fisik atau path lokal yang dikirim untuk diunggah.',
+          })
+        );
+        return;
+      }
 
       let isEmbedded = false;
       let embeddedFormat = null;
@@ -974,6 +1055,191 @@ const server = http.createServer(async (req, res) => {
       const msg = err instanceof Error ? err.message : String(err);
       res.writeHead(500, { 'Content-Type': 'application/json' });
       res.end(JSON.stringify({ ok: false, error: msg }));
+    }
+    return;
+  }
+
+  // 5. Local Asset Discovery: Pindai Folder Unduhan Google Flow (Downloads/MetaGen_Flow)
+  if (req.method === 'GET' && (pathname === '/api/local/scan-flow-downloads' || pathname === '/scan-flow-downloads')) {
+    try {
+      const flowRootDir = path.join(os.homedir(), 'Downloads', 'MetaGen_Flow');
+
+      if (!fs.existsSync(flowRootDir)) {
+        res.writeHead(200, { 'Content-Type': 'application/json' });
+        res.end(JSON.stringify({ ok: true, flowRootDir, sessions: [], files: [] }));
+        return;
+      }
+
+      const reqSession = url.searchParams.get('sessionFolder')?.trim();
+      const entries = fs.readdirSync(flowRootDir, { withFileTypes: true });
+      const sessionDirs = entries.filter((e) => e.isDirectory()).map((e) => e.name);
+
+      const targetSessions = reqSession && sessionDirs.includes(reqSession)
+        ? [reqSession]
+        : sessionDirs;
+
+      const sessionsSummary = [];
+      const discoveredFiles = [];
+
+      for (const sName of sessionDirs) {
+        const sPath = path.join(flowRootDir, sName);
+        let sFiles = [];
+        try {
+          sFiles = fs.readdirSync(sPath, { withFileTypes: true })
+            .filter((f) => f.isFile() && /\.(jpe?g|png|webp|gif|mp4|mov)$/i.test(f.name));
+        } catch {}
+
+        sessionsSummary.push({
+          sessionFolder: sName,
+          count: sFiles.length,
+          mtime: fs.statSync(sPath).mtimeMs,
+        });
+
+        // Kumpulkan detail file jika termasuk target
+        if (targetSessions.includes(sName)) {
+          for (const f of sFiles) {
+            const fPath = path.join(sPath, f.name);
+            const stat = fs.statSync(fPath);
+            const is2K = f.name.includes('_2K_') || f.name.toLowerCase().includes('2k');
+            const is4K = f.name.includes('_4K_') || f.name.toLowerCase().includes('4k');
+
+            discoveredFiles.push({
+              filename: f.name,
+              fullPath: fPath,
+              sessionFolder: sName,
+              sizeBytes: stat.size,
+              lastModified: stat.mtimeMs,
+              resolutionTag: is4K ? '4K' : is2K ? '2K' : '1K',
+              streamUrl: `http://127.0.0.1:${PORT}/api/local/file?path=${encodeURIComponent(fPath)}`,
+            });
+          }
+        }
+      }
+
+      // Urutkan file: yang terbaru di paling atas
+      discoveredFiles.sort((a, b) => b.lastModified - a.lastModified);
+      sessionsSummary.sort((a, b) => b.mtime - a.mtime);
+
+      res.writeHead(200, { 'Content-Type': 'application/json' });
+      res.end(JSON.stringify({
+        ok: true,
+        flowRootDir,
+        sessions: sessionsSummary,
+        files: discoveredFiles,
+      }));
+    } catch (err) {
+      log('LOCAL_SCAN', `Gagal memindai unduhan Flow: ${err.message}`, c.red);
+      res.writeHead(500, { 'Content-Type': 'application/json' });
+      res.end(JSON.stringify({ ok: false, error: err.message }));
+    }
+    return;
+  }
+
+  // 6. Local Media Streamer: Sajikan file langsung ke browser UI (<img> / fetch blob)
+  if (req.method === 'GET' && (pathname === '/api/local/file' || pathname === '/local-file')) {
+    const rawPath = url.searchParams.get('path');
+    if (!rawPath) {
+      res.writeHead(400, { 'Content-Type': 'application/json' });
+      res.end(JSON.stringify({ ok: false, error: 'Parameter path wajib disertakan.' }));
+      return;
+    }
+
+    try {
+      const targetPath = path.resolve(rawPath);
+      const userHome = os.homedir();
+
+      // Keamanan path traversal: Pastikan path berada dalam ruang folder pengguna
+      if (!targetPath.toLowerCase().startsWith(userHome.toLowerCase())) {
+        res.writeHead(403, { 'Content-Type': 'application/json' });
+        res.end(JSON.stringify({ ok: false, error: 'Akses ditolak: Path di luar direktori pengguna.' }));
+        return;
+      }
+
+      if (!fs.existsSync(targetPath) || !fs.statSync(targetPath).isFile()) {
+        res.writeHead(404, { 'Content-Type': 'application/json' });
+        res.end(JSON.stringify({ ok: false, error: 'File tidak ditemukan di disk lokal.' }));
+        return;
+      }
+
+      const stat = fs.statSync(targetPath);
+      const ext = path.extname(targetPath).toLowerCase();
+      const mimeMap = {
+        '.jpg': 'image/jpeg',
+        '.jpeg': 'image/jpeg',
+        '.png': 'image/png',
+        '.webp': 'image/webp',
+        '.gif': 'image/gif',
+        '.svg': 'image/svg+xml',
+        '.mp4': 'video/mp4',
+        '.mov': 'video/quicktime',
+        '.webm': 'video/webm',
+      };
+      const contentType = mimeMap[ext] || 'application/octet-stream';
+
+      // Dukungan HTTP Range header (berguna untuk scrubbing video/audio)
+      const range = req.headers.range;
+      if (range) {
+        const parts = range.replace(/bytes=/, '').split('-');
+        const start = parseInt(parts[0], 10);
+        const end = parts[1] ? parseInt(parts[1], 10) : stat.size - 1;
+        const chunkSize = end - start + 1;
+        const fileStream = fs.createReadStream(targetPath, { start, end });
+
+        res.writeHead(206, {
+          'Content-Range': `bytes ${start}-${end}/${stat.size}`,
+          'Accept-Ranges': 'bytes',
+          'Content-Length': chunkSize,
+          'Content-Type': contentType,
+        });
+        fileStream.pipe(res);
+      } else {
+        res.writeHead(200, {
+          'Content-Length': stat.size,
+          'Content-Type': contentType,
+          'Cache-Control': 'public, max-age=3600',
+          'Accept-Ranges': 'bytes',
+        });
+        fs.createReadStream(targetPath).pipe(res);
+      }
+    } catch (err) {
+      log('LOCAL_FILE', `Gagal streaming file lokal: ${err.message}`, c.red);
+      res.writeHead(500, { 'Content-Type': 'application/json' });
+      res.end(JSON.stringify({ ok: false, error: err.message }));
+    }
+    return;
+  }
+
+  // 6.5. Local File Resolver: Temukan path absolut file berdasarkan nama atau path parsial
+  if (req.method === 'GET' && (pathname === '/api/local/find-file' || pathname === '/find-file')) {
+    const filename = url.searchParams.get('filename') || url.searchParams.get('name') || url.searchParams.get('path');
+    if (!filename) {
+      res.writeHead(400, { 'Content-Type': 'application/json' });
+      res.end(JSON.stringify({ ok: false, error: 'Parameter filename wajib disertakan.' }));
+      return;
+    }
+
+    try {
+      const resolved = resolveLocalFilePath(filename);
+      if (resolved && fs.existsSync(resolved)) {
+        const stat = fs.statSync(resolved);
+        res.writeHead(200, { 'Content-Type': 'application/json' });
+        res.end(
+          JSON.stringify({
+            ok: true,
+            found: true,
+            fullPath: resolved,
+            filename: path.basename(resolved),
+            sizeBytes: stat.size,
+            lastModified: stat.mtimeMs,
+          })
+        );
+      } else {
+        res.writeHead(200, { 'Content-Type': 'application/json' });
+        res.end(JSON.stringify({ ok: true, found: false }));
+      }
+    } catch (err) {
+      res.writeHead(500, { 'Content-Type': 'application/json' });
+      res.end(JSON.stringify({ ok: false, error: err.message }));
     }
     return;
   }

@@ -1,0 +1,358 @@
+{
+  "library": "Adobe Stock QC Agent rulebook",
+  "version": "0.1.1",
+  "checked_on": "2026-10-22",
+  "scope": {
+    "initial_mvp": [
+      "AI-generated still images",
+      "JPEG",
+      "transparent PNG",
+      "visual quality",
+      "Adobe policy preflight"
+    ],
+    "excluded_for_now": [
+      "similarity against the Adobe Stock catalogue",
+      "portfolio/batch similarity clustering",
+      "automatic upload/submission",
+      "video visual QC",
+      "full vector semantic QC"
+    ]
+  },
+  "decision_vocabulary": {
+    "BLOCK": "Confirmed hard technical/policy failure; do not submit until fixed",
+    "REVIEW": "Evidence or context ambiguous; require user review/confirmation",
+    "READY": "All configured checks ran and no known issue was detected; not a guarantee of Adobe acceptance",
+    "UNKNOWN": "Insufficient provenance/context/data to decide"
+  },
+  "rules": [
+    {
+      "id": "AS-MOD-001",
+      "domain": "moderation",
+      "rule_type": "official_policy_summary",
+      "severity": "INFO",
+      "automation": "system_context",
+      "statement": "Adobe moderates each submission against technical, legal, metadata, creative/commercial value and other criteria; documented refusal categories include technical issues, IP, metadata/non-compliance and generative-AI anomalies.",
+      "agent_action": "Use this taxonomy to organize report findings; do not claim to reproduce Adobe's internal moderation logic.",
+      "decision": "Informational context only",
+      "human_confirmation_required": false,
+      "source_ids": [
+        "ADOBE_MODERATION",
+        "ADOBE_REFUSAL"
+      ]
+    },
+    {
+      "id": "AS-PHOTO-TECH-001",
+      "domain": "technical_photo",
+      "rule_type": "technical_requirement",
+      "severity": "BLOCK_IF_CONFIRMED",
+      "condition": {
+        "format": "JPEG",
+        "megapixels_min": 4,
+        "megapixels_max": 100,
+        "file_size_mb_max": 45,
+        "color_profile": "sRGB",
+        "watermark_timestamp_branding": "not_allowed"
+      },
+      "statement": "Photo submissions must be JPEG, 4-100 MP, max 45 MB, sRGB, without watermarks, timestamps or branding; image should be sharp and well-lit.",
+      "agent_action": "Validate metadata deterministically. If a hard file requirement fails, BLOCK and state exact measured value. Presence of visible branding requires a detection result and often review; don't rely on OCR alone.",
+      "human_confirmation_required": false,
+      "source_ids": [
+        "ADOBE_PHOTO_TECH",
+        "ADOBE_QUALITY"
+      ]
+    },
+    {
+      "id": "AS-PNG-TECH-001",
+      "domain": "technical_png",
+      "rule_type": "technical_requirement",
+      "severity": "BLOCK_IF_CONFIRMED",
+      "condition": {
+        "format": "PNG",
+        "megapixels_min": 4,
+        "megapixels_max": 100,
+        "file_size_mb_max": 45,
+        "color_profile": "sRGB",
+        "alpha_transparency_required": true,
+        "watermark_timestamp_branding": "not_allowed"
+      },
+      "statement": "PNG submission requirements include 4-100 MP, max 45 MB, sRGB, true transparent background and no watermark/timestamp/branding. Quality guidance also requires clarity, preserved details, minimal excess space and no decorative frame.",
+      "agent_action": "Check PNG alpha channel and visible alpha bounds; composite preview on light/dark/checkerboard test backgrounds to find fringes and false checkerboard. Treat edge or shadow anomalies as REVIEW unless clearly invalid.",
+      "human_confirmation_required": false,
+      "source_ids": [
+        "ADOBE_PNG_TECH",
+        "ADOBE_PNG_BEST"
+      ]
+    },
+    {
+      "id": "AS-VECTOR-TECH-001",
+      "domain": "technical_vector",
+      "rule_type": "technical_requirement",
+      "severity": "BLOCK_IF_CONFIRMED",
+      "condition": {
+        "file_size_mb_max": 45,
+        "artboard_megapixels_min": 15,
+        "artboard_megapixels_max": 65,
+        "color_mode": "RGB",
+        "artboard_origin": [
+          0,
+          0
+        ]
+      },
+      "statement": "Vector requirements specify max 45 MB, artboard 15-65 MP, RGB mode and artboard offset/origin (0,0). Vector quality should be clean, scalable and editable.",
+      "agent_action": "Phase 2: inspect SVG/AI/EPS structure, artboard geometry, open paths/gaps, clipping and editability. Do not infer vector validity only from raster preview.",
+      "human_confirmation_required": false,
+      "source_ids": [
+        "ADOBE_VECTOR_TECH"
+      ]
+    },
+    {
+      "id": "AS-VIDEO-TECH-001",
+      "domain": "technical_video",
+      "rule_type": "technical_requirement",
+      "severity": "BLOCK_IF_CONFIRMED",
+      "condition": {
+        "formats": [
+          "MOV",
+          "MPG",
+          "MP4"
+        ],
+        "duration_seconds_min": 5,
+        "duration_seconds_max": 60,
+        "file_size_mb_max": 3900,
+        "accepted_frame_rates": [
+          23.98,
+          24,
+          25,
+          29.97,
+          30,
+          50,
+          59.94,
+          60
+        ]
+      },
+      "statement": "Adobe video requirements list formats, 5-60 second duration, max 3900 MB, accepted frame rates and supported native resolutions. Video QC is out of initial JPEG/PNG MVP scope.",
+      "agent_action": "Future phase only; use media probe/FFmpeg, native resolution checks, stability/rolling-shutter assessment and frame-sampled visual review.",
+      "human_confirmation_required": false,
+      "source_ids": [
+        "ADOBE_VIDEO_TECH"
+      ]
+    },
+    {
+      "id": "AS-AI-001",
+      "domain": "generative_ai",
+      "rule_type": "official_policy",
+      "severity": "HIGH",
+      "statement": "Contributor must have the necessary rights to submit content generated with AI tools for commercial licensing; verify the tool's terms and license.",
+      "agent_action": "Ask the user to select/confirm tool and applicable plan/license; store evidence URL/date. If rights status is unknown, REVIEW; do not claim the image pixels prove rights.",
+      "decision": "REVIEW when unknown; BLOCK when no commercial submission rights are confirmed",
+      "human_confirmation_required": true,
+      "source_ids": [
+        "ADOBE_GENAI_GUIDE",
+        "ADOBE_GENAI_SUBMIT"
+      ]
+    },
+    {
+      "id": "AS-AI-002",
+      "domain": "generative_ai",
+      "rule_type": "official_policy",
+      "severity": "HIGH",
+      "statement": "Content created with generative AI tools must be labeled using the appropriate 'Created using generative AI tools' checkbox. Adobe notes some limited edits (e.g., background extension, removing distracting objects or background recoloring) are not necessarily required to be labeled; changes/additions to a primary subject and certain material modifications are examples requiring labeling.",
+      "agent_action": "Use provenance/workflow manifest first. If manifest is missing, ask user; never decide solely from a generic AI-image detector. Add final manual portal checkbox reminder.",
+      "human_confirmation_required": true,
+      "source_ids": [
+        "ADOBE_GENAI_GUIDE",
+        "ADOBE_GENAI_FAQ"
+      ]
+    },
+    {
+      "id": "AS-AI-003",
+      "domain": "generative_ai",
+      "rule_type": "official_policy",
+      "severity": "HIGH",
+      "statement": "For AI content depicting, based on, or intended to portray an identifiable real person, Adobe requires a model release. If AI content was not based on a real person but visually resembles a person/property, select the 'People and Property are fictional' checkbox. If there are no recognizable people or property, the box may be left unchecked.",
+      "agent_action": "Classify evidence as TRUE/FALSE/UNKNOWN. Do not set fictional=true just because no release is attached. Ask the contributor to confirm provenance and releases; human review required when identity/resemblance is uncertain.",
+      "human_confirmation_required": true,
+      "source_ids": [
+        "ADOBE_GENAI_GUIDE",
+        "ADOBE_GENAI_SUBMIT",
+        "ADOBE_MODEL_RELEASE"
+      ]
+    },
+    {
+      "id": "AS-AI-004",
+      "domain": "generative_ai",
+      "rule_type": "official_policy",
+      "severity": "HIGH",
+      "statement": "Photo-realistic AI content that looks like a camera-captured real-world photo belongs in Photos; artistic/imaginary/fantasy content that would not appear in real life belongs in Illustrations. Generative AI content cannot be submitted as Illustrative Editorial.",
+      "agent_action": "Recommend content type with rationale and flag ambiguous photoreal/fantasy hybrid for user review; never submit as Illustrative Editorial.",
+      "human_confirmation_required": true,
+      "source_ids": [
+        "ADOBE_GENAI_GUIDE",
+        "ADOBE_GENAI_FAQ"
+      ]
+    },
+    {
+      "id": "AS-AI-005",
+      "domain": "generative_ai",
+      "rule_type": "official_policy",
+      "severity": "HIGH",
+      "statement": "Generative AI prompts, titles and keywords must not include artist names, real people or fictional character names, references to creative works still under copyright, government agency names, third-party IP references or descriptions implying an actual newsworthy event.",
+      "agent_action": "Scan prompt/title/keywords using entity-aware rules and phrase matching. A match triggers REVIEW; only confirmed policy-context violations should become BLOCK. Support synonyms/transliterations but avoid blacklisting every innocent occurrence of a word.",
+      "human_confirmation_required": true,
+      "source_ids": [
+        "ADOBE_GENAI_GUIDE",
+        "ADOBE_AI_POLICY_REFERENCES",
+        "ADOBE_REFUSAL"
+      ]
+    },
+    {
+      "id": "AS-VIS-001",
+      "domain": "visual_quality",
+      "rule_type": "official_quality_standard",
+      "severity": "HIGH",
+      "statement": "Review images at 100% zoom; the main subject should be sharp and clearly defined. Unintentional softness/blur or important subject detail out of focus may cause refusal.",
+      "agent_action": "Assess overall sharpness and subject-region sharpness separately. Create 100% crops for key regions. Blur metrics are heuristics, not universal thresholds.",
+      "human_confirmation_required": true,
+      "source_ids": [
+        "ADOBE_QUALITY",
+        "ADOBE_REFUSAL"
+      ]
+    },
+    {
+      "id": "AS-VIS-002",
+      "domain": "visual_quality",
+      "rule_type": "official_quality_standard",
+      "severity": "HIGH",
+      "statement": "Avoid over- or underexposure, lost detail, unbalanced lighting/exposure, poor white balance and unnatural color correction.",
+      "agent_action": "Measure clipping in highlights/shadows, color cast and local exposure; distinguish intentional high-key/low-key style from unusable detail loss. REVIEW stylistic ambiguity.",
+      "human_confirmation_required": true,
+      "source_ids": [
+        "ADOBE_QUALITY",
+        "ADOBE_REFUSAL"
+      ]
+    },
+    {
+      "id": "AS-VIS-003",
+      "domain": "visual_quality",
+      "rule_type": "official_quality_standard",
+      "severity": "MEDIUM_HIGH",
+      "statement": "Avoid excessive noise, compression artifacts, over-editing, over-sharpening, excessive saturation, dust spots and chromatic aberration/color fringing.",
+      "agent_action": "Use local defect detectors and provide crops; do not reject on a single image-statistic score without visual verification.",
+      "human_confirmation_required": true,
+      "source_ids": [
+        "ADOBE_QUALITY",
+        "ADOBE_REFUSAL"
+      ]
+    },
+    {
+      "id": "AS-VIS-004",
+      "domain": "visual_quality",
+      "rule_type": "official_quality_standard",
+      "severity": "HIGH",
+      "statement": "AI-generated content must be checked for unintentional anatomy, proportions, inaccurate details and other visual errors in humans and animals.",
+      "agent_action": "Inspect hands, fingers, feet, facial features, teeth/eyes/ears, limbs, joints, animal anatomy and interactions with objects. Use region crops and explicit observed evidence; do not rely on a single global pass/fail classifier.",
+      "human_confirmation_required": true,
+      "source_ids": [
+        "ADOBE_GENAI_FAQ",
+        "ADOBE_GENAI_SUBMIT"
+      ]
+    },
+    {
+      "id": "AS-VIS-005",
+      "domain": "visual_quality",
+      "rule_type": "internal_heuristic_grounded_in_quality_standards",
+      "severity": "MEDIUM_HIGH",
+      "statement": "Check object integrity, impossible joins, duplicated/melted parts, texture discontinuities, shadows/reflections that conflict with scene geometry, and unintended gibberish text as internal QC indicators for AI-image artifacts.",
+      "agent_action": "Treat as internal heuristics rather than verbatim Adobe rules. Return region, evidence and confidence; use REVIEW when subjective or not clearly defective.",
+      "human_confirmation_required": true,
+      "source_ids": [
+        "ADOBE_GENAI_FAQ",
+        "ADOBE_QUALITY",
+        "ICLR_XAIGD_2026",
+        "CVPR_AIGIQA_20K"
+      ],
+      "notes": "Specific categories like impossible reflections or gibberish are engineering checks; official sources support broad accuracy/artifact/technical quality, not every subcategory as an individually named rejection rule."
+    },
+    {
+      "id": "AS-IP-001",
+      "domain": "ip_rights",
+      "rule_type": "official_policy",
+      "severity": "HIGH",
+      "statement": "Visible logos, trademarks, brand names, recognizable product packaging or distinctive protected designs may cause IP refusal. Removing a logo does not make all protected products/designs acceptable.",
+      "agent_action": "Run OCR plus logo/object/context detections; cross-check official Known Restrictions. A possible logo/design is REVIEW, not auto-inpaint. BLOCK only for confirmed restricted item/policy context; maintain evidence and source.",
+      "human_confirmation_required": true,
+      "source_ids": [
+        "ADOBE_REFUSAL",
+        "ADOBE_PROPERTY_RELEASE",
+        "ADOBE_KNOWN_RESTRICTIONS"
+      ]
+    },
+    {
+      "id": "AS-IP-002",
+      "domain": "ip_rights",
+      "rule_type": "official_policy",
+      "severity": "HIGH",
+      "statement": "Model release may be needed for a recognizable person. Adobe's guidance notes recognition may come from face, voice, tattoos, clothing or specific surroundings. Property release scenarios include clearly visible private homes, artwork/gallery/murals and recognizable products/designs; generic buildings/public landscapes can differ; some landmarks are restricted even with release.",
+      "agent_action": "Detect people, tattoos, artwork, private property, recognizable product designs, landmarks and signage. Ask the user to confirm releases/context. Do not infer release validity from presence of a PDF alone.",
+      "human_confirmation_required": true,
+      "source_ids": [
+        "ADOBE_MODEL_RELEASE",
+        "ADOBE_PROPERTY_RELEASE",
+        "ADOBE_KNOWN_RESTRICTIONS"
+      ]
+    },
+    {
+      "id": "AS-IP-003",
+      "domain": "ip_rights",
+      "rule_type": "official_reference_with_limited_completeness",
+      "severity": "HIGH",
+      "statement": "Adobe's Known Restrictions list contains examples of designs, products and locations not acceptable for commercial submissions. Adobe explicitly states that the list is updated periodically and is not all-inclusive.",
+      "agent_action": "Refresh the official page periodically and store checked date. The local list is only a cache/watchlist. A no-match result is not evidence that an asset is legally clear. Exact or likely matches trigger REVIEW and context/focus check.",
+      "human_confirmation_required": true,
+      "source_ids": [
+        "ADOBE_KNOWN_RESTRICTIONS"
+      ]
+    },
+    {
+      "id": "AS-META-001",
+      "domain": "metadata",
+      "rule_type": "official_best_practice",
+      "severity": "MEDIUM",
+      "statement": "Title should be brief, accurate, focused on the visible content, ideally under 70 characters. Avoid IP references, artist names and real-person names. Up to 49 keywords is stated on the metadata tips page, with the first ten prioritized by search.",
+      "agent_action": "Measure title length; check whether title claims match visible objects/setting; flag metadata references prohibited under the AI policy; default to max 49 keywords because Adobe's metadata page says up to 49. Document that some submission pages state 5-50, so rule config should be versioned conservatively.",
+      "human_confirmation_required": true,
+      "source_ids": [
+        "ADOBE_TITLE_KEYWORDS",
+        "ADOBE_GENAI_GUIDE",
+        "ADOBE_PHOTO_TECH"
+      ]
+    },
+    {
+      "id": "AS-PNG-002",
+      "domain": "technical_png",
+      "rule_type": "official_best_practice",
+      "severity": "MEDIUM",
+      "statement": "For transparent PNG assets, minimize empty surrounding canvas, isolate edges cleanly, only keep shadows where useful/integral, use true transparency and avoid decorative borders; do not submit the same work both as JPEG and PNG.",
+      "agent_action": "Check alpha channel, subject-to-canvas bounds, semi-transparent fringe/halo, matte residue, false checkerboard and unnecessary margins; ask human about intended shadows and crop.",
+      "human_confirmation_required": true,
+      "source_ids": [
+        "ADOBE_PNG_BEST",
+        "ADOBE_PNG_TECH"
+      ]
+    },
+    {
+      "id": "AS-POLICY-001",
+      "domain": "content_policy",
+      "rule_type": "official_policy",
+      "severity": "HIGH",
+      "statement": "Adobe lists hateful or defamatory content among potential non-compliance refusal reasons; other policy restrictions may depend on subject and context.",
+      "agent_action": "Use content moderation only as a risk flag, not a legal finding. For context-sensitive material, explain the concrete visual/textual signal and route to human review. Never infer that all depictions of a controversial subject are prohibited.",
+      "decision": "REVIEW for potential/contextual issue; BLOCK only for a confirmed rule violation",
+      "human_confirmation_required": true,
+      "source_ids": [
+        "ADOBE_REFUSAL"
+      ]
+    }
+  ],
+  "rule_count": 21
+}

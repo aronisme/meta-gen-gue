@@ -2,10 +2,12 @@
 
 import { useState } from 'react';
 import {
+  Bot,
   HelpCircle,
   Home,
   LogOut,
   Search,
+  ShieldCheck,
   Sparkles,
   User,
   Wand2,
@@ -14,7 +16,13 @@ import {
 
 import type { AuthUser } from '@/lib/auth/types';
 
-export type AppModuleId = 'beranda' | 'metadata' | 'prompt-gen' | 'keyword-research';
+export type AppModuleId =
+  | 'beranda'
+  | 'metadata'
+  | 'qc-agent'
+  | 'prompt-gen'
+  | 'keyword-research'
+  | 'ai-copilot';
 
 export interface AppSideRailProps {
   activeModule: AppModuleId;
@@ -41,10 +49,24 @@ const NAV_ITEMS: NavItem[] = [
     icon: Home,
   },
   {
+    id: 'ai-copilot',
+    label: 'Omnigent Agent',
+    tagline: 'Live Microstock Coworker & Auto Tools',
+    icon: Bot,
+    badge: 'LIVE',
+  },
+  {
     id: 'metadata',
     label: 'Metadata Generator',
     tagline: 'AI Metadata & Multi-FTP Sync',
     icon: Sparkles,
+  },
+  {
+    id: 'qc-agent',
+    label: 'QC Inspector',
+    tagline: 'Adobe Stock Pre-Submission Gatekeeper',
+    icon: ShieldCheck,
+    badge: 'QC',
   },
   {
     id: 'prompt-gen',

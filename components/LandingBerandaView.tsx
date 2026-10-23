@@ -22,6 +22,8 @@ interface LandingBerandaViewProps {
   onNavigateToStudio: () => void;
   onNavigateToPromptGen: () => void;
   onNavigateToKeywords: () => void;
+  onNavigateToQc?: () => void;
+  onNavigateToAgent?: () => void;
 }
 
 export function LandingBerandaView({
@@ -30,6 +32,8 @@ export function LandingBerandaView({
   onNavigateToStudio,
   onNavigateToPromptGen,
   onNavigateToKeywords,
+  onNavigateToQc,
+  onNavigateToAgent,
 }: LandingBerandaViewProps) {
   const [activeFaq, setActiveFaq] = useState<number | null>(null);
 
@@ -192,7 +196,7 @@ export function LandingBerandaView({
         <div className="flex items-center justify-between flex-wrap gap-2">
           <div>
             <h2 className="text-2xl font-black text-[#2c1810] tracking-tight">
-              Tiga Modul Produktivitas Dalam Satu Tempat
+              Empat Modul Produktivitas Dalam Satu Tempat
             </h2>
             <p className="text-sm text-[#6b5344] font-medium">
               Alat terintegrasi untuk mempercepat siklus pembuatan konten dari konsep visual hingga distribusi agensi.
@@ -200,7 +204,7 @@ export function LandingBerandaView({
           </div>
         </div>
 
-        <div className="grid grid-cols-1 md:grid-cols-3 gap-5">
+        <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-5">
           {/* Card 1: Metadata Generator */}
           <div className="bg-white border-2 border-[#2c1810] shadow-[5px_5px_0_#2c1810] rounded-2xl p-5 flex flex-col justify-between space-y-4 hover:translate-x-[1px] hover:translate-y-[1px] transition-all">
             <div className="space-y-3">
@@ -303,6 +307,45 @@ export function LandingBerandaView({
               <span>Buka Keyword Research</span>
               <ArrowRight className="w-3.5 h-3.5" />
             </button>
+          </div>
+
+          {/* Card 4: Adobe Stock QC Inspector */}
+          <div className="bg-white border-2 border-[#2c1810] shadow-[5px_5px_0_#2c1810] rounded-2xl p-5 flex flex-col justify-between space-y-4 hover:translate-x-[1px] hover:translate-y-[1px] transition-all">
+            <div className="space-y-3">
+              <div className="w-11 h-11 rounded-xl bg-emerald-600 border-2 border-[#2c1810] shadow-[2px_2px_0_#2c1810] flex items-center justify-center text-white">
+                <ShieldCheck className="w-6 h-6" />
+              </div>
+              <div className="flex items-center gap-2">
+                <h3 className="text-lg font-black text-[#2c1810]">QC Inspector</h3>
+                <span className="text-[10px] font-black px-1.5 py-0.5 rounded bg-emerald-700 text-white">
+                  Adobe Gate
+                </span>
+              </div>
+              <p className="text-xs text-[#6b5344] leading-relaxed font-medium">
+                Asisten kendali mutu pra-submit otomatis berbasis Vision Language Models (VLM). Deteksi dini resolusi &lt; 4MP, cacat jari AI, teks/merk liar, dan lindungi akun di antrean FTP.
+              </p>
+              <ul className="text-xs text-[#2c1810] font-semibold space-y-1.5 pt-1">
+                <li className="flex items-center gap-1.5">
+                  <Check className="w-3.5 h-3.5 text-emerald-600" /> Preflight teknis instan &lt;5ms
+                </li>
+                <li className="flex items-center gap-1.5">
+                  <Check className="w-3.5 h-3.5 text-emerald-600" /> Deteksi Known Restrictions
+                </li>
+                <li className="flex items-center gap-1.5">
+                  <Check className="w-3.5 h-3.5 text-emerald-600" /> Proteksi otomatis antrean upload FTP
+                </li>
+              </ul>
+            </div>
+            {onNavigateToQc && (
+              <button
+                type="button"
+                onClick={onNavigateToQc}
+                className="w-full py-2.5 rounded-xl bg-[#fff5e6] hover:bg-[#ffebd1] text-[#2c1810] font-bold text-xs border-2 border-[#2c1810] shadow-[2px_2px_0_#2c1810] flex items-center justify-center gap-1.5 cursor-pointer transition-all"
+              >
+                <span>Buka QC Inspector</span>
+                <ArrowRight className="w-3.5 h-3.5" />
+              </button>
+            )}
           </div>
         </div>
       </section>

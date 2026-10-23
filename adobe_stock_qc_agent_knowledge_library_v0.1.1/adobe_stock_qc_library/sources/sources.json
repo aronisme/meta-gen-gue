@@ -1,0 +1,211 @@
+{
+  "library_name": "Adobe Stock QC Agent research sources",
+  "checked_on": "2026-10-22",
+  "source_count": 20,
+  "sources": [
+    {
+      "id": "ADOBE_MODERATION",
+      "title": "Content moderation in Adobe Stock",
+      "url": "https://helpx.adobe.com/stock/contributor/content-moderation/content-moderation.html",
+      "publisher": "Adobe HelpX",
+      "source_class": "official_adobe",
+      "last_updated": "2026-08-18",
+      "checked_on": "2026-10-22",
+      "scope": "Overall moderation criteria: technical quality, IP compliance, commercial value, metadata, uniqueness; refusal reasons include technical issues, release issues, IP, metadata and generative-AI anomalies.",
+      "notes": "Public overview; does not reveal complete internal moderation algorithms."
+    },
+    {
+      "id": "ADOBE_QUALITY",
+      "title": "Quality and technical issues behind content refusal",
+      "url": "https://helpx.adobe.com/stock/contributor/content-moderation/quality-technical-standards-reasons-content-refusal.html",
+      "publisher": "Adobe HelpX",
+      "source_class": "official_adobe",
+      "last_updated": "2026-06-11",
+      "checked_on": "2026-10-22",
+      "scope": "Focus at 100%, blur, sharpening artifacts, noise, exposure, white balance, color fringing, masking, composition, video stability, vector path quality.",
+      "notes": "Search snippets from some regional/localized page variants displayed 2026-09-02, while the opened HelpX page content showed 2026-06-11; refresh canonical page/locale before treating update stamp as authoritative."
+    },
+    {
+      "id": "ADOBE_REFUSAL",
+      "title": "Common reasons for content refusal",
+      "url": "https://helpx.adobe.com/stock/contributor/content-moderation/common-reasons-content-refusal.html",
+      "publisher": "Adobe HelpX",
+      "source_class": "official_adobe",
+      "last_updated": "2026-06-11",
+      "checked_on": "2026-10-22",
+      "scope": "Non-compliance, IP, technical quality; photos can be over/underexposed, soft, poorly white-balanced, heavily edited/oversharpened, dusty, over/undersaturated; video-specific concerns.",
+      "notes": "Search snippets from some regional/localized page variants displayed 2026-09-02, while the opened HelpX page content showed 2026-06-11; refresh canonical page/locale before treating update stamp as authoritative."
+    },
+    {
+      "id": "ADOBE_GENAI_GUIDE",
+      "title": "Generative AI content guidelines",
+      "url": "https://helpx.adobe.com/stock/contributor/submit-your-content/submit-generative-ai-content/generative-ai-content-guidelines.html",
+      "publisher": "Adobe HelpX",
+      "source_class": "official_adobe",
+      "last_updated": "2026-06-11",
+      "checked_on": "2026-10-22",
+      "scope": "Commercial rights, prohibited prompt/title/keyword references, required AI label, fictional people/property checkbox conditions, releases, content classification."
+    },
+    {
+      "id": "ADOBE_GENAI_SUBMIT",
+      "title": "Submit AI-generated content to Adobe Stock",
+      "url": "https://helpx.adobe.com/stock/contributor/submit-your-content/submit-generative-ai-content/submit-generative-ai-content.html",
+      "publisher": "Adobe HelpX",
+      "source_class": "official_adobe",
+      "last_updated": "2026-06-11",
+      "checked_on": "2026-10-22",
+      "scope": "Pre-submission review for anatomy, proportions, visual intent, releases, unique value; AI content cannot be Illustrative Editorial."
+    },
+    {
+      "id": "ADOBE_GENAI_FAQ",
+      "title": "Adobe Stock generative AI FAQ",
+      "url": "https://helpx.adobe.com/stock/contributor/submit-your-content/submit-generative-ai-content/adobe-stock-generative-ai-faq.html",
+      "publisher": "Adobe HelpX",
+      "source_class": "official_adobe",
+      "last_updated": "Not captured in snippet; recheck live page",
+      "checked_on": "2026-10-22",
+      "scope": "Required AI checkbox; fictional checkbox when AI-made content resembles a person/property but wasn't based on a real person; human/animal anatomy; upscaling; similar iteration advice.",
+      "notes": "Use canonical page and refresh its current update stamp during scheduled knowledge refresh."
+    },
+    {
+      "id": "ADOBE_AI_POLICY_REFERENCES",
+      "title": "Content policy for artist names, known people, fictional characters",
+      "url": "https://helpx.adobe.com/stock/contributor/submit-your-content/submit-generative-ai-content/content-policy-artist-names-real-known-people-fictional-characters.html",
+      "publisher": "Adobe HelpX",
+      "source_class": "official_adobe",
+      "last_updated": "Live page to verify",
+      "checked_on": "2026-10-22",
+      "scope": "Further detail on prohibited prompts and references for generative AI."
+    },
+    {
+      "id": "ADOBE_PHOTO_TECH",
+      "title": "Technical and legal requirements for photo submission",
+      "url": "https://helpx.adobe.com/stock/contributor/submit-your-content/submit-photos/technical-legal-requirements-photo-submission.html",
+      "publisher": "Adobe HelpX",
+      "source_class": "official_adobe",
+      "last_updated": "2026-06-11",
+      "checked_on": "2026-10-22",
+      "scope": "Photo JPEG, 4-100MP, max 45MB, sRGB, clean of watermarks/timestamps/branding, sharp and well-lit, people and property releases/IP."
+    },
+    {
+      "id": "ADOBE_PNG_TECH",
+      "title": "Technical requirements for PNG submissions",
+      "url": "https://helpx.adobe.com/stock/contributor/submit-your-content/submit-pngs/technical-requirements-png-submission.html",
+      "publisher": "Adobe HelpX",
+      "source_class": "official_adobe",
+      "last_updated": "2026-09-02",
+      "checked_on": "2026-10-22",
+      "scope": "PNG, 4-100MP, max 45MB, sRGB, true transparency, no watermark/timestamps/branding, clarity/details/crop/borders/scaling."
+    },
+    {
+      "id": "ADOBE_PNG_BEST",
+      "title": "PNG best practices",
+      "url": "https://helpx.adobe.com/stock/contributor/submit-your-content/submit-pngs/png-best-practices.html",
+      "publisher": "Adobe HelpX",
+      "source_class": "official_adobe",
+      "last_updated": "2026-06-11",
+      "checked_on": "2026-10-22",
+      "scope": "Crop excess space, clean isolation, shadow treatment, true transparency, no duplicate same content as PNG and JPEG."
+    },
+    {
+      "id": "ADOBE_VECTOR_TECH",
+      "title": "Technical requirements for vector submissions",
+      "url": "https://helpx.adobe.com/stock/contributor/submit-your-content/submit-vectors/technical-requirements-for-vector-submissions.html",
+      "publisher": "Adobe HelpX",
+      "source_class": "official_adobe",
+      "last_updated": "2026-06-11",
+      "checked_on": "2026-10-22",
+      "scope": "Vector file max 45MB, artboard 15-65MP, RGB, artboard offset (0,0), clean scalable/editable paths."
+    },
+    {
+      "id": "ADOBE_VIDEO_TECH",
+      "title": "Technical requirements for video submissions",
+      "url": "https://helpx.adobe.com/stock/contributor/submit-your-content/submit-videos/technical-requirements-for-video-submissions.html",
+      "publisher": "Adobe HelpX",
+      "source_class": "official_adobe",
+      "last_updated": "2026-06-11",
+      "checked_on": "2026-10-22",
+      "scope": "Video formats, duration, file size, frame rate, resolution, native frame size; video implementation is future phase."
+    },
+    {
+      "id": "ADOBE_TITLE_KEYWORDS",
+      "title": "Tips for effective titles and keywords",
+      "url": "https://helpx.adobe.com/stock/contributor/content-policies-guidelines/metadata/tips-effective-titles-keywords.html",
+      "publisher": "Adobe HelpX",
+      "source_class": "official_adobe",
+      "last_updated": "2026-08-18",
+      "checked_on": "2026-10-22",
+      "scope": "Brief accurate title, ideally under 70 characters; up to 49 keywords on this page; ordering importance, relevance, first ten priority."
+    },
+    {
+      "id": "ADOBE_MODEL_RELEASE",
+      "title": "Model release overview",
+      "url": "https://helpx.adobe.com/stock/contributor/content-policies-guidelines/model-property-releases/model-release-overview.html",
+      "publisher": "Adobe HelpX",
+      "source_class": "official_adobe",
+      "last_updated": "2026-06-11",
+      "checked_on": "2026-10-22",
+      "scope": "Recognizable people may be identified by face, voice, tattoos, clothing or surroundings; release is required."
+    },
+    {
+      "id": "ADOBE_PROPERTY_RELEASE",
+      "title": "Property release requirements",
+      "url": "https://helpx.adobe.com/stock/contributor/content-policies-guidelines/model-property-releases/property-release-requirements.html",
+      "publisher": "Adobe HelpX",
+      "source_class": "official_adobe",
+      "last_updated": "2026-08-18",
+      "checked_on": "2026-10-22",
+      "scope": "Private homes, artwork, street murals, recognizable products/designs, protected objects; cases depend on focus and context."
+    },
+    {
+      "id": "ADOBE_KNOWN_RESTRICTIONS",
+      "title": "Known restrictions",
+      "url": "https://helpx.adobe.com/stock/contributor/content-policies-guidelines/content-policies/known-restrictions.html",
+      "publisher": "Adobe HelpX",
+      "source_class": "official_adobe",
+      "last_updated": "2026-09-02",
+      "checked_on": "2026-10-22",
+      "scope": "Dynamic list of prohibited or restricted designs, locations, logos and works. Adobe explicitly says list is updated periodically and is not all-inclusive."
+    },
+    {
+      "id": "ADOBE_ACCOUNT_RULES",
+      "title": "Account and submission guidelines",
+      "url": "https://helpx.adobe.com/stock/contributor/get-started/manage-your-account/account-submission-guidelines.html",
+      "publisher": "Adobe HelpX",
+      "source_class": "official_adobe",
+      "last_updated": "Live page to verify",
+      "checked_on": "2026-10-22",
+      "scope": "High-level technical, legal, creative and submission standards."
+    },
+    {
+      "id": "ICLR_XAIGD_2026",
+      "title": "Unveiling Perceptual Artifacts: A Fine-Grained Benchmark for Interpretable AI-Generated Image Detection",
+      "url": "https://proceedings.iclr.cc/paper_files/paper/2026/hash/65b4e84b66ed049f8066919a803e3942-Abstract-Conference.html",
+      "publisher": "ICLR 2026",
+      "source_class": "research_background",
+      "last_updated": "2026",
+      "checked_on": "2026-10-22",
+      "scope": "Research on localized, explainable artifact annotations; warns current binary AI-image detectors often rely on uninterpretable features and lack fine-grained evidence."
+    },
+    {
+      "id": "CVPR_AIGIQA_20K",
+      "title": "AIGIQA-20K: A Large Database for AI-Generated Image Quality Assessment",
+      "url": "https://openaccess.thecvf.com/content/CVPR2024W/NTIRE/html/Li_AIGIQA-20K_A_Large_Database_for_AI-Generated_Image_Quality_Assessment_CVPRW_2024_paper.html",
+      "publisher": "CVPR Workshops 2024",
+      "source_class": "research_background",
+      "last_updated": "2024",
+      "checked_on": "2026-10-22",
+      "scope": "Subjective assessment database covering perceived image quality and text-image alignment for AI-generated images."
+    },
+    {
+      "id": "ELSEVIER_AGIQA_2026",
+      "title": "Multi-dimensional AI-generated image quality assessment via joint text template and multi-granularity similarity",
+      "url": "https://doi.org/10.1016/j.patrec.2026.02.023",
+      "publisher": "Pattern Recognition Letters",
+      "source_class": "research_background",
+      "last_updated": "2026-05",
+      "checked_on": "2026-10-22",
+      "scope": "Research framing AI-generated image quality in terms including quality, authenticity, and text-image correspondence; research context only, not Adobe policy."
+    }
+  ]
+}

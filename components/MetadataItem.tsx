@@ -228,6 +228,24 @@ function MetadataItemComponent({
                 </span>
               )}
 
+              {item.filePath && (
+                <span
+                  className="text-[10px] bg-emerald-50 text-emerald-900 border border-emerald-400 px-1.5 py-0.5 rounded font-bold inline-flex items-center gap-1 cursor-help shadow-[1px_1px_0_#2c1810]"
+                  title={`Path Asli di Komputer:\n${item.filePath}\n\nSiap langsung diunggah via Local FTP Bridge tanpa pilih ulang file.`}
+                >
+                  📁 Siap di Disk
+                </span>
+              )}
+
+              {(item.promptText || item.meta?.aiPrompt) && (
+                <span
+                  className="text-[10px] bg-amber-50 text-amber-900 border border-amber-400 px-1.5 py-0.5 rounded font-bold inline-flex items-center gap-1 cursor-help shadow-[1px_1px_0_#2c1810]"
+                  title={`Prompt Asli dari Prompt Generator:\n"${item.promptText || item.meta?.aiPrompt}"`}
+                >
+                  ⚡ Prompt Asli
+                </span>
+              )}
+
               {item.meta?.category && (
                 <span className="text-[11px] px-2 py-0.5 rounded-md bg-[#fff5e6] border border-[#2c1810] font-bold text-[#6b5344]">
                   Kat: {ADOBE_STOCK_CATEGORIES.find((c) => c.code === item.meta?.category)?.name || item.meta.category}

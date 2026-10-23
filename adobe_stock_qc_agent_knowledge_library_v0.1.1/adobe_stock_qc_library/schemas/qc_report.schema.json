@@ -1,0 +1,339 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://example.invalid/adobe-stock-qc-report.schema.json",
+  "title": "Adobe Stock QC Agent Report",
+  "type": "object",
+  "required": [
+    "schema_version",
+    "asset_id",
+    "asset_type",
+    "decision",
+    "checks",
+    "provenance",
+    "limitations"
+  ],
+  "properties": {
+    "schema_version": {
+      "type": "string"
+    },
+    "asset_id": {
+      "type": "string"
+    },
+    "file_name": {
+      "type": [
+        "string",
+        "null"
+      ]
+    },
+    "asset_type": {
+      "enum": [
+        "photo_jpeg",
+        "transparent_png",
+        "vector",
+        "video",
+        "unknown"
+      ]
+    },
+    "decision": {
+      "enum": [
+        "BLOCK",
+        "REVIEW",
+        "READY"
+      ]
+    },
+    "decision_summary": {
+      "type": "string"
+    },
+    "technical": {
+      "type": "object",
+      "properties": {
+        "format": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "width_px": {
+          "type": [
+            "integer",
+            "null"
+          ]
+        },
+        "height_px": {
+          "type": [
+            "integer",
+            "null"
+          ]
+        },
+        "megapixels": {
+          "type": [
+            "number",
+            "null"
+          ]
+        },
+        "file_size_bytes": {
+          "type": [
+            "integer",
+            "null"
+          ]
+        },
+        "icc_profile": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "has_alpha": {
+          "type": [
+            "boolean",
+            "null"
+          ]
+        },
+        "checks_run": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
+        }
+      },
+      "additionalProperties": true
+    },
+    "checks": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "required": [
+          "check_id",
+          "status",
+          "severity",
+          "source_class",
+          "observation",
+          "requires_human_review"
+        ],
+        "properties": {
+          "check_id": {
+            "type": "string"
+          },
+          "rule_id": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "status": {
+            "enum": [
+              "PASS",
+              "FAIL",
+              "REVIEW",
+              "UNKNOWN",
+              "NOT_APPLICABLE"
+            ]
+          },
+          "severity": {
+            "enum": [
+              "INFO",
+              "LOW",
+              "MEDIUM",
+              "HIGH",
+              "CRITICAL"
+            ]
+          },
+          "confidence": {
+            "type": [
+              "number",
+              "null"
+            ],
+            "minimum": 0,
+            "maximum": 1
+          },
+          "confidence_calibrated": {
+            "type": "boolean",
+            "default": false
+          },
+          "source_class": {
+            "enum": [
+              "official_adobe",
+              "internal_heuristic",
+              "research_background",
+              "unknown"
+            ]
+          },
+          "source_ids": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          },
+          "evidence_type": {
+            "enum": [
+              "metadata_measurement",
+              "crop",
+              "bounding_box",
+              "ocr_text",
+              "model_observation",
+              "user_confirmation",
+              "document",
+              "none"
+            ]
+          },
+          "region": {
+            "oneOf": [
+              {
+                "type": "object",
+                "required": [
+                  "x",
+                  "y",
+                  "width",
+                  "height"
+                ],
+                "properties": {
+                  "x": {
+                    "type": "number",
+                    "minimum": 0,
+                    "maximum": 1
+                  },
+                  "y": {
+                    "type": "number",
+                    "minimum": 0,
+                    "maximum": 1
+                  },
+                  "width": {
+                    "type": "number",
+                    "minimum": 0,
+                    "maximum": 1
+                  },
+                  "height": {
+                    "type": "number",
+                    "minimum": 0,
+                    "maximum": 1
+                  }
+                }
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "observation": {
+            "type": "string"
+          },
+          "why_it_matters": {
+            "type": "string"
+          },
+          "suggested_action": {
+            "type": "string"
+          },
+          "requires_human_review": {
+            "type": "boolean"
+          }
+        },
+        "additionalProperties": true
+      }
+    },
+    "provenance": {
+      "type": "object",
+      "properties": {
+        "is_generative_ai": {
+          "enum": [
+            true,
+            false,
+            "unknown",
+            null
+          ]
+        },
+        "tool_name": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "model_name": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "prompt_available": {
+          "type": "boolean"
+        },
+        "license_status": {
+          "enum": [
+            "confirmed",
+            "unconfirmed",
+            "not_applicable",
+            "unknown"
+          ]
+        },
+        "people_property_status": {
+          "enum": [
+            "fictional_confirmed",
+            "real_identifiable",
+            "no_recognizable_people_or_property",
+            "unknown"
+          ]
+        },
+        "model_release_status": {
+          "enum": [
+            "attached_and_verified_by_user",
+            "missing",
+            "not_required_confirmed",
+            "unknown"
+          ]
+        },
+        "property_release_status": {
+          "enum": [
+            "attached_and_verified_by_user",
+            "missing",
+            "not_required_confirmed",
+            "unknown"
+          ]
+        }
+      },
+      "additionalProperties": true
+    },
+    "metadata_review": {
+      "type": "object",
+      "properties": {
+        "title": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "keywords": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
+        },
+        "claims_to_verify": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
+        },
+        "suspected_prohibited_terms": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
+        }
+      },
+      "additionalProperties": true
+    },
+    "limitations": {
+      "type": "array",
+      "items": {
+        "type": "string"
+      }
+    },
+    "policy_version": {
+      "type": "string"
+    },
+    "reviewed_at": {
+      "type": "string",
+      "format": "date-time"
+    }
+  },
+  "additionalProperties": true
+}

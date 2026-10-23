@@ -10,6 +10,7 @@ import {
   Key,
   Maximize2,
   RefreshCw,
+  ShieldCheck,
   Sparkles,
   Square,
   Upload,
@@ -35,7 +36,7 @@ import {
   setActiveFtpProfileId,
 } from '@/lib/ftp/store';
 import { normalizeFileStem } from '@/lib/dedupe';
-import { useFtpBridgeStatus, getFtpApiUrl } from '@/lib/ftp/bridge-client';
+import { useFtpBridgeStatus, getFtpApiUrl, findLocalFile } from '@/lib/ftp/bridge-client';
 import { FtpBridgeStatusBanner } from '@/components/FtpBridgeStatusBanner';
 
 export interface FtpQueueViewProps {
@@ -57,6 +58,7 @@ interface LocalQueueItem {
   id: string;
   itemId: string;
   file?: File;
+  filePath?: string;
   filename: string;
   fileSize: number;
   assetType: 'image' | 'video';
@@ -161,6 +163,7 @@ export function FtpQueueView({
   const [selectedQueueIds, setSelectedQueueIds] = useState<Set<string>>(new Set());
   const [skipDuplicates, setSkipDuplicates] = useState(true);
   const [autoEmbedMetadata, setAutoEmbedMetadata] = useState(true);
+  const [autoQcProtection, setAutoQcProtection] = useState(true);
   const [isUploading, setIsUploading] = useState(false);
   const isUploadingRef = useRef(false);
   const abortUploadRef = useRef(false);
@@ -262,25 +265,44 @@ export function FtpQueueView({
       const freshLedger = await loadUploadLedger();
       if (isCancelled) return;
 
-      const itemsWithFiles = items.map((it) => {
-        const matchedFile = fileMap.get(it.filename.toLowerCase());
-        const hasValidMeta = Boolean(
-          !it.error && it.meta && Boolean(it.meta.title?.trim()) && Boolean(it.meta.keywords?.trim())
-        );
-        return {
-          id: it.id,
-          itemId: it.id,
-          file: matchedFile,
-          filename: it.filename,
-          fileSize: matchedFile?.size || 0,
-          assetType: it.assetType,
-          thumbDataUrl: it.thumbDataUrl,
-          hasValidMeta,
-          metaError: it.error,
-          status: 'pending' as const,
-          progress: 0,
-        };
-      });
+      const itemsWithFiles = await Promise.all(
+        items.map(async (it) => {
+          const matchedFile = fileMap.get(it.filename.toLowerCase());
+          let effectiveFilePath = it.filePath;
+          let effectiveFileSize = matchedFile?.size || 0;
+
+          // Jika tidak ada file di memori browser dan belum ada filePath, auto-resolve via local bridge!
+          if (!matchedFile && !effectiveFilePath) {
+            try {
+              const localFound = await findLocalFile(it.filename);
+              if (localFound?.found && localFound.fullPath) {
+                effectiveFilePath = localFound.fullPath;
+                if (!effectiveFileSize && localFound.sizeBytes) {
+                  effectiveFileSize = localFound.sizeBytes;
+                }
+              }
+            } catch {}
+          }
+
+          const hasValidMeta = Boolean(
+            !it.error && it.meta && Boolean(it.meta.title?.trim()) && Boolean(it.meta.keywords?.trim())
+          );
+          return {
+            id: it.id,
+            itemId: it.id,
+            file: matchedFile,
+            filePath: effectiveFilePath,
+            filename: it.filename,
+            fileSize: effectiveFileSize,
+            assetType: it.assetType,
+            thumbDataUrl: it.thumbDataUrl,
+            hasValidMeta,
+            metaError: it.error,
+            status: 'pending' as const,
+            progress: 0,
+          };
+        })
+      );
 
       // Compute duplicates for each item (termasuk intra-queue deduplication)
       const seenQueueFingerprints = new Map<string, string>(); // fingerprint -> filename
@@ -288,13 +310,15 @@ export function FtpQueueView({
 
       const newQueue: LocalQueueItem[] = [];
       for (const item of itemsWithFiles) {
-        if (!item.file || !selectedProfile) {
+        if ((!item.file && !item.filePath) || !selectedProfile) {
           newQueue.push(item);
           continue;
         }
 
         try {
-          const fingerprint = await computeFileFingerprint(item.file);
+          const fingerprint = item.file
+            ? await computeFileFingerprint(item.file)
+            : `path:${item.filePath || item.filename}`;
           const stem = normalizeFileStem(item.filename);
           const stemKey = `${stem}_${item.fileSize}`;
 
@@ -365,7 +389,7 @@ export function FtpQueueView({
         if (prevSelected.size > 0) return prevSelected;
         const initialSelected = new Set<string>();
         for (const q of newQueue) {
-          if (q.file && q.hasValidMeta && (!skipDuplicates || !q.duplicateInfo?.isDuplicate)) {
+          if ((q.file || q.filePath) && q.hasValidMeta && (!skipDuplicates || !q.duplicateInfo?.isDuplicate)) {
             initialSelected.add(q.id);
           }
         }
@@ -381,12 +405,12 @@ export function FtpQueueView({
   }, [items, availableFiles, selectedProfile?.id, selectedProfile?.agencyId, skipDuplicates]);
 
   const missingFileCount = useMemo(() => {
-    return queue.filter((q) => !q.file).length;
+    return queue.filter((q) => !q.file && !q.filePath).length;
   }, [queue]);
 
   const selectedReadyCount = useMemo(() => {
     return queue.filter((q) => {
-      if (!selectedQueueIds.has(q.id) || !q.file) return false;
+      if (!selectedQueueIds.has(q.id) || (!q.file && !q.filePath)) return false;
       if (q.status === 'success') return false;
       if (!q.hasValidMeta) return false;
       if (skipDuplicates && q.duplicateInfo?.isDuplicate) return false;
@@ -448,7 +472,7 @@ export function FtpQueueView({
 
   const selectUnuploadedOnly = () => {
     const unuploaded = queue.filter(
-      (q) => q.hasValidMeta && !q.duplicateInfo?.isDuplicate && q.status !== 'success'
+      (q) => (q.file || q.filePath) && q.hasValidMeta && !q.duplicateInfo?.isDuplicate && q.status !== 'success'
     );
     setSelectedQueueIds(new Set(unuploaded.map((q) => q.id)));
     toast.info(`Memilih ${unuploaded.length} file yang belum pernah diunggah.`);
@@ -460,7 +484,7 @@ export function FtpQueueView({
 
   // Coba ulang unggahan yang sebelumnya gagal
   const handleRetryFailed = () => {
-    const failedItems = queue.filter((q) => q.status === 'error' && q.file && q.hasValidMeta);
+    const failedItems = queue.filter((q) => q.status === 'error' && (q.file || q.filePath) && q.hasValidMeta);
     if (failedItems.length === 0) {
       toast.info('Tidak ada file gagal yang dapat dicoba lagi.');
       return;
@@ -529,7 +553,7 @@ export function FtpQueueView({
       return;
     }
 
-    const readyItems = targetItems.filter((q) => Boolean(q.file && q.hasValidMeta));
+    const readyItems = targetItems.filter((q) => Boolean((q.file || q.filePath) && q.hasValidMeta));
     if (readyItems.length === 0) {
       const missingMeta = targetItems.filter((q) => !q.hasValidMeta);
       if (missingMeta.length > 0) {
@@ -538,7 +562,7 @@ export function FtpQueueView({
         );
         return;
       }
-      toast.error('File fisik belum dimuat ke memori browser (0.0 MB). Klik "Pasangkan File Asli dari Komputer".');
+      toast.error('File fisik belum dimuat ke memori browser atau disk (0.0 MB). Klik "Pasangkan File Asli dari Komputer".');
       document.getElementById('ftp-queue-attach-input')?.click();
       return;
     }
@@ -548,13 +572,61 @@ export function FtpQueueView({
       toast.warning(`${skippedCount} file dilewati karena belum memiliki file fisik atau metadata.`);
     }
 
+    // Track 2: Proteksi Otomatis Akun Adobe Stock (Adobe Safety Gate)
+    const isTargetingAdobe = selectedProfile.agencyId === 'adobe';
+    let itemsToProcess = readyItems;
+
+    if (isTargetingAdobe && autoQcProtection) {
+      const blockedReasons: { filename: string; reason: string }[] = [];
+      const safeItems = readyItems.filter((item) => {
+        // Cek batasan ukuran resmi Adobe (Maks 45 MB)
+        if (item.fileSize > 45 * 1024 * 1024) {
+          blockedReasons.push({
+            filename: item.filename,
+            reason: `Ukuran file ${(item.fileSize / (1024 * 1024)).toFixed(1)} MB melebihi batas 45 MB Adobe Stock.`,
+          });
+          return false;
+        }
+        return true;
+      });
+
+      if (blockedReasons.length > 0) {
+        toast.warning(
+          `🛡️ ${blockedReasons.length} file ditahan oleh Proteksi Akun Adobe Stock!`,
+          {
+            description: blockedReasons.map((b) => `${b.filename}: ${b.reason}`).slice(0, 3).join('; '),
+            duration: 6000,
+          }
+        );
+        setQueue((prev) =>
+          prev.map((q) => {
+            const blocked = blockedReasons.find((b) => b.filename === q.filename);
+            if (blocked) {
+              return {
+                ...q,
+                status: 'skipped',
+                error: `🛡️ Ditahan Proteksi Adobe: ${blocked.reason}`,
+              };
+            }
+            return q;
+          })
+        );
+        itemsToProcess = safeItems;
+      }
+
+      if (itemsToProcess.length === 0) {
+        toast.error('Semua file yang dipilih ditahan oleh proteksi Adobe Stock karena tidak memenuhi syarat resmi.');
+        return;
+      }
+    }
+
     setIsUploading(true);
     isUploadingRef.current = true;
     abortUploadRef.current = false;
     activeAbortControllersRef.current.clear();
     activeFilenamesRef.current.clear();
 
-    const totalBytes = readyItems.reduce((acc, it) => acc + it.fileSize, 0);
+    const totalBytes = itemsToProcess.reduce((acc, it) => acc + (it.fileSize || 0), 0);
     setUploadStats({
       speed: 'Memulai...',
       bytesUploaded: 0,
@@ -584,10 +656,12 @@ export function FtpQueueView({
       if (abortUploadRef.current) return;
 
       // Pre-flight check terhadap ledger live
-      if (qItem.file && selectedProfile) {
+      if ((qItem.file || qItem.filePath) && selectedProfile) {
         try {
           const freshLedger = await loadUploadLedger();
-          const freshFingerprint = await computeFileFingerprint(qItem.file);
+          const freshFingerprint = qItem.file
+            ? await computeFileFingerprint(qItem.file)
+            : `path:${qItem.filePath || qItem.filename}`;
           const liveDupCheck = checkDuplicateAsset(
             qItem.filename,
             freshFingerprint,
@@ -619,11 +693,11 @@ export function FtpQueueView({
         }
       }
 
-      if (!qItem.file) {
+      if (!qItem.file && !qItem.filePath) {
         setQueue((prev) =>
           prev.map((item) =>
             item.id === qItem.id
-              ? { ...item, status: 'error', error: 'File sumber tidak tersedia di memori' }
+              ? { ...item, status: 'error', error: 'File sumber tidak tersedia di memori maupun disk' }
               : item
           )
         );
@@ -722,7 +796,11 @@ export function FtpQueueView({
       try {
         const formData = new FormData();
         formData.append('uploadId', qItem.id);
-        formData.append('file', qItem.file);
+        if (qItem.file) {
+          formData.append('file', qItem.file);
+        } else if (qItem.filePath) {
+          formData.append('filePath', qItem.filePath);
+        }
         formData.append(
           'config',
           JSON.stringify({
@@ -831,7 +909,9 @@ export function FtpQueueView({
           )
         );
 
-        const fingerprint = await computeFileFingerprint(qItem.file);
+        const fingerprint = qItem.file
+          ? await computeFileFingerprint(qItem.file)
+          : `path:${qItem.filePath || qItem.filename}`;
         await recordSuccessfulUpload({
           assetHash: fingerprint,
           filename: qItem.filename,
@@ -1198,6 +1278,23 @@ export function FtpQueueView({
                 </span>
               </label>
 
+              {/* Track 2: Proteksi Otomatis Akun Adobe Stock */}
+              <label
+                className="flex items-center gap-1.5 text-xs font-bold cursor-pointer select-none text-[#2c1810]"
+                title="Aktifkan proteksi otomatis untuk akun Adobe Stock: otomatis menahan file yang melanggar batas resmi 45 MB / resolusi rendah agar reputasi akun terlindungi."
+              >
+                <input
+                  type="checkbox"
+                  checked={autoQcProtection}
+                  onChange={(e) => setAutoQcProtection(e.target.checked)}
+                  className="w-3.5 h-3.5 accent-[#ff6b35] rounded cursor-pointer"
+                />
+                <span className="flex items-center gap-1 text-emerald-800">
+                  <ShieldCheck className="w-3.5 h-3.5 text-emerald-600" />
+                  <span>Proteksi Adobe Stock</span>
+                </span>
+              </label>
+
               {/* Concurrency Selector */}
               <div
                 className="flex items-center gap-1.5 text-xs font-bold text-[#2c1810]"
@@ -1258,7 +1355,7 @@ export function FtpQueueView({
               )}
 
                 {/* Retry Failed Button */}
-                {queue.some((q) => q.status === 'error' && q.file && q.hasValidMeta) && !isUploading && (
+                {queue.some((q) => q.status === 'error' && (q.file || q.filePath) && q.hasValidMeta) && !isUploading && (
                   <Button
                     type="button"
                     onClick={handleRetryFailed}
@@ -1266,7 +1363,7 @@ export function FtpQueueView({
                     title="Pilih dan reset file yang gagal diunggah untuk dicoba kembali"
                   >
                     <RefreshCw className="w-3.5 h-3.5 mr-1.5" />
-                    <span>Coba Lagi Gagal ({queue.filter((q) => q.status === 'error' && q.file && q.hasValidMeta).length})</span>
+                    <span>Coba Lagi Gagal ({queue.filter((q) => q.status === 'error' && (q.file || q.filePath) && q.hasValidMeta).length})</span>
                   </Button>
                 )}
 
@@ -1424,6 +1521,15 @@ export function FtpQueueView({
                               </span>
                             )}
 
+                            {qItem.filePath && (
+                              <span
+                                className="inline-flex items-center gap-1 text-[10px] bg-emerald-50 text-emerald-800 border border-emerald-300 px-1.5 py-0.5 rounded font-bold"
+                                title={`File ada di disk lokal:\n${qItem.filePath}`}
+                              >
+                                📁 Di Disk
+                              </span>
+                            )}
+
                             {/* Dreamstime Remote Folder Routing Indicator */}
                             {selectedProfile?.agencyId === 'dreamstime' && (
                               <span
@@ -1457,6 +1563,20 @@ export function FtpQueueView({
                           <span className="text-[#6b5344] font-bold">
                             {(qItem.fileSize / (1024 * 1024)).toFixed(1)} MB
                           </span>
+                        ) : qItem.filePath ? (
+                          <div className="flex flex-col gap-0.5">
+                            <span
+                              className="bg-emerald-100 text-emerald-900 border border-emerald-300 px-1.5 py-0.5 rounded font-bold text-[10px] w-fit"
+                              title={qItem.filePath}
+                            >
+                              📁 Siap di Disk
+                            </span>
+                            {qItem.fileSize > 0 && (
+                              <span className="text-[10px] text-emerald-800 font-bold font-mono">
+                                {(qItem.fileSize / (1024 * 1024)).toFixed(1)} MB
+                              </span>
+                            )}
+                          </div>
                         ) : (
                           <span className="bg-amber-100 text-amber-900 border border-amber-300 px-1.5 py-0.5 rounded font-black text-[10px]">
                             0.0 MB (Perlu File)
@@ -1466,7 +1586,7 @@ export function FtpQueueView({
 
                       {/* Duplicate Status Verification */}
                       <td className="p-3">
-                        {!qItem.file ? (
+                        {!qItem.file && !qItem.filePath ? (
                           <div className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-lg bg-stone-100 border border-stone-300 text-stone-700 text-[11px] font-medium">
                             <AlertTriangle className="w-3.5 h-3.5 text-stone-500 shrink-0" />
                             <span>Menunggu File Fisik</span>
@@ -1513,12 +1633,12 @@ export function FtpQueueView({
                             )}
                           </div>
                         )}
-                        {qItem.hasValidMeta && !qItem.file && qItem.status === 'pending' && (
+                        {qItem.hasValidMeta && !qItem.file && !qItem.filePath && qItem.status === 'pending' && (
                           <span className="text-amber-800 font-bold bg-amber-50 px-2 py-0.5 rounded border border-amber-200">
                             Perlu File Asli
                           </span>
                         )}
-                        {qItem.hasValidMeta && qItem.file && qItem.status === 'pending' && (
+                        {qItem.hasValidMeta && (qItem.file || qItem.filePath) && qItem.status === 'pending' && (
                           <span className="text-[#6b5344] font-bold">Antrean</span>
                         )}
                         {qItem.status === 'uploading' && (

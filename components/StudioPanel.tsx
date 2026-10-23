@@ -6,10 +6,11 @@ import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import { Textarea } from '@/components/ui/textarea';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
-import { ChevronDown, ChevronUp, Upload, Film } from 'lucide-react';
+import { ChevronDown, ChevronUp, Upload, Film, FolderDown, Loader2, ShieldCheck } from 'lucide-react';
 import type { FileType } from '@/lib/types';
 import { isMediaFile, isVideoFile, validateVideoFile, MAX_VIDEO_DURATION_SECONDS } from '@/lib/video';
 import { filterDuplicateFiles } from '@/lib/dedupe';
+import { scanFlowDownloads, fetchLocalFileAsBrowserFile } from '@/lib/ftp/bridge-client';
 import { toast } from 'sonner';
 
 interface StudioPanelProps {
@@ -20,6 +21,7 @@ interface StudioPanelProps {
   hasVideoFiles: boolean;
   onFilesChange: (files: File[]) => void;
   onGenerate: () => void;
+  onOpenQc?: () => void;
   existingItemFilenames?: string[];
   model: string;
   onModelChange: (model: string) => void;
@@ -59,6 +61,7 @@ function StudioPanelComponent({
   onFilesChange,
   onGenerate,
   existingItemFilenames,
+  onOpenQc,
   model,
   onModelChange,
   gasProxyModels,
@@ -76,6 +79,7 @@ function StudioPanelComponent({
   const fileInputId = useId();
   const [openSettings, setOpenSettings] = useState(false);
   const [openTagging, setOpenTagging] = useState(false);
+  const [isPullingFlowAssets, setIsPullingFlowAssets] = useState(false);
 
   const models = gasProxyModels.length > 0 ? gasProxyModels : Object.keys(MODEL_LABELS);
 
@@ -125,6 +129,64 @@ function StudioPanelComponent({
   const onDrop = (e: React.DragEvent) => {
     e.preventDefault();
     void addFiles(Array.from(e.dataTransfer.files || []));
+  };
+
+  const handlePullFlowAssets = async () => {
+    setIsPullingFlowAssets(true);
+    const toastId = toast.loading('Memindai folder unduhan Google Flow di disk lokal...');
+
+    try {
+      const scanRes = await scanFlowDownloads();
+      if (!scanRes.ok) {
+        toast.error('Gagal menghubungkan Local FTP Bridge (port 45678)', {
+          id: toastId,
+          description: scanRes.error || 'Pastikan local bridge server berjalan.',
+        });
+        return;
+      }
+
+      if (scanRes.files.length === 0) {
+        toast.warning('Tidak ditemukan file unduhan di folder lokal Downloads/MetaGen_Flow.', {
+          id: toastId,
+          description: 'Lakukan unduh 2K di Google Flow terlebih dahulu.',
+        });
+        return;
+      }
+
+      // Prioritize 2K, then 4K, then all files
+      const files2K = scanRes.files.filter((f) => f.resolutionTag === '2K');
+      const targetFiles = files2K.length > 0 ? files2K : scanRes.files;
+
+      toast.loading(`Mengambil ${targetFiles.length} file visual dari disk lokal...`, { id: toastId });
+
+      const browserFiles: File[] = [];
+      for (const item of targetFiles) {
+        try {
+          const file = await fetchLocalFileAsBrowserFile(item);
+          browserFiles.push(file);
+        } catch (err) {
+          console.warn(`[StudioPanel] Gagal stream file ${item.filename}:`, err);
+        }
+      }
+
+      if (browserFiles.length === 0) {
+        toast.error('Gagal memuat stream file gambar dari bridge lokal.', { id: toastId });
+        return;
+      }
+
+      toast.dismiss(toastId);
+      await addFiles(browserFiles);
+      toast.success(
+        `Berhasil menarik ${browserFiles.length} aset ${files2K.length > 0 ? '2K' : ''} dari disk lokal ke Studio!`
+      );
+    } catch (err) {
+      toast.error('Terjadi kesalahan saat menarik file lokal', {
+        id: toastId,
+        description: err instanceof Error ? err.message : String(err),
+      });
+    } finally {
+      setIsPullingFlowAssets(false);
+    }
   };
 
   // Clipboard Paste (Ctrl+V) listener for Studio assets
@@ -220,6 +282,28 @@ function StudioPanelComponent({
           </span>
         </div>
 
+        {/* Direct Local Bridge Pull for Google Flow Downloads */}
+        <Button
+          type="button"
+          variant="outline"
+          disabled={isPullingFlowAssets || busy}
+          onClick={handlePullFlowAssets}
+          className="w-full h-9 text-xs font-bold border-2 border-indigo-900 bg-indigo-50 hover:bg-indigo-100 text-indigo-950 shadow-[2px_2px_0_#2c1810] flex items-center justify-center gap-1.5 transition-all cursor-pointer"
+          title="Tarik otomatis file 2K hasil unduhan Google Flow dari disk lokal tanpa upload manual"
+        >
+          {isPullingFlowAssets ? (
+            <>
+              <Loader2 className="w-3.5 h-3.5 animate-spin text-indigo-700" />
+              <span>Menarik Aset 2K dari Disk Lokal...</span>
+            </>
+          ) : (
+            <>
+              <FolderDown className="w-4 h-4 text-indigo-700" />
+              <span>📥 Tarik Aset 2K dari Google Flow (Disk Lokal)</span>
+            </>
+          )}
+        </Button>
+
       {/* Selected files badge info */}
       {!!files.length && (
         <div className="bg-[#fff5e6] border-2 border-[#2c1810] rounded-xl p-3 shadow-[2px_2px_0_#2c1810] space-y-1.5">
@@ -257,6 +341,16 @@ function StudioPanelComponent({
             <p className="text-[10px] text-[#ff6b35] font-bold bg-white p-1.5 rounded-lg border border-[#2c1810]">
               🎬 Video terdeteksi: 5 keyframe otomatis diekstrak untuk analisis video footage.
             </p>
+          )}
+          {onOpenQc && (
+            <button
+              type="button"
+              onClick={onOpenQc}
+              className="w-full mt-2 py-1.5 px-3 rounded-lg bg-white border border-[#2c1810] shadow-[1px_1px_0_#2c1810] text-[11px] font-black text-[#ff6b35] hover:bg-[#fffdf9] flex items-center justify-center gap-1.5 transition-all cursor-pointer"
+            >
+              <ShieldCheck className="w-3.5 h-3.5" />
+              <span>Audit di QC Inspector ({files.length})</span>
+            </button>
           )}
         </div>
       )}

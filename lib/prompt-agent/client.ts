@@ -7,6 +7,7 @@ import {
   parseAndFormatPromptCards,
 } from './engine';
 import type {
+  ContextualTwistItem,
   PromptCardItem,
   VCPAMode,
   VCPAResult,
@@ -317,4 +318,165 @@ Do NOT include markdown backticks or explanations. Output pure JSON only.`;
   // Graceful fallback to curated pool if AI call times out or errors
   return getRandomCuratedIdeas(safeCount).map((item) => ({ ...item, isAiGenerated: false }));
 }
+
+export const FALLBACK_STOCK_TWISTS: ContextualTwistItem[] = [
+  {
+    id: 'twist-flatlay',
+    label: 'Flatlay & Copy Space',
+    category: 'Sudut & Framing',
+    modifierText: 'Overhead 90-degree flatlay tabletop composition with generous negative copy space for designer typography',
+  },
+  {
+    id: 'twist-isolated',
+    label: 'Studio Isolated on White',
+    category: 'Setting & Iklan',
+    modifierText: 'Clean commercial studio shot isolated on pure neutral white background with softbox lighting and soft contact shadow',
+  },
+  {
+    id: 'twist-golden-hour',
+    label: 'Golden Hour Rim Light',
+    category: 'Pencahayaan',
+    modifierText: 'Warm golden hour rim lighting, soft ambient sun flare, rich natural depth of field and warm color temperature',
+  },
+  {
+    id: 'twist-macro',
+    label: 'Macro Detail & Tekstur',
+    category: 'Sudut & Framing',
+    modifierText: 'Extreme macro close-up showcasing tactile surface textures, crisp focal plane, delicate natural lighting highlights',
+  },
+  {
+    id: 'twist-lifestyle-candid',
+    label: 'Candid Lifestyle Moment',
+    category: 'Emosi & Narasi',
+    modifierText: 'Authentic candid lifestyle interaction, genuine human touch, modern contemporary setting with soft daylight',
+  },
+  {
+    id: 'twist-cinematic-night',
+    label: 'Sinematik Blue Hour',
+    category: 'Pencahayaan',
+    modifierText: 'Atmospheric blue hour twilight, subtle warm tungsten accent lighting, high dynamic range cinematic color grading',
+  },
+  {
+    id: 'twist-editorial-minimal',
+    label: 'Minimalist Editorial',
+    category: 'Komposisi',
+    modifierText: 'Sophisticated minimalist art direction, architectural negative space, muted refined color palette, museum quality',
+  },
+  {
+    id: 'twist-hero-banner',
+    label: 'Hero Advertising Banner',
+    category: 'Komersial',
+    modifierText: 'Wide panoramic commercial advertising composition with intentional clean side space reserved for corporate headline',
+  },
+];
+
+export async function generateContextualTwists(params: {
+  imageDataUrl?: string;
+  visualDna?: VisualDNAProfile;
+  currentBrief?: string;
+  count?: number;
+  provider?: Provider;
+  model?: string;
+  customApiKey?: string;
+}): Promise<ContextualTwistItem[]> {
+  const {
+    imageDataUrl,
+    visualDna,
+    currentBrief,
+    count = 6,
+    provider = 'gas-proxy',
+    model = 'auto',
+    customApiKey,
+  } = params;
+
+  const apiKey = customApiKey || getApiKey(provider);
+  const safeCount = Math.max(4, Math.min(count, 12));
+
+  let dnaContext = '';
+  if (visualDna) {
+    const safeDna = normalizeVisualDna(visualDna) || visualDna;
+    dnaContext = `Visual elements detected in image:
+- Subject: ${safeDna.subject?.type || 'Subject'} (${(safeDna.subject?.attributes || []).join(', ')})
+- Observed: ${(safeDna.observed || []).slice(0, 5).join(', ')}
+- Core anchors: ${(safeDna.anchors || []).slice(0, 4).join(', ')}
+- Theme: ${safeDna.semanticProfile?.coreTheme || ''}`;
+  }
+
+  const instruction = `You are a world-class creative director for commercial microstock photography and illustrations (Adobe Stock, Freepik).
+The user has attached an image reference to create commercial prompt variations.
+
+${dnaContext}
+${currentBrief ? `User's current focus: "${currentBrief}"` : ''}
+
+TASK:
+Brainstorm EXACTLY ${safeCount} DISTINCT, highly commercial creative angles / scene twists specifically designed to be COMBINED with this reference image.
+Each twist should give the user an exciting new variation to shoot or generate without breaking the core subject!
+
+Explore diverse categories:
+1. Lighting & Atmosphere (e.g. "Golden Hour Rim Light", "Blue Hour Twilight", "Softbox Studio Glow")
+2. Camera & Framing (e.g. "Flatlay Overhead 90°", "Extreme Macro Texture", "Wide Environmental Hero")
+3. Setting & Story (e.g. "Minimalist Scandinavian Interior", "Urban Commute Street", "Outdoor Nature Morning")
+4. Commercial Purpose (e.g. "Hero Shot Copy Space", "Product Packaging Banner", "Candid Social Lifestyle")
+
+FORMAT REQUIREMENTS:
+Return ONLY a valid JSON object matching this schema exactly (no markdown backticks, no extra text):
+{
+  "twists": [
+    {
+      "id": "twist-1",
+      "label": "Short Catchy Label (2-4 words in Indonesian, e.g. 'Flatlay & Copy Space' or 'Pagi Hangat di Kafe')",
+      "category": "Sudut / Pencahayaan / Setting / Komersial",
+      "modifierText": "Rich concrete English prompt phrase (1 concise sentence) describing this specific visual twist"
+    }
+  ]
+}`;
+
+  try {
+    const res = await withRetry(
+      () =>
+        fetch('/api/generate/prompt-agent', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            mode: imageDataUrl ? 'reference_to_prompt' : 'text_ideation',
+            brief: currentBrief || 'Brainstorm contextual visual twists',
+            imageDataUrl: imageDataUrl || undefined,
+            apiKey: apiKey || undefined,
+            provider,
+            model,
+            instruction,
+          }),
+        }).then(async (r) => {
+          if (!r.ok) {
+            const errText = await r.text();
+            throw new Error(`HTTP ${r.status}: ${errText.slice(0, 150)}`);
+          }
+          return r;
+        }),
+      2,
+      700
+    );
+
+    const data = (await res.json()) as { twists?: Array<Record<string, unknown>> } & Record<string, unknown>;
+    const rawTwists = Array.isArray(data.twists) ? data.twists : [];
+
+    if (rawTwists.length > 0) {
+      return rawTwists.map((it, idx) => ({
+        id: (typeof it.id === 'string' && it.id) || `twist-${nanoid()}`,
+        label: (typeof it.label === 'string' && it.label) || `Opsi Twist #${idx + 1}`,
+        category: (typeof it.category === 'string' && it.category) || 'Variasi Kreatif',
+        modifierText:
+          (typeof it.modifierText === 'string' && it.modifierText) ||
+          'Complementary commercial scene variation with clean lighting and balanced composition',
+        isSelected: false,
+      }));
+    }
+  } catch (err) {
+    console.warn('[Contextual Twists Error] Falling back to default stock twists:', err);
+  }
+
+  // Resilient fallback: Return curated stock twists
+  return FALLBACK_STOCK_TWISTS.slice(0, safeCount).map((t) => ({ ...t, id: `twist-${nanoid()}` }));
+}
+
 
