@@ -120,7 +120,9 @@ export async function POST(req: NextRequest) {
 
     const targetModel = model || 'auto';
 
-    const contentParts: Array<{ type: string; text?: string; image_url?: { url: string } }> = [];
+    const contentParts: Array<{ type: string; text?: string; image_url?: { url: string } }> = [
+      { type: 'text', text: instruction },
+    ];
 
     if (imageDataUrl) {
       contentParts.push({
@@ -129,7 +131,7 @@ export async function POST(req: NextRequest) {
       });
     }
 
-    contentParts.push({ type: 'text', text: instruction });
+    const effectiveTemp = imageDataUrl ? 0.3 : 0.5;
 
     const payload = {
       model: targetModel,
@@ -139,7 +141,7 @@ export async function POST(req: NextRequest) {
           content: contentParts,
         },
       ],
-      temperature: 0.7,
+      temperature: effectiveTemp,
       max_tokens: 4096,
     };
 

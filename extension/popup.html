@@ -3,7 +3,7 @@
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>Meta-Gen VCPA Assistant</title>
+  <title>Meta-Gen Extension Control Center</title>
   <link rel="stylesheet" href="popup.css">
 </head>
 <body>
@@ -11,13 +11,13 @@
     <!-- Header -->
     <header class="header">
       <div class="brand">
-        <div class="brand-icon">✨</div>
+        <div class="brand-icon">⚡</div>
         <div>
-          <h1 class="brand-title">Meta-Gen VCPA</h1>
-          <p class="brand-sub">Deteksi Gambar & Frame (All Tabs)</p>
+          <h1 class="brand-title">Meta-Gen Assistant</h1>
+          <p class="brand-sub">Pusat Kendali Fitur Ekstensi</p>
         </div>
       </div>
-      <span class="status-pill" id="statusPill">Latar Belakang</span>
+      <span class="status-pill" id="statusPill">Aktif</span>
     </header>
 
     <!-- App Target Config Bar -->
@@ -29,48 +29,145 @@
           <option value="http://localhost:3000">Local (localhost:3000)</option>
         </select>
       </div>
+
+      <!-- Connection Status Badges -->
+      <div class="status-indicators">
+        <div class="indicator-badge" id="appConnectionBadge" title="Status koneksi ke tab aktif Meta-Gen">
+          <span class="indicator-dot unknown" id="appDot"></span>
+          <span id="appConnectionText">Memeriksa Web App...</span>
+        </div>
+        <div class="indicator-badge" id="localBridgeBadge" title="Status server lokal FTP & ExifTool Bridge (:45678)">
+          <span class="indicator-dot unknown" id="bridgeDot"></span>
+          <span id="localBridgeText">Local Bridge :45678</span>
+        </div>
+      </div>
     </section>
 
-    <!-- Scanner Info Header -->
-    <section class="scanner-header">
-      <div class="scanner-stats">
-        <span class="stat-count" id="imageCount">0</span>
-        <span class="stat-label">Gambar Ditemukan</span>
-      </div>
-      <div class="scanner-actions">
-        <button type="button" id="selectAllBtn" class="btn-text">Pilih Semua</button>
-        <button type="button" id="refreshBtn" class="btn-text" title="Pindai Ulang Seluruh Frame">🔄 Pindai Ulang</button>
-      </div>
-    </section>
+    <!-- Features Toggle Section -->
+    <main class="features-container">
+      <div class="section-title">Aktivasi Fitur Otomasi</div>
 
-    <!-- Filter Toggle Bar -->
-    <section class="filter-bar">
-      <label class="filter-toggle">
-        <input type="checkbox" id="filterSmallImages" checked>
-        <span>Sembunyikan ikon / elemen kecil (&lt; 60px)</span>
-      </label>
-    </section>
+      <!-- Feature 1: Auto Download 2K/4K Google Flow -->
+      <div class="feature-card">
+        <div class="feature-info">
+          <div class="feature-header">
+            <span class="feature-icon">📥</span>
+            <span class="feature-name">Auto-Download 2K/4K (Google Flow)</span>
+          </div>
+          <p class="feature-desc">Otomatis unduh gambar beresolusi tinggi ke folder Downloads saat generasi selesai.</p>
+          <div class="feature-suboptions" id="resOptionsWrapper">
+            <span class="suboption-label">Resolusi Unduhan:</span>
+            <div class="pill-group">
+              <button type="button" class="res-pill" data-res="2K">2K</button>
+              <button type="button" class="res-pill" data-res="4K">4K</button>
+              <button type="button" class="res-pill" data-res="1K">1K</button>
+            </div>
+          </div>
+        </div>
+        <label class="switch" title="Aktifkan/nonaktifkan auto-download resolusi tinggi">
+          <input type="checkbox" id="toggleAutoDownload">
+          <span class="slider"></span>
+        </label>
+      </div>
 
-    <!-- Images Grid List -->
-    <main class="images-container" id="imagesContainer">
-      <div class="loading-state" id="loadingState">
-        <div class="spinner"></div>
-        <p>Memindai seluruh frame & gambar di tab aktif...</p>
+      <!-- Feature 2: Google Flow Bridge (Auto-Submit) -->
+      <div class="feature-card">
+        <div class="feature-info">
+          <div class="feature-header">
+            <span class="feature-icon">🤖</span>
+            <span class="feature-name">Google Flow Bridge (Auto-Submit)</span>
+          </div>
+          <p class="feature-desc">Ketik & kirim antrean prompt secara otomatis ke canvas Google Flow tanpa copas manual.</p>
+        </div>
+        <label class="switch" title="Aktifkan/nonaktifkan auto-submit prompt ke Flow">
+          <input type="checkbox" id="toggleFlowBridge">
+          <span class="slider"></span>
+        </label>
       </div>
-      <div class="empty-state hidden" id="emptyState">
-        <p>Tidak ada gambar yang memenuhi kriteria pada halaman dan frame ini.</p>
-        <p class="empty-tip">Coba hilangkan centang "Sembunyikan ikon kecil" di atas.</p>
+
+      <!-- Feature 3: Auto-Sync Canvas ke Meta-Gen -->
+      <div class="feature-card">
+        <div class="feature-info">
+          <div class="feature-header">
+            <span class="feature-icon">🔄</span>
+            <span class="feature-name">Auto-Sync Canvas ke Meta-Gen</span>
+          </div>
+          <p class="feature-desc">Pindai canvas Flow setiap 2 detik & sinkronkan hasil render kembali ke sesi aktif.</p>
+        </div>
+        <label class="switch" title="Aktifkan/nonaktifkan auto-sync kanvas Flow">
+          <input type="checkbox" id="toggleAutoSync">
+          <span class="slider"></span>
+        </label>
       </div>
-      <div class="images-grid" id="imagesGrid"></div>
+
+      <!-- Feature 4: Auto-Retry Generasi Gagal -->
+      <div class="feature-card">
+        <div class="feature-info">
+          <div class="feature-header">
+            <span class="feature-icon">🔁</span>
+            <span class="feature-name">Auto-Retry Google Flow (Coba Lagi)</span>
+          </div>
+          <p class="feature-desc">Otomatis klik tombol 'Coba lagi' saat render gagal karena kendala server Google.</p>
+        </div>
+        <label class="switch" title="Aktifkan/nonaktifkan auto-retry Flow">
+          <input type="checkbox" id="toggleAutoRetry">
+          <span class="slider"></span>
+        </label>
+      </div>
+
+      <!-- Feature 5: Omnigent In-Page Companion (Floating Agent) -->
+      <div class="feature-card">
+        <div class="feature-info">
+          <div class="feature-header">
+            <span class="feature-icon">💬</span>
+            <span class="feature-name">Omnigent Floating Companion</span>
+          </div>
+          <p class="feature-desc">Tampilkan widget asisten AI mengambang di pojok kanan bawah halaman web aktif.</p>
+        </div>
+        <label class="switch" title="Aktifkan/nonaktifkan asisten mengambang di halaman web">
+          <input type="checkbox" id="toggleFloatingAgent">
+          <span class="slider"></span>
+        </label>
+      </div>
+
+      <!-- Feature 6: Menu Klik Kanan "Generate Prompt" -->
+      <div class="feature-card">
+        <div class="feature-info">
+          <div class="feature-header">
+            <span class="feature-icon">🖱️</span>
+            <span class="feature-name">Menu Klik Kanan "Generate Prompt"</span>
+          </div>
+          <p class="feature-desc">Klik kanan gambar web mana pun untuk langsung mengirimnya ke antrean Meta-Gen.</p>
+        </div>
+        <label class="switch" title="Aktifkan/nonaktifkan menu klik kanan browser">
+          <input type="checkbox" id="toggleContextMenu">
+          <span class="slider"></span>
+        </label>
+      </div>
+
+      <!-- Feature 7: Auto QC & Metadata Handoff -->
+      <div class="feature-card">
+        <div class="feature-info">
+          <div class="feature-header">
+            <span class="feature-icon">🛡️</span>
+            <span class="feature-name">Auto-QC & Metadata Handoff</span>
+          </div>
+          <p class="feature-desc">Memicu audit teknis Adobe Stock & handoff metadata otomatis begitu gambar terunduh.</p>
+        </div>
+        <label class="switch" title="Aktifkan/nonaktifkan alur otomatis QC & Metadata">
+          <input type="checkbox" id="toggleAutoQc">
+          <span class="slider"></span>
+        </label>
+      </div>
     </main>
 
     <!-- Footer Action Bar -->
     <footer class="footer">
-      <button type="button" id="sendSelectedBtn" class="btn-primary" disabled>
-        <span>Kirim 0 Gambar ke Antrean (Latar Belakang)</span>
-      </button>
-      <button type="button" id="openAppBtn" class="btn-secondary" title="Buka Tab Web App Meta-Gen">
+      <button type="button" id="openAppBtn" class="btn-primary" title="Buka Tab Web App Meta-Gen">
         🚀 Buka Web App
+      </button>
+      <button type="button" id="openFlowBtn" class="btn-secondary" title="Buka Tab Google Flow">
+        🌊 Buka Google Flow
       </button>
     </footer>
   </div>

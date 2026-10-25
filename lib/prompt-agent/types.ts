@@ -98,15 +98,19 @@ export interface PromptCardItem {
   tags: string[];
   isFavorite?: boolean;
   isEdited?: boolean;
+  isCopied?: boolean;
+  copiedAt?: number;
   rawBasePrompt?: string;
   createdAt?: number;
   batchId?: string;
   generatedImageUrl?: string;
-  flowStatus?: 'idle' | 'generating' | 'completed' | 'error';
+  flowStatus?: 'idle' | 'pending' | 'generating' | 'completed' | 'error';
   variations?: FlowVariationItem[];
   selectedVariationIndex?: number;
   mediaToken?: string;
   mediaId?: string;
+  qcStatus?: 'pending' | 'passed' | 'failed';
+  qcDetails?: string;
 }
 
 export interface FlowVariationItem {

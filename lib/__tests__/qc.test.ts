@@ -88,6 +88,35 @@ describe('Adobe Stock QC Decision Engine', () => {
     const res = evaluateFinalDecision(baseTechnical, findings);
     expect(res.decision).toBe('READY');
   });
+
+  it('harus mengabaikan (kalibrasi) halusinasi VLM terkait area putih kosong letterboxing pada gambar 16:9 solid', () => {
+    const widescreenTech: TechnicalMetrics = {
+      ...baseTechnical,
+      width_px: 2752,
+      height_px: 1536,
+      megapixels: 4.23,
+      format: 'JPEG',
+      has_alpha: false,
+      passes_hard_tech: true,
+      fail_reasons: [],
+    };
+
+    const hallucinatedFindings: QcCheckFinding[] = [
+      {
+        check_id: 'VQ-COMPOSITION',
+        status: 'FAIL',
+        severity: 'CRITICAL',
+        source_class: 'official_adobe',
+        observation:
+          'Bagian bawah gambar (sekitar 50% dari total tinggi) terisi oleh area putih kosong yang masif, yang tampaknya merupakan artefak dari proses penggabungan (stitching) atau kesalahan kanvas.',
+        requires_human_review: false,
+      },
+    ];
+
+    const res = evaluateFinalDecision(widescreenTech, hallucinatedFindings);
+    expect(res.decision).toBe('READY');
+    expect(res.has_block_issue).toBe(false);
+  });
 });
 
 describe('Known Restrictions Watchlist & Rulebook Lookup', () => {

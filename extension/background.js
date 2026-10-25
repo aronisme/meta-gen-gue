@@ -12,12 +12,18 @@ chrome.runtime.onStartup.addListener(() => {
 });
 
 function setupContextMenu() {
-  chrome.contextMenus.removeAll(() => {
-    // Exactly ONE single menu item: no submenus, no secondary options, zero clutter
-    chrome.contextMenus.create({
-      id: 'metagen_generate_prompt',
-      title: '✨ Generate Prompt (Meta-Gen)',
-      contexts: ['image', 'link', 'page', 'frame'],
+  chrome.storage.local.get(['metagen_feature_context_menu'], (data) => {
+    if (data && data.metagen_feature_context_menu === false) {
+      chrome.contextMenus.removeAll();
+      return;
+    }
+    chrome.contextMenus.removeAll(() => {
+      // Exactly ONE single menu item: no submenus, no secondary options, zero clutter
+      chrome.contextMenus.create({
+        id: 'metagen_generate_prompt',
+        title: '✨ Generate Prompt (Meta-Gen)',
+        contexts: ['image', 'link', 'page', 'frame'],
+      });
     });
   });
 }
@@ -332,6 +338,12 @@ async function executeCdpSubmission(tabId, promptText, coords) {
 
 // Handle Messages from Content Script or Popup
 chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
+  if (message.type === 'UPDATE_CONTEXT_MENU_TOGGLE') {
+    setupContextMenu();
+    sendResponse({ success: true });
+    return true;
+  }
+
   if (message.type === 'TRIGGER_CDP_SUBMIT') {
     const tabId = sender.tab?.id;
     const promptText = message.prompt || '';
@@ -442,6 +454,21 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
       }
     })();
     return true; // async sendResponse
+  }
+
+  if (message.type === 'CHECK_LOCAL_BRIDGE') {
+    (async () => {
+      try {
+        const res = await fetch('http://127.0.0.1:45678/health', { signal: AbortSignal.timeout(2000) });
+        if (res.ok) {
+          const data = await res.json();
+          sendResponse({ online: true, details: data });
+          return;
+        }
+      } catch (e) {}
+      sendResponse({ online: false });
+    })();
+    return true;
   }
 
   if (message.type === 'FLOW_LOGIN_REQUIRED') {

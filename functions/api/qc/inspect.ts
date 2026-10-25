@@ -148,13 +148,25 @@ export async function onRequestPost(context: { request: Request; env: Env }): Pr
       });
     }
 
+    const aspectRatio = technical ? (technical.width_px / Math.max(1, technical.height_px)).toFixed(2) : '1.78';
+    const isWidescreen = technical ? technical.width_px > technical.height_px : true;
+    const aspectDesc = isWidescreen ? `Landscape Widescreen (~${aspectRatio}:1)` : 'Standard/Portrait';
+
     // 2. Prompt Spesialis Inspeksi Visual & Kebijakan Adobe Stock untuk VLM
     const systemPrompt = `You are an expert Adobe Stock Quality Control (QC) Inspector examining a stock image asset before submission.
 Target Asset Type: ${assetType}
 Filename: ${filename}
+Source Dimensions: ${technical?.width_px || '2752'} x ${technical?.height_px || '1536'} px (${aspectDesc}, Format: ${technical?.format || 'JPEG'}${technical?.has_alpha ? ' Transparent' : ' Solid'})
 User Metadata (if available):
 - Title: ${metadata?.title || 'None'}
 - Keywords: ${metadata?.keywords || 'None'}
+
+CRITICAL ASPECT RATIO & LETTERBOXING RULES (MANDATORY ANTI-HALLUCINATION):
+- The original image has dimensions ${technical?.width_px || '2752'} x ${technical?.height_px || '1536'} px (${aspectDesc}).
+- Image transport channels or Vision Transformer preprocessors may letterbox, pillarbox, or pad non-square images with neutral, white, or black background bands (e.g. at the bottom ~44-50% of a square canvas) or slice widescreen photos into sub-tiles.
+- DO NOT confuse letterbox canvas padding, coordinate margins, or white/black border bands outside the active photo area with image defects.
+- DO NOT flag or hallucinate "blank white space", "area putih kosong", "canvas errors", "crop errors", or "stitching artifacts" if the subject matter inside the active frame is complete and normal.
+- Evaluate ONLY the actual visual content inside the photo / illustration frame.
 
 INSPECTION CRITERIA (OFFICIAL ADOBE STOCK QUALITY & TECHNICAL STANDARDS):
 1. ANATOMY & GEOMETRY (AI Defects): Check for deformed/extra/fused hands, fingers, limbs, eyes, unnatural teeth, melted object geometry, unnatural physics, or floating artifacts.

@@ -8,17 +8,40 @@
 (function () {
   // Prevent duplicate injection and run only in the top-level frame
   if (window.top !== window.self) return;
-  if (document.getElementById('metagen-omnigent-root')) return;
 
-  const hostContainer = document.createElement('div');
-  hostContainer.id = 'metagen-omnigent-root';
-  hostContainer.style.position = 'fixed';
-  hostContainer.style.zIndex = '2147483647';
-  hostContainer.style.bottom = '20px';
-  hostContainer.style.right = '20px';
-  hostContainer.style.pointerEvents = 'none'; // pass-through except interactive children
+  chrome.storage?.local?.get(['metagen_feature_floating_agent'], (res) => {
+    if (res && res.metagen_feature_floating_agent === false) {
+      return; // Disabled via extension popup
+    }
+    mountFloater();
+  });
 
-  const shadow = hostContainer.attachShadow({ mode: 'open' });
+  chrome.storage?.onChanged?.addListener((changes, area) => {
+    if (area === 'local' && 'metagen_feature_floating_agent' in changes) {
+      if (changes.metagen_feature_floating_agent.newValue === false) {
+        document.getElementById('metagen-omnigent-root')?.remove();
+      } else {
+        mountFloater();
+      }
+    }
+  });
+
+  function mountFloater() {
+    if (document.getElementById('metagen-omnigent-root')) return;
+
+    const isGoogleFlow =
+      window.location.hostname.includes('flow.google.com') ||
+      window.location.hostname.includes('labs.google');
+
+    const hostContainer = document.createElement('div');
+    hostContainer.id = 'metagen-omnigent-root';
+    hostContainer.style.position = 'fixed';
+    hostContainer.style.zIndex = '2147483647';
+    hostContainer.style.bottom = isGoogleFlow ? '120px' : '20px';
+    hostContainer.style.right = '20px';
+    hostContainer.style.pointerEvents = 'none'; // pass-through except interactive children
+
+    const shadow = hostContainer.attachShadow({ mode: 'open' });
 
   // In-Page Agent Styling
   const style = document.createElement('style');
@@ -486,4 +509,5 @@
     },
     setStatus,
   };
+  }
 })();

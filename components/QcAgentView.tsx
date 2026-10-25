@@ -1,12 +1,17 @@
 'use client';
 
-import React, { useState, useCallback, useMemo } from 'react';
+import React, { useState, useCallback, useMemo, useEffect } from 'react';
 import {
   AlertTriangle,
   ArrowRight,
+  Check,
   CheckCircle2,
+  CheckSquare,
   Download,
+  ExternalLink,
   Eye,
+  FolderCheck,
+  FolderInput,
   FolderOpen,
   HelpCircle,
   Info,
@@ -15,6 +20,7 @@ import {
   ShieldAlert,
   ShieldCheck,
   Sparkles,
+  Square,
   UploadCloud,
   X,
   Zap,
@@ -30,6 +36,12 @@ import {
   removeQcCacheRecord,
   computeQcFileKey,
 } from '@/lib/qc/cache';
+import {
+  organizeQcFiles,
+  openLocalFolderInExplorer,
+  checkBridgeHealth,
+  type OrganizeQcResult,
+} from '@/lib/ftp/bridge-client';
 
 interface QcAgentViewProps {
   onSwitchToMetadata?: () => void;
@@ -65,6 +77,15 @@ export function QcAgentView({
   const [showHowItWorks, setShowHowItWorks] = useState(true);
   const [concurrency, setConcurrency] = useState<number>(3);
   const [thumbnailSize, setThumbnailSize] = useState<'normal' | 'large' | 'xlarge'>('large');
+
+  // Fitur Pemindahan File Lolos QC via Local FTP Bridge
+  const [isOrganizeModalOpen, setIsOrganizeModalOpen] = useState(false);
+  const [targetFolderName, setTargetFolderName] = useState('MetaGen_QC_Passed');
+  const [organizeOperation, setOrganizeOperation] = useState<'move' | 'copy'>('move');
+  const [isOrganizing, setIsOrganizing] = useState(false);
+  const [isBridgeOnline, setIsBridgeOnline] = useState<boolean | null>(null);
+  const [selectedForOrganize, setSelectedForOrganize] = useState<Set<string>>(new Set());
+  const [organizeResults, setOrganizeResults] = useState<OrganizeQcResult | null>(null);
 
   // Dropzone file intake dengan Restorasi Otomatis dari Memori QC
   const handleFilesAdded = useCallback(async (newFiles: File[]) => {
@@ -333,6 +354,18 @@ export function QcAgentView({
     [items, isAuditing, targetAssetType, selectedModel, selectedItem]
   );
 
+  // Tutup modal bukti temuan dengan tombol Escape
+  useEffect(() => {
+    if (!selectedItem) return;
+    const handleKeyDown = (e: KeyboardEvent) => {
+      if (e.key === 'Escape') {
+        setSelectedItem(null);
+      }
+    };
+    window.addEventListener('keydown', handleKeyDown);
+    return () => window.removeEventListener('keydown', handleKeyDown);
+  }, [selectedItem]);
+
   // Toggle user dismiss untuk temuan tertentu
   const handleToggleDismissFinding = useCallback(
     (findingCheckId: string) => {
@@ -377,6 +410,91 @@ export function QcAgentView({
     },
     [selectedItem]
   );
+
+  // Buka modal organize QC dan cek status bridge lokal
+  const handleOpenOrganizeModal = useCallback(async () => {
+    const readyItems = items.filter((it) => it.report?.decision === 'READY');
+    setSelectedForOrganize(new Set(readyItems.map((it) => it.id)));
+    setOrganizeResults(null);
+    setIsOrganizeModalOpen(true);
+
+    try {
+      const health = await checkBridgeHealth();
+      setIsBridgeOnline(health.isAvailable);
+    } catch {
+      setIsBridgeOnline(false);
+    }
+  }, [items]);
+
+  const handleToggleSelectOrganizeItem = useCallback((id: string) => {
+    setSelectedForOrganize((prev) => {
+      const next = new Set(prev);
+      if (next.has(id)) next.delete(id);
+      else next.add(id);
+      return next;
+    });
+  }, []);
+
+  const handleToggleSelectAllOrganize = useCallback(() => {
+    const readyItems = items.filter((it) => it.report?.decision === 'READY');
+    if (selectedForOrganize.size === readyItems.length) {
+      setSelectedForOrganize(new Set());
+    } else {
+      setSelectedForOrganize(new Set(readyItems.map((it) => it.id)));
+    }
+  }, [items, selectedForOrganize]);
+
+  // Eksekusi pemindahan file via bridge
+  const handleExecuteOrganize = useCallback(async () => {
+    const targetItems = items.filter((it) => selectedForOrganize.has(it.id));
+    if (targetItems.length === 0) {
+      toast.warning('Pilih minimal satu file yang lolos QC.');
+      return;
+    }
+
+    setIsOrganizing(true);
+    try {
+      const itemsPayload = targetItems.map((it) => ({
+        filename: it.filename,
+        filePath: it.filePath,
+        file: it.file,
+      }));
+
+      const res = await organizeQcFiles(itemsPayload, {
+        targetFolder: targetFolderName.trim() || 'MetaGen_QC_Passed',
+        operation: organizeOperation,
+      });
+
+      setOrganizeResults(res);
+
+      if (res.ok) {
+        toast.success(
+          `Sukses ${organizeOperation === 'move' ? 'memindahkan' : 'menyalin'} ${res.successCount} file ke ${res.targetDir}`
+        );
+
+        if (organizeOperation === 'move' && res.results) {
+          const movedFilenames = new Set(
+            res.results.filter((r) => r.success).map((r) => r.filename.toLowerCase())
+          );
+          setItems((prev) => prev.filter((it) => !movedFilenames.has(it.filename.toLowerCase())));
+        }
+      } else {
+        toast.error(`Gagal: ${res.error || 'Terjadi kesalahan saat memproses file'}`);
+      }
+    } catch (err) {
+      toast.error(err instanceof Error ? err.message : 'Kegagalan pemindahan file');
+    } finally {
+      setIsOrganizing(false);
+    }
+  }, [items, selectedForOrganize, targetFolderName, organizeOperation]);
+
+  const handleOpenFolder = useCallback(async (folderPath?: string) => {
+    const target = folderPath || organizeResults?.targetDir || targetFolderName;
+    const ok = await openLocalFolderInExplorer(target);
+    if (!ok) {
+      toast.info(`Buka folder di File Explorer: ${target}`);
+    }
+  }, [organizeResults, targetFolderName]);
 
   // Filter items
   const filteredItems = useMemo(() => {
@@ -684,6 +802,20 @@ export function QcAgentView({
               <span>Ekspor JSON</span>
             </button>
           )}
+
+          {/* Tombol Pindahkan File Lolos QC via Local Bridge */}
+          {items.some((it) => it.report?.decision === 'READY') && (
+            <button
+              type="button"
+              onClick={handleOpenOrganizeModal}
+              disabled={isAuditing}
+              className="inline-flex items-center gap-1.5 px-3.5 py-2 rounded-xl bg-emerald-600 text-white font-black text-xs uppercase tracking-wider border-2 border-[#2c1810] shadow-[2px_2px_0_#2c1810] hover:bg-emerald-700 transition-all cursor-pointer"
+              title="Pindahkan atau salin file yang lolos QC ke folder lokal terpisah via FTP Bridge"
+            >
+              <FolderCheck className="w-4 h-4" />
+              <span>Pindahkan Lolos QC ({stats.ready})</span>
+            </button>
+          )}
         </div>
 
         {/* Tombol Eksekusi Audit Masal */}
@@ -953,8 +1085,13 @@ export function QcAgentView({
 
       {/* 6. Modal / Drawer Detail Bukti Temuan (Evidence Viewer) */}
       {selectedItem && selectedItem.report && (
-        <div className="fixed inset-0 z-50 bg-[#2c1810]/60 backdrop-blur-xs flex items-center justify-center p-4">
-          <div className="bg-white rounded-3xl border-2 border-[#2c1810] shadow-[6px_6px_0_#2c1810] max-w-4xl w-full max-h-[90vh] flex flex-col overflow-hidden animate-in fade-in zoom-in-95 duration-150">
+        <div
+          className="fixed inset-0 z-50 bg-[#2c1810]/60 backdrop-blur-xs flex items-center justify-center p-4 cursor-pointer"
+          onClick={(e) => {
+            if (e.target === e.currentTarget) setSelectedItem(null);
+          }}
+        >
+          <div className="bg-white rounded-3xl border-2 border-[#2c1810] shadow-[6px_6px_0_#2c1810] max-w-4xl w-full max-h-[90vh] flex flex-col overflow-hidden animate-in fade-in zoom-in-95 duration-150 cursor-default">
             {/* Modal Header */}
             <div className="p-4 border-b-2 border-[#2c1810] bg-[#fff5e6] flex items-center justify-between gap-3">
               <div className="flex items-center gap-2 min-w-0">
@@ -1147,6 +1284,268 @@ export function QcAgentView({
                   <strong>Pernyataan Kepatuhan:</strong> Status READY mengindikasikan bahwa gambar memenuhi seluruh pengujian yang dikonfigurasi saat ini. Adobe Stock menerapkan proses moderasi manusia dan otomatis privat tersendiri.
                 </div>
               </div>
+            </div>
+
+            {/* Modal Footer */}
+            <div className="p-3.5 border-t-2 border-[#2c1810] bg-[#fff5e6] flex items-center justify-between gap-3">
+              <span className="text-[11px] text-stone-500 font-bold flex items-center gap-1.5">
+                <span>💡 Tip: Tekan tombol</span>
+                <kbd className="px-1.5 py-0.5 bg-white border border-stone-300 rounded font-mono text-[10px] text-stone-700 shadow-xs">Esc</kbd>
+                <span>atau klik di luar modal untuk menutup.</span>
+              </span>
+              <button
+                type="button"
+                onClick={() => setSelectedItem(null)}
+                className="px-4 py-2 rounded-xl bg-[#2c1810] text-white font-black text-xs hover:bg-[#3d2216] transition-colors cursor-pointer shrink-0"
+              >
+                Tutup Jendela
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* 5. Modal Pindahkan File Lolos QC ke Folder Terpisah via Local FTP Bridge */}
+      {isOrganizeModalOpen && (
+        <div
+          className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-[#2c1810]/60 backdrop-blur-xs animate-in fade-in duration-150"
+          onClick={(e) => {
+            if (e.target === e.currentTarget && !isOrganizing) {
+              setIsOrganizeModalOpen(false);
+            }
+          }}
+        >
+          <div className="bg-[#fffcf7] rounded-3xl border-3 border-[#2c1810] shadow-[8px_8px_0_#2c1810] w-full max-w-2xl max-h-[90vh] flex flex-col overflow-hidden animate-in zoom-in-95 duration-150">
+            {/* Modal Header */}
+            <div className="px-6 py-4 border-b-2 border-[#2c1810] bg-[#fff5e6] flex items-center justify-between gap-4">
+              <div className="flex items-center gap-2.5">
+                <span className="w-8 h-8 rounded-xl bg-emerald-600 text-white flex items-center justify-center border-2 border-[#2c1810] shadow-[2px_2px_0_#2c1810]">
+                  <FolderCheck className="w-4 h-4" />
+                </span>
+                <div>
+                  <h3 className="font-black text-sm text-[#2c1810]">
+                    Pindahkan File Lolos QC ke Folder Terpisah
+                  </h3>
+                  <p className="text-[11px] text-[#6b5344] font-medium">
+                    Didukung oleh Backend Lokal MetaGen FTP Bridge (Port 45678)
+                  </p>
+                </div>
+              </div>
+              <button
+                type="button"
+                onClick={() => setIsOrganizeModalOpen(false)}
+                disabled={isOrganizing}
+                className="w-8 h-8 rounded-xl border-2 border-[#2c1810] bg-white flex items-center justify-center hover:bg-[#ffe4d6] transition-colors cursor-pointer"
+              >
+                <X className="w-4 h-4 text-[#2c1810]" />
+              </button>
+            </div>
+
+            {/* Modal Body */}
+            <div className="p-6 overflow-y-auto space-y-5 text-xs text-[#2c1810]">
+              {/* Status Koneksi Bridge */}
+              <div
+                className={`p-3.5 rounded-xl border-2 border-[#2c1810] flex items-center justify-between gap-3 ${
+                  isBridgeOnline
+                    ? 'bg-emerald-50 text-emerald-900'
+                    : 'bg-rose-50 text-rose-900'
+                }`}
+              >
+                <div className="flex items-center gap-2">
+                  <span
+                    className={`w-2.5 h-2.5 rounded-full ${
+                      isBridgeOnline ? 'bg-emerald-600 animate-pulse' : 'bg-rose-600'
+                    }`}
+                  />
+                  <span className="font-bold">
+                    {isBridgeOnline
+                      ? 'Local FTP Bridge Aktif (127.0.0.1:45678) — Siap memproses file lokal langsung.'
+                      : 'Local FTP Bridge Belum Terdeteksi — Jalankan start-ftp-bridge.bat untuk memproses file.'}
+                  </span>
+                </div>
+                <button
+                  type="button"
+                  onClick={async () => {
+                    const health = await checkBridgeHealth();
+                    setIsBridgeOnline(health.isAvailable);
+                    if (health.isAvailable) toast.success('Bridge terhubung!');
+                    else toast.error('Bridge masih offline.');
+                  }}
+                  className="px-2.5 py-1 rounded-lg bg-white border border-[#2c1810] font-bold text-[10px] shadow-[1px_1px_0_#2c1810] hover:bg-stone-50 cursor-pointer"
+                >
+                  Cek Ulang
+                </button>
+              </div>
+
+              {/* Input Nama Folder Tujuan */}
+              <div className="space-y-1.5">
+                <label className="font-black text-xs uppercase tracking-wider block text-[#2c1810]">
+                  Nama / Path Folder Tujuan:
+                </label>
+                <div className="flex items-center gap-2">
+                  <input
+                    type="text"
+                    value={targetFolderName}
+                    onChange={(e) => setTargetFolderName(e.target.value)}
+                    disabled={isOrganizing}
+                    placeholder="MetaGen_QC_Passed"
+                    className="flex-1 h-10 px-3.5 rounded-xl border-2 border-[#2c1810] bg-white font-mono text-xs shadow-[2px_2px_0_#2c1810] focus:outline-none"
+                  />
+                </div>
+                <p className="text-[11px] text-[#6b5344]">
+                  * Secara default folder dibuat di dalam <strong>Downloads/{targetFolderName}</strong>. Anda juga dapat mengetikkan path absolut (contoh: <code className="bg-stone-100 px-1 py-0.5 rounded">D:\AdobeStock_Ready</code>).
+                </p>
+              </div>
+
+              {/* Opsi Operasi: Move vs Copy */}
+              <div className="space-y-1.5">
+                <label className="font-black text-xs uppercase tracking-wider block text-[#2c1810]">
+                  Metode Operasi:
+                </label>
+                <div className="grid grid-cols-2 gap-3">
+                  <button
+                    type="button"
+                    onClick={() => setOrganizeOperation('move')}
+                    disabled={isOrganizing}
+                    className={`p-3 rounded-xl border-2 border-[#2c1810] text-left transition-all cursor-pointer ${
+                      organizeOperation === 'move'
+                        ? 'bg-[#2c1810] text-white shadow-[2px_2px_0_#ff6b35]'
+                        : 'bg-white text-[#2c1810] hover:bg-[#fff5e6]'
+                    }`}
+                  >
+                    <div className="font-black text-xs">Pindahkan (Move) ★</div>
+                    <div className="text-[10px] opacity-80 mt-0.5">
+                      Pindahkan file asli ke folder baru (membersihkan antrean).
+                    </div>
+                  </button>
+
+                  <button
+                    type="button"
+                    onClick={() => setOrganizeOperation('copy')}
+                    disabled={isOrganizing}
+                    className={`p-3 rounded-xl border-2 border-[#2c1810] text-left transition-all cursor-pointer ${
+                      organizeOperation === 'copy'
+                        ? 'bg-[#2c1810] text-white shadow-[2px_2px_0_#ff6b35]'
+                        : 'bg-white text-[#2c1810] hover:bg-[#fff5e6]'
+                    }`}
+                  >
+                    <div className="font-black text-xs">Salin (Copy)</div>
+                    <div className="text-[10px] opacity-80 mt-0.5">
+                      Duplikasi file ke folder baru (file asal tetap aman di tempatnya).
+                    </div>
+                  </button>
+                </div>
+              </div>
+
+              {/* Daftar File Terpilih */}
+              <div className="space-y-2">
+                <div className="flex items-center justify-between">
+                  <label className="font-black text-xs uppercase tracking-wider text-[#2c1810]">
+                    Pilih File untuk Di-{organizeOperation === 'move' ? 'pindahkan' : 'salin'} ({selectedForOrganize.size} Terpilih):
+                  </label>
+                  <button
+                    type="button"
+                    onClick={handleToggleSelectAllOrganize}
+                    className="text-[11px] font-bold text-[#ff6b35] hover:underline cursor-pointer"
+                  >
+                    {selectedForOrganize.size === items.filter((it) => it.report?.decision === 'READY').length
+                      ? 'Batalkan Semua'
+                      : 'Pilih Semua'}
+                  </button>
+                </div>
+
+                <div className="max-h-52 overflow-y-auto rounded-xl border-2 border-[#2c1810] bg-white divide-y divide-stone-200">
+                  {items
+                    .filter((it) => it.report?.decision === 'READY')
+                    .map((item) => {
+                      const isSelected = selectedForOrganize.has(item.id);
+                      return (
+                        <div
+                          key={item.id}
+                          onClick={() => handleToggleSelectOrganizeItem(item.id)}
+                          className={`px-3 py-2 flex items-center justify-between gap-3 cursor-pointer transition-colors ${
+                            isSelected ? 'bg-emerald-50/60' : 'hover:bg-stone-50'
+                          }`}
+                        >
+                          <div className="flex items-center gap-2.5 truncate">
+                            <span className="text-emerald-700">
+                              {isSelected ? (
+                                <CheckSquare className="w-4 h-4 fill-emerald-100" />
+                              ) : (
+                                <Square className="w-4 h-4 text-stone-400" />
+                              )}
+                            </span>
+                            <span className="font-bold text-xs text-[#2c1810] truncate">
+                              {item.filename}
+                            </span>
+                          </div>
+                          <span className="text-[10px] font-bold text-emerald-800 bg-emerald-100 px-2 py-0.5 rounded shrink-0">
+                            Lolos QC ({item.report?.technical?.megapixels || '4+'} MP)
+                          </span>
+                        </div>
+                      );
+                    })}
+                </div>
+              </div>
+
+              {/* Hasil Eksekusi Terakhir */}
+              {organizeResults && (
+                <div className="p-4 rounded-xl border-2 border-[#2c1810] bg-[#fff5e6] space-y-2">
+                  <div className="flex items-center justify-between">
+                    <span className="font-black text-xs text-[#2c1810]">
+                      Hasil Eksekusi: {organizeResults.successCount} Berhasil, {organizeResults.failCount} Gagal
+                    </span>
+                    <button
+                      type="button"
+                      onClick={() => handleOpenFolder(organizeResults.targetDir)}
+                      className="inline-flex items-center gap-1 px-3 py-1 bg-white text-[#2c1810] font-black text-xs rounded-lg border-2 border-[#2c1810] shadow-[1px_1px_0_#2c1810] hover:bg-stone-50 cursor-pointer"
+                    >
+                      <ExternalLink className="w-3.5 h-3.5 text-emerald-700" />
+                      <span>Buka Folder di File Explorer</span>
+                    </button>
+                  </div>
+                  <div className="font-mono text-[11px] text-[#6b5344] bg-white p-2 rounded-lg border border-stone-300 break-all">
+                    {organizeResults.targetDir}
+                  </div>
+                </div>
+              )}
+            </div>
+
+            {/* Modal Footer */}
+            <div className="px-6 py-4 border-t-2 border-[#2c1810] bg-[#fff5e6] flex items-center justify-between gap-3">
+              <button
+                type="button"
+                onClick={() => setIsOrganizeModalOpen(false)}
+                disabled={isOrganizing}
+                className="px-4 py-2 rounded-xl bg-white text-[#2c1810] font-bold text-xs border-2 border-[#2c1810] shadow-[2px_2px_0_#2c1810] hover:bg-stone-100 transition-colors cursor-pointer"
+              >
+                Tutup
+              </button>
+
+              <button
+                type="button"
+                onClick={handleExecuteOrganize}
+                disabled={isOrganizing || selectedForOrganize.size === 0 || isBridgeOnline === false}
+                className={`inline-flex items-center gap-2 px-5 py-2.5 rounded-xl text-white font-black text-xs uppercase tracking-wider border-2 border-[#2c1810] shadow-[3px_3px_0_#2c1810] transition-all cursor-pointer ${
+                  isOrganizing || selectedForOrganize.size === 0 || isBridgeOnline === false
+                    ? 'bg-stone-400 cursor-not-allowed opacity-75'
+                    : 'bg-emerald-600 hover:bg-emerald-700'
+                }`}
+              >
+                {isOrganizing ? (
+                  <>
+                    <RefreshCw className="w-4 h-4 animate-spin" />
+                    <span>Memproses ({organizeOperation === 'move' ? 'Pindahkan' : 'Salin'})...</span>
+                  </>
+                ) : (
+                  <>
+                    <FolderCheck className="w-4 h-4" />
+                    <span>
+                      Mulai {organizeOperation === 'move' ? 'Pindahkan' : 'Salin'} ({selectedForOrganize.size} File)
+                    </span>
+                  </>
+                )}
+              </button>
             </div>
           </div>
         </div>

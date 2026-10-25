@@ -209,8 +209,19 @@ async function scanAndAutoSyncFlowCanvas() {
 
   isAutoScannerRunning = true;
   try {
-    chrome.storage.local.get(['metagen_flow_registry', 'metagen_session_prompts', 'metagen_agent_scenes'], async (res) => {
+    chrome.storage.local.get([
+      'metagen_flow_registry',
+      'metagen_session_prompts',
+      'metagen_agent_scenes',
+      'metagen_feature_auto_sync',
+      'metagen_feature_auto_retry',
+    ], async (res) => {
       try {
+        if (res && res.metagen_feature_auto_sync === false) {
+          isAutoScannerRunning = false;
+          return;
+        }
+
         const reg = res.metagen_flow_registry || {};
         const sessionPrompts = res.metagen_session_prompts || [];
         const agentScenes = res.metagen_agent_scenes || [];
@@ -336,6 +347,7 @@ async function scanAndAutoSyncFlowCanvas() {
                 console.warn('[Meta-Gen Flow Bridge] Auto-sync export error:', err);
               }
             }
+          }
         }
 
         // 4. Check for any failed tiles with 'Coba lagi' / 'try-again-button'
@@ -346,24 +358,26 @@ async function scanAndAutoSyncFlowCanvas() {
             )
           );
 
-          for (const container of candidateContainers) {
-            const tryBtn = findTryAgainButton(container);
-            if (!tryBtn) continue;
+          if (res.metagen_feature_auto_retry !== false) {
+            for (const container of candidateContainers) {
+              const tryBtn = findTryAgainButton(container);
+              if (!tryBtn) continue;
 
-            const matchedPrompt = findBestMatchingPrompt(container, candidatePrompts);
-            if (matchedPrompt) {
-              const tileKey = matchedPrompt.cardId || extractTilePromptText(container).slice(0, 40) || 'tile_err';
-              const retryCount = autoRetriedFailedTilesMap.get(tileKey) || 0;
-              if (retryCount < 2) {
-                autoRetriedFailedTilesMap.set(tileKey, retryCount + 1);
-                console.warn(`[Meta-Gen Flow Bridge] Auto-clicking 'Coba lagi' for scene #${matchedPrompt.ordinal}...`);
-                showFlowToast(
-                  '⚠️ Auto-Retry Google Flow',
-                  `Mencoba lagi render otomatis untuk adegan #${matchedPrompt.ordinal || ''} (${retryCount + 1}/2)...`,
-                  false
-                );
-                clickTryAgainButton(tryBtn);
-                break;
+              const matchedPrompt = findBestMatchingPrompt(container, candidatePrompts);
+              if (matchedPrompt) {
+                const tileKey = matchedPrompt.cardId || extractTilePromptText(container).slice(0, 40) || 'tile_err';
+                const retryCount = autoRetriedFailedTilesMap.get(tileKey) || 0;
+                if (retryCount < 2) {
+                  autoRetriedFailedTilesMap.set(tileKey, retryCount + 1);
+                  console.warn(`[Meta-Gen Flow Bridge] Auto-clicking 'Coba lagi' for scene #${matchedPrompt.ordinal}...`);
+                  showFlowToast(
+                    '⚠️ Auto-Retry Google Flow',
+                    `Mencoba lagi render otomatis untuk adegan #${matchedPrompt.ordinal || ''} (${retryCount + 1}/2)...`,
+                    false
+                  );
+                  clickTryAgainButton(tryBtn);
+                  break;
+                }
               }
             }
           }
@@ -1066,7 +1080,7 @@ async function ensureBatchViewMode() {
 
     // 4. Cari tombol Setelan (icon settings_2 atau aria-label Setelan)
     let settingsBtn = document.querySelector(
-      'button[aria-label="Setelan" i], button[mattooltip="Lihat setelan" i]'
+      'button[aria-label="Setelan" i], button[aria-label="Settings" i], button[mattooltip="Lihat setelan" i], button[mattooltip="View settings" i]'
     );
     if (!settingsBtn) {
       const allButtons = Array.from(document.querySelectorAll('button'));

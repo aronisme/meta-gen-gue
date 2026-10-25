@@ -15,6 +15,7 @@ vi.mock('idb-keyval', () => ({
 import {
   exportPromptsToCsv,
   exportPromptsToQueueText,
+  exportUncopiedPromptsToQueueText,
   normalizeVisualDna,
 } from '../prompt-agent/engine';
 import {
@@ -95,6 +96,35 @@ describe('VCPA Prompt Session & Bulk Export System', () => {
     expect(queueTxt).toContain('Macro shot of roasted coffee beans --ar 16:9 --v 6.1');
     // Separated by double newline
     expect(queueTxt).toContain('\n\n');
+  });
+
+  it('exports only uncopied prompts when using exportUncopiedPromptsToQueueText', () => {
+    const mixedPrompts: PromptCardItem[] = [
+      {
+        ...samplePrompts[0],
+        isCopied: true,
+        copiedAt: Date.now() - 5000,
+      },
+      {
+        ...samplePrompts[1],
+        isCopied: false,
+      },
+      {
+        id: 'p-3',
+        ordinal: 3,
+        title: 'Brand New Concept',
+        prompt: 'Futuristic solar-powered coffee roastery in Bali --ar 16:9',
+        creativeStrategy: 'Sci-Fi Commercial',
+        tags: ['future', 'solar'],
+      },
+    ];
+
+    const uncopiedTxt = exportUncopiedPromptsToQueueText(mixedPrompts);
+    // Should NOT contain prompt that has already been copied
+    expect(uncopiedTxt).not.toContain('Indonesian coffee shop barista pouring latte art');
+    // Should contain uncopied prompts
+    expect(uncopiedTxt).toContain('Macro shot of roasted coffee beans --ar 16:9 --v 6.1');
+    expect(uncopiedTxt).toContain('Futuristic solar-powered coffee roastery in Bali --ar 16:9');
   });
 
   it('creates an initialized prompt session with defaults and timestamps', () => {

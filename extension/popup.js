@@ -1,300 +1,213 @@
-// Meta-Gen VCPA Extension - Robust Multi-Frame Popup Controller
+// Meta-Gen VCPA Extension - Neo-Brutalist Feature Control Center Controller
 
-let allScannedImages = [];
-let visibleImages = [];
-let selectedUrls = new Set();
-let currentPageTitle = 'Web Page';
+const DEFAULT_APP_URL = 'https://meta-gen-gue.pages.dev';
 
+// DOM Elements
 const targetUrlSelect = document.getElementById('targetUrlSelect');
-const imageCountEl = document.getElementById('imageCount');
-const selectAllBtn = document.getElementById('selectAllBtn');
-const refreshBtn = document.getElementById('refreshBtn');
-const filterSmallCheckbox = document.getElementById('filterSmallImages');
-const loadingState = document.getElementById('loadingState');
-const emptyState = document.getElementById('emptyState');
-const imagesGrid = document.getElementById('imagesGrid');
-const sendSelectedBtn = document.getElementById('sendSelectedBtn');
+const appDot = document.getElementById('appDot');
+const appConnectionText = document.getElementById('appConnectionText');
+const bridgeDot = document.getElementById('bridgeDot');
+const localBridgeText = document.getElementById('localBridgeText');
+
+const toggleAutoDownload = document.getElementById('toggleAutoDownload');
+const toggleFlowBridge = document.getElementById('toggleFlowBridge');
+const toggleAutoSync = document.getElementById('toggleAutoSync');
+const toggleAutoRetry = document.getElementById('toggleAutoRetry');
+const toggleFloatingAgent = document.getElementById('toggleFloatingAgent');
+const toggleContextMenu = document.getElementById('toggleContextMenu');
+const toggleAutoQc = document.getElementById('toggleAutoQc');
+
+const resOptionsWrapper = document.getElementById('resOptionsWrapper');
+const resPills = document.querySelectorAll('.res-pill');
+
 const openAppBtn = document.getElementById('openAppBtn');
+const openFlowBtn = document.getElementById('openFlowBtn');
 
-// Initialize Configuration
-async function initConfig() {
-  const data = await chrome.storage.local.get(['targetAppUrl']);
-  if (data.targetAppUrl) {
-    targetUrlSelect.value = data.targetAppUrl;
+// Default Feature Settings
+const DEFAULT_FEATURES = {
+  targetAppUrl: DEFAULT_APP_URL,
+  metagen_feature_auto_download: true,
+  metagen_flow_download_resolution: '2K',
+  metagen_feature_flow_bridge: true,
+  metagen_feature_auto_sync: true,
+  metagen_feature_auto_retry: true,
+  metagen_feature_floating_agent: true,
+  metagen_feature_context_menu: true,
+  metagen_feature_auto_qc: true,
+};
+
+// Initialize Controls and Load Settings
+async function initControlCenter() {
+  const stored = await chrome.storage.local.get(Object.keys(DEFAULT_FEATURES));
+  const settings = { ...DEFAULT_FEATURES, ...stored };
+
+  // 1. Target URL
+  if (targetUrlSelect) {
+    targetUrlSelect.value = settings.targetAppUrl || DEFAULT_APP_URL;
+    targetUrlSelect.addEventListener('change', async (e) => {
+      await chrome.storage.local.set({ targetAppUrl: e.target.value });
+      checkMetaGenTabStatus(e.target.value);
+    });
   }
 
-  targetUrlSelect.addEventListener('change', async (e) => {
-    await chrome.storage.local.set({ targetAppUrl: e.target.value });
+  // 2. Feature Toggles
+  setupToggle(toggleAutoDownload, 'metagen_feature_auto_download', settings.metagen_feature_auto_download, (val) => {
+    if (resOptionsWrapper) {
+      resOptionsWrapper.style.opacity = val ? '1' : '0.4';
+      resOptionsWrapper.style.pointerEvents = val ? 'auto' : 'none';
+    }
+  });
+
+  setupToggle(toggleFlowBridge, 'metagen_feature_flow_bridge', settings.metagen_feature_flow_bridge);
+  setupToggle(toggleAutoSync, 'metagen_feature_auto_sync', settings.metagen_feature_auto_sync);
+  setupToggle(toggleAutoRetry, 'metagen_feature_auto_retry', settings.metagen_feature_auto_retry);
+  setupToggle(toggleFloatingAgent, 'metagen_feature_floating_agent', settings.metagen_feature_floating_agent);
+
+  setupToggle(toggleContextMenu, 'metagen_feature_context_menu', settings.metagen_feature_context_menu, (val) => {
+    chrome.runtime.sendMessage({ type: 'UPDATE_CONTEXT_MENU_TOGGLE', enabled: val }).catch(() => {});
+  });
+
+  setupToggle(toggleAutoQc, 'metagen_feature_auto_qc', settings.metagen_feature_auto_qc);
+
+  // 3. Resolution Selector Pills
+  const activeRes = settings.metagen_flow_download_resolution || '2K';
+  resPills.forEach((pill) => {
+    if (pill.dataset.res === activeRes) {
+      pill.classList.add('active');
+    } else {
+      pill.classList.remove('active');
+    }
+
+    pill.addEventListener('click', async () => {
+      resPills.forEach((p) => p.classList.remove('active'));
+      pill.classList.add('active');
+      const chosen = pill.dataset.res;
+      await chrome.storage.local.set({ metagen_flow_download_resolution: chosen });
+    });
+  });
+
+  if (resOptionsWrapper) {
+    resOptionsWrapper.style.opacity = settings.metagen_feature_auto_download ? '1' : '0.4';
+    resOptionsWrapper.style.pointerEvents = settings.metagen_feature_auto_download ? 'auto' : 'none';
+  }
+
+  // 4. Check Connection Health
+  checkMetaGenTabStatus(settings.targetAppUrl);
+  checkLocalBridgeStatus();
+}
+
+function setupToggle(el, key, initialValue, onChange) {
+  if (!el) return;
+  el.checked = !!initialValue;
+  el.addEventListener('change', async () => {
+    const val = el.checked;
+    await chrome.storage.local.set({ [key]: val });
+    if (onChange) onChange(val);
   });
 }
 
-// Filter and re-render images
-function applyFilterAndRender() {
-  const filterSmall = filterSmallCheckbox ? filterSmallCheckbox.checked : true;
-
-  if (filterSmall) {
-    visibleImages = allScannedImages.filter((img) => {
-      // Keep images with width/height >= 60, or unknown dimension (0) that have valid image extensions
-      if (img.width > 0 && img.height > 0) {
-        return img.width >= 60 && img.height >= 60;
-      }
-      // If 0 (lazy/offscreen), check URL doesn't look like an icon or tracking pixel
-      return !img.url.includes('1x1') && !img.url.includes('favicon') && !img.url.includes('icon');
-    });
-  } else {
-    visibleImages = [...allScannedImages];
-  }
-
-  renderGrid();
-}
-
-// Update Action Button State
-function updateSendButton() {
-  const count = selectedUrls.size;
-  sendSelectedBtn.disabled = count === 0;
-  sendSelectedBtn.innerHTML = `<span>Kirim ${count} Gambar ke Antrean (Latar Belakang)</span>`;
-
-  const allVisibleSelected =
-    visibleImages.length > 0 &&
-    visibleImages.every((img) => selectedUrls.has(img.url));
-
-  selectAllBtn.textContent = allVisibleSelected ? 'Hapus Semua' : 'Pilih Semua';
-}
-
-// Toggle Image Selection
-function toggleImageSelection(url, cardElement) {
-  if (selectedUrls.has(url)) {
-    selectedUrls.delete(url);
-    cardElement.classList.remove('selected');
-    const check = cardElement.querySelector('.checkbox-overlay');
-    if (check) check.textContent = '';
-  } else {
-    selectedUrls.add(url);
-    cardElement.classList.add('selected');
-    const check = cardElement.querySelector('.checkbox-overlay');
-    if (check) check.textContent = '✓';
-  }
-  updateSendButton();
-}
-
-// Render Images Grid
-function renderGrid() {
-  imagesGrid.innerHTML = '';
-
-  if (visibleImages.length === 0) {
-    emptyState.classList.remove('hidden');
-    imageCountEl.textContent = '0';
-    updateSendButton();
-    return;
-  }
-
-  emptyState.classList.add('hidden');
-  imageCountEl.textContent = String(visibleImages.length);
-
-  visibleImages.forEach((img, idx) => {
-    const card = document.createElement('div');
-    card.className = `image-card ${selectedUrls.has(img.url) ? 'selected' : ''}`;
-
-    const thumb = document.createElement('div');
-    thumb.className = 'thumb-wrapper';
-
-    const imgEl = document.createElement('img');
-    imgEl.src = img.url;
-    imgEl.alt = img.alt || `Visual ${idx + 1}`;
-    imgEl.loading = 'lazy';
-    imgEl.onerror = () => {
-      card.style.display = 'none'; // hide broken link thumbnails
-    };
-
-    const check = document.createElement('div');
-    check.className = 'checkbox-overlay';
-    check.textContent = selectedUrls.has(img.url) ? '✓' : '';
-
-    const dim = document.createElement('div');
-    dim.className = 'dimension-badge';
-    dim.textContent =
-      img.width > 0 && img.height > 0
-        ? `${img.width}x${img.height}`
-        : 'Web Res';
-
-    thumb.appendChild(imgEl);
-    thumb.appendChild(check);
-    thumb.appendChild(dim);
-    card.appendChild(thumb);
-
-    card.addEventListener('click', () => {
-      toggleImageSelection(img.url, card);
-    });
-
-    imagesGrid.appendChild(card);
-  });
-
-  updateSendButton();
-}
-
-// Scan Active Tab across Main Frame AND All IFrames
-async function scanActiveTab() {
-  loadingState.classList.remove('hidden');
-  emptyState.classList.add('hidden');
-  imagesGrid.innerHTML = '';
-  selectedUrls.clear();
-  updateSendButton();
-
+// Check if Meta-Gen App Tab is open
+async function checkMetaGenTabStatus(targetUrl) {
   try {
-    const [tab] = await chrome.tabs.query({ active: true, currentWindow: true });
-    if (!tab?.id) {
-      loadingState.classList.add('hidden');
-      emptyState.classList.remove('hidden');
-      return;
-    }
-
-    currentPageTitle = tab.title || 'Web Page';
-
-    // 1. Execute frame scanner across ALL frames (frame 0 + all child iframes)
-    let rawResults = [];
-    try {
-      rawResults = await chrome.scripting.executeScript({
-        target: { tabId: tab.id, allFrames: true },
-        func: () => {
-          return typeof window.__metaGenScanFrameImages === 'function'
-            ? window.__metaGenScanFrameImages()
-            : [];
-        },
-      });
-    } catch (e) {
-      console.warn('Initial frame scan notice:', e);
-    }
-
-    let flatImages = [];
-    for (const r of rawResults || []) {
-      if (Array.isArray(r.result)) {
-        flatImages.push(...r.result);
-      }
-    }
-
-    // 2. If no images returned (e.g. scripts not yet ready in some frames), inject content.js and re-scan
-    if (flatImages.length === 0) {
-      try {
-        await chrome.scripting.executeScript({
-          target: { tabId: tab.id, allFrames: true },
-          files: ['content.js'],
-        });
-
-        const retryResults = await chrome.scripting.executeScript({
-          target: { tabId: tab.id, allFrames: true },
-          func: () => {
-            return typeof window.__metaGenScanFrameImages === 'function'
-              ? window.__metaGenScanFrameImages()
-              : [];
-          },
-        });
-
-        for (const r of retryResults || []) {
-          if (Array.isArray(r.result)) {
-            flatImages.push(...r.result);
-          }
-        }
-      } catch (err) {
-        console.error('Frame script injection error:', err);
-      }
-    }
-
-    // 3. Deduplicate images by URL
-    const seen = new Set();
-    const deduped = [];
-    for (const img of flatImages) {
-      if (!img || !img.url) continue;
-      if (!seen.has(img.url)) {
-        seen.add(img.url);
-        deduped.push(img);
-      }
-    }
-
-    // 4. Sort by estimated pixel area (highest resolution first)
-    deduped.sort((a, b) => {
-      const areaA = (a.width || 0) * (a.height || 0);
-      const areaB = (b.width || 0) * (b.height || 0);
-      return areaB - areaA;
+    const tabs = await chrome.tabs.query({});
+    const urlLower = (targetUrl || '').toLowerCase();
+    const hasTab = tabs.some((t) => {
+      if (!t.url) return false;
+      const u = t.url.toLowerCase();
+      return (
+        (urlLower && u.startsWith(urlLower)) ||
+        u.includes('meta-gen-gue.pages.dev') ||
+        u.includes('localhost:3000') ||
+        t.title?.toLowerCase().includes('meta-gen')
+      );
     });
 
-    allScannedImages = deduped;
-    loadingState.classList.add('hidden');
-
-    applyFilterAndRender();
-  } catch (err) {
-    console.error('Scan error:', err);
-    loadingState.classList.add('hidden');
-    emptyState.classList.remove('hidden');
+    if (appDot && appConnectionText) {
+      if (hasTab) {
+        appDot.className = 'indicator-dot online';
+        appConnectionText.textContent = 'Web App Terhubung';
+      } else {
+        appDot.className = 'indicator-dot offline';
+        appConnectionText.textContent = 'Web App Belum Dibuka';
+      }
+    }
+  } catch {
+    if (appDot && appConnectionText) {
+      appDot.className = 'indicator-dot unknown';
+      appConnectionText.textContent = 'Status Web App: ?';
+    }
   }
 }
 
-// Event Listeners
-if (selectAllBtn) {
-  selectAllBtn.addEventListener('click', () => {
-    const allVisibleSelected =
-      visibleImages.length > 0 &&
-      visibleImages.every((img) => selectedUrls.has(img.url));
+// Check Local FTP & ExifTool Bridge Status (:45678)
+async function checkLocalBridgeStatus() {
+  try {
+    const res = await fetch('http://127.0.0.1:45678/health', {
+      signal: AbortSignal.timeout(1500),
+    });
+    if (res.ok) {
+      bridgeDot.className = 'indicator-dot online';
+      localBridgeText.textContent = 'Local Bridge :45678 (Aktif)';
+    } else {
+      bridgeDot.className = 'indicator-dot offline';
+      localBridgeText.textContent = 'Bridge :45678 (Mati)';
+    }
+  } catch {
+    bridgeDot.className = 'indicator-dot offline';
+    localBridgeText.textContent = 'Bridge :45678 (Offline)';
+  }
+}
 
-    if (allVisibleSelected) {
-      // Deselect visible
-      for (const img of visibleImages) {
-        selectedUrls.delete(img.url);
+// Open Meta-Gen Web App
+if (openAppBtn) {
+  openAppBtn.addEventListener('click', async () => {
+    const data = await chrome.storage.local.get(['targetAppUrl']);
+    const targetUrl = data.targetAppUrl || DEFAULT_APP_URL;
+
+    const tabs = await chrome.tabs.query({});
+    const existing = tabs.find((t) => {
+      if (!t.url) return false;
+      const u = t.url.toLowerCase();
+      return (
+        u.startsWith(targetUrl.toLowerCase()) ||
+        u.includes('meta-gen-gue.pages.dev') ||
+        u.includes('localhost:3000')
+      );
+    });
+
+    if (existing) {
+      await chrome.tabs.update(existing.id, { active: true });
+      if (existing.windowId) {
+        await chrome.windows.update(existing.windowId, { focused: true });
       }
     } else {
-      // Select all visible
-      for (const img of visibleImages) {
-        selectedUrls.add(img.url);
-      }
+      await chrome.tabs.create({ url: targetUrl });
     }
-    renderGrid();
+    window.close();
   });
 }
 
-if (refreshBtn) {
-  refreshBtn.addEventListener('click', scanActiveTab);
-}
+// Open Google Flow
+if (openFlowBtn) {
+  openFlowBtn.addEventListener('click', async () => {
+    const tabs = await chrome.tabs.query({});
+    const existing = tabs.find((t) => {
+      if (!t.url) return false;
+      const u = t.url.toLowerCase();
+      return u.includes('flow.google.com') || u.includes('labs.google');
+    });
 
-if (filterSmallCheckbox) {
-  filterSmallCheckbox.addEventListener('change', applyFilterAndRender);
-}
-
-// Send Selected Images to Queue SILENTLY (Latar Belakang - Never switch tab)
-sendSelectedBtn.addEventListener('click', async () => {
-  if (selectedUrls.size === 0) return;
-
-  const selectedImages = visibleImages.filter((img) => selectedUrls.has(img.url));
-  sendSelectedBtn.disabled = true;
-  sendSelectedBtn.innerHTML = `<span>Mengirim ${selectedImages.length} Gambar...</span>`;
-
-  chrome.runtime.sendMessage(
-    {
-      type: 'ENQUEUE_IMAGES_BATCH',
-      images: selectedImages,
-      pageTitle: currentPageTitle,
-    },
-    (res) => {
-      if (res?.success) {
-        sendSelectedBtn.innerHTML = `<span>✓ Berhasil Masuk Antrean Latar Belakang!</span>`;
-        sendSelectedBtn.style.backgroundColor = '#10b981';
-        setTimeout(() => {
-          window.close();
-        }, 1200);
-      } else {
-        sendSelectedBtn.innerHTML = `<span>Gagal Mengirim</span>`;
-        sendSelectedBtn.disabled = false;
+    if (existing) {
+      await chrome.tabs.update(existing.id, { active: true });
+      if (existing.windowId) {
+        await chrome.windows.update(existing.windowId, { focused: true });
       }
+    } else {
+      await chrome.tabs.create({ url: 'https://flow.google.com' });
     }
-  );
-});
+    window.close();
+  });
+}
 
-// Explicitly Open Meta-Gen App Tab (Only when clicked)
-openAppBtn.addEventListener('click', async () => {
-  const targetUrl = targetUrlSelect.value || 'https://meta-gen-gue.pages.dev';
-  chrome.tabs.create({ url: targetUrl, active: true });
-});
-
-// Run Initialization
-document.addEventListener('DOMContentLoaded', () => {
-  void initConfig();
-  void scanActiveTab();
-});
+// Initialize on DOM Ready
+document.addEventListener('DOMContentLoaded', initControlCenter);

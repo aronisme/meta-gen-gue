@@ -278,3 +278,122 @@ export async function findLocalFile(
   }
 }
 
+export interface OrganizeQcItem {
+  filename: string;
+  filePath?: string;
+  file?: File;
+}
+
+export interface OrganizeQcResult {
+  ok: boolean;
+  operation?: 'move' | 'copy';
+  targetDir?: string;
+  total?: number;
+  successCount?: number;
+  failCount?: number;
+  results?: Array<{
+    filename: string;
+    success: boolean;
+    sourcePath?: string;
+    destPath?: string;
+    operation?: string;
+    error?: string;
+  }>;
+  error?: string;
+}
+
+/**
+ * Pindahkan atau salin file yang lolos QC ke folder terpisah via Local Bridge (:45678)
+ */
+export async function organizeQcFiles(
+  items: OrganizeQcItem[],
+  options: {
+    targetFolder?: string;
+    operation?: 'move' | 'copy';
+    customBridgeUrl?: string;
+  } = {}
+): Promise<OrganizeQcResult> {
+  const baseUrl = (options.customBridgeUrl || getStoredBridgeUrl() || DEFAULT_BRIDGE_URL).replace(/\/+$/, '');
+  const targetFolder = options.targetFolder || 'MetaGen_QC_Passed';
+  const operation = options.operation || 'move';
+
+  // 1. Coba batch JSON via path disk lokal
+  const jsonPayload = {
+    targetFolder,
+    operation,
+    items: items.map((it) => ({
+      filename: it.filename,
+      filePath: it.filePath,
+    })),
+  };
+
+  try {
+    const res = await fetch(`${baseUrl}/api/local/organize-qc`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(jsonPayload),
+    });
+
+    if (res.ok) {
+      const data: OrganizeQcResult = await res.json();
+      // Periksa jika ada file yang gagal karena tidak ditemukan di disk, namun kita memiliki objek File di browser
+      if (data.results && data.results.some((r) => !r.success)) {
+        for (const r of data.results) {
+          if (!r.success) {
+            const matchedItem = items.find((it) => it.filename === r.filename);
+            if (matchedItem?.file) {
+              // Upload fallback via Multipart form-data
+              try {
+                const formData = new FormData();
+                formData.append('file', matchedItem.file);
+                formData.append('filename', matchedItem.filename);
+                formData.append('targetFolder', targetFolder);
+
+                const upRes = await fetch(`${baseUrl}/api/local/organize-qc`, {
+                  method: 'POST',
+                  body: formData,
+                });
+                if (upRes.ok) {
+                  r.success = true;
+                  r.error = undefined;
+                  r.destPath = `${data.targetDir}\\${matchedItem.filename}`;
+                  data.successCount = (data.successCount || 0) + 1;
+                  data.failCount = Math.max(0, (data.failCount || 0) - 1);
+                }
+              } catch {}
+            }
+          }
+        }
+      }
+      return data;
+    }
+  } catch (err) {
+    return {
+      ok: false,
+      error: err instanceof Error ? err.message : 'Gagal menghubungi server bridge lokal',
+    };
+  }
+
+  return { ok: false, error: 'Gagal memproses pengelompokan file' };
+}
+
+/**
+ * Buka folder hasil QC di Windows Explorer / macOS Finder via backend bridge
+ */
+export async function openLocalFolderInExplorer(
+  folderPath: string,
+  customBridgeUrl?: string
+): Promise<boolean> {
+  const baseUrl = (customBridgeUrl || getStoredBridgeUrl() || DEFAULT_BRIDGE_URL).replace(/\/+$/, '');
+  try {
+    const res = await fetch(`${baseUrl}/api/local/open-folder`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ folderPath }),
+    });
+    return res.ok;
+  } catch {
+    return false;
+  }
+}
+

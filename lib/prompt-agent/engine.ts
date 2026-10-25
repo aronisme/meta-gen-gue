@@ -70,6 +70,125 @@ export const VISUAL_DIRECTION_SUFFIXES: Record<string, string> = {
   auto: '',
 };
 
+export interface StyleSpecification {
+  medium: string;
+  requiredElements: string;
+  forbiddenElements: string;
+}
+
+export const STYLE_SPECIFICATIONS: Record<string, StyleSpecification> = {
+  // --- 1. FOTOGRAFI (Photography Sub-styles) ---
+  photo_commercial_lifestyle: {
+    medium: 'Authentic commercial stock photography',
+    requiredElements: 'Real candid people, authentic emotions, natural available daylight or soft morning window light, natural skin textures, contextual environment matching the subject (e.g. modern office for work, kitchen for food, home for family, park/gym for fitness)',
+    forbiddenElements: 'Fake plastic studio looks, stiff poses, repetitive unrequested beach or vacation clichés when unrelated to the subject',
+  },
+  photo_studio_isolated: {
+    medium: 'Commercial studio product photography isolated on white',
+    requiredElements: 'Subject strictly isolated on a clean, solid, neutral pure white background (#FFFFFF cutout-ready), professional studio softbox lighting, crisp sharp focus, generous negative copy space',
+    forbiddenElements: 'ANY outdoor environments, rooms, offices, beaches, horizons, landscapes, walls, or decorative clutter',
+  },
+  photo_flatlay_knolling: {
+    medium: 'Overhead flatlay tabletop knolling photography',
+    requiredElements: 'Strictly 90-degree straight top-down overhead perspective, neat knolling or flatlay arrangement, clean textured tabletop surface (linen, marble, light wood, concrete, or solid color), ample negative copy space for designer typography',
+    forbiddenElements: 'Eye-level perspective, horizontal horizons, outdoor landscapes, perspective keystoning',
+  },
+  photo_macro_texture: {
+    medium: 'Extreme macro close-up photography',
+    requiredElements: 'Microscopic surface details, tactile textures, crisp razor-sharp focal plane, delicate rim lighting, shallow depth of field bokeh',
+    forbiddenElements: 'Wide-angle views, full-body portraits, distant scenery, broad room environments',
+  },
+  photo_cinematic_narrative: {
+    medium: 'Cinematic 4K film still frame',
+    requiredElements: 'Atmospheric storytelling, anamorphic lens flare, Arri Alexa color science, cinematic framing, rich shadows, and deep emotional mood',
+    forbiddenElements: 'Flat flash lighting, sterile white cutouts, generic snapshots',
+  },
+  photo_editorial_documentary: {
+    medium: 'Authentic photojournalistic documentary photography',
+    requiredElements: 'Spontaneous candid realism, natural available ambient light only, Leica M11 lens perspective, photojournalistic framing, true-to-life colors',
+    forbiddenElements: 'Staged commercial poses, artificial studio lighting, heavy retouching, isolated cutouts',
+  },
+  photo_interior_architecture: {
+    medium: 'Modern architectural and interior photography',
+    requiredElements: 'Clean straight vertical perspective lines, spacious architectural composition, balanced natural window sunlight and ambient interior lighting, Scandinavian/Japandi/modern architectural design',
+    forbiddenElements: 'Macro close-ups, messy clutter, tilted perspective, outdoor beach landscapes',
+  },
+  photo_drone_aerial: {
+    medium: 'High-altitude drone aerial photography',
+    requiredElements: 'Top-down 90-degree bird-eye perspective, geometric environmental patterns, wide topographical overview, crisp high-resolution detail',
+    forbiddenElements: 'Ground-level eye views, indoor ceilings, macro shots',
+  },
+
+  // --- 2. ILUSTRASI & GRAFIS (Illustration & Graphics Sub-styles) ---
+  vector_flat_isolated: {
+    medium: 'Clean 2D flat vector illustration (SVG / Microstock graphic asset)',
+    requiredElements: 'Solid vector shapes, crisp clean outlines, modern flat color palette, strictly isolated on a pure white background, scalable graphic design asset',
+    forbiddenElements: 'Photorealism, real human photos, camera lenses (Sony, 85mm), 3D shaders, realistic skin textures, photographic lighting or lens blur',
+  },
+  vector_lineart_minimal: {
+    medium: 'Minimalist monoline vector line art illustration',
+    requiredElements: 'Continuous fluid monoline contour drawing, delicate pastel color wash accents, clean negative space, modern aesthetic boho style',
+    forbiddenElements: 'Photorealism, dense realistic photo textures, complex 3D renders, photographic lenses',
+  },
+  render_3d_isometric: {
+    medium: '3D isometric orthographic render',
+    requiredElements: 'Strictly 30-degree isometric orthographic camera angle, Blender Cycles / Octane render, smooth matte plastic and ceramic textures, clean ambient occlusion, tech/SaaS miniature aesthetic',
+    forbiddenElements: 'Flat 2D lines, perspective camera distortion, photorealistic real-world camera shots',
+  },
+  render_3d_clay_glass: {
+    medium: '3D claymorphism and frosted glassmorphism render',
+    requiredElements: 'Tactile smooth clay 3D shapes, translucent frosted glass with soft reflections, playful rounded geometry, vibrant pastel studio lighting',
+    forbiddenElements: 'Flat 2D graphics, realistic photographic grain, dark gritty textures',
+  },
+  art_watercolor_handdrawn: {
+    medium: 'Authentic hand-painted watercolor illustration',
+    requiredElements: 'Wet-on-wet paint washes, authentic textured cold-press cotton paper, delicate translucent fluid brushstrokes, artisanal organic feel',
+    forbiddenElements: 'Sharp vector lines, digital 3D renders, photographic realism, glossy plastic surfaces',
+  },
+  art_vintage_engraving: {
+    medium: 'Classical vintage engraving and woodcut illustration',
+    requiredElements: 'Detailed cross-hatching and linework, antique copperplate printing aesthetic, timeless monochrome or sepia ink drawing, aged bookplate feel',
+    forbiddenElements: 'Full-color photography, modern neon vectors, 3D renders, blurry gradients',
+  },
+  graphic_sticker_clipart: {
+    medium: 'Die-cut graphic sticker design',
+    requiredElements: 'Thick clean white contour outline border, bold vibrant colors, subtle soft drop shadow, isolated clipart graphic ready for print',
+    forbiddenElements: 'Full-bleed photographic landscapes, realistic photo clutter, messy unbordered illustrations',
+  },
+  graphic_infographic_asset: {
+    medium: 'Modern business infographic and data visualization graphic',
+    requiredElements: 'Clean structured visual layout, crisp geometric icons and charts, sleek corporate data aesthetic, high contrast legible typography spaces',
+    forbiddenElements: 'Loose painterly sketches, noisy realistic photo backgrounds, casual lifestyle photos',
+  },
+
+  // Legacy fallbacks
+  photorealistic: {
+    medium: 'Commercial stock photography',
+    requiredElements: 'Sharp focus, natural textures, balanced lighting, high resolution',
+    forbiddenElements: 'Watermarks, severe distortion',
+  },
+  '3d_render': {
+    medium: '3D isometric render',
+    requiredElements: 'Clean 3D render, smooth materials, ambient occlusion',
+    forbiddenElements: 'Messy 2D drawings',
+  },
+  vector: {
+    medium: 'Vector illustration',
+    requiredElements: 'Clean vector lines, sharp edges, flat design',
+    forbiddenElements: 'Photorealism',
+  },
+  cinematic: {
+    medium: 'Cinematic 4K still frame',
+    requiredElements: 'Atmospheric lighting, anamorphic flare, dramatic grading',
+    forbiddenElements: 'Flat flash lighting',
+  },
+  editorial: {
+    medium: 'High-end editorial design',
+    requiredElements: 'Tactile art direction, sophisticated negative space',
+    forbiddenElements: 'Cluttered stock clichés',
+  },
+};
+
 export interface VisualDirectionMeta {
   id: string;
   category: 'photo' | 'illustration' | 'special';
@@ -398,23 +517,20 @@ export function buildVCPAPromptInstruction(params: {
         `\nCRITICAL: Tastefully blend and harmonize these user-selected creative twists into the concepts generated for this reference image.\n`
       : '';
 
-  let visualDirectionInstruction = '';
-  if (settings.visualDirection === 'agent_decide') {
-    visualDirectionInstruction = `Visual Direction: AGENT DECIDE (AUTO-ANALYZE)
-- Carefully examine the subject matter, texture, and composition.
-- Automatically diagnose whether Photography (e.g. Commercial Lifestyle, Studio Isolated, Flatlay, Macro) or Illustration (e.g. Vector Flat Isolated, 3D Isometric, Line Art, Watercolor) provides the HIGHEST COMMERCIAL VALUE and buyer demand on microstock agencies.
-- State your chosen visual style clearly in 'creativeStrategy' and reflect it concretely in each prompt.`;
-  } else if (settings.visualDirection === 'smart_random') {
-    visualDirectionInstruction = `Visual Direction: SMART VARIETY PACK (MULTI-STYLE MIX)
-- Generate a diverse, balanced series across the ${count} prompt concepts.
-- Do NOT use the exact same visual angle for every card. Distribute distinct complementary sub-genres across the batch (e.g. Card 1: Hero Commercial Lifestyle; Card 2: Overhead Flatlay with copy space; Card 3: Macro Texture Detail; Card 4: Studio Product Isolated on white; Card 5: Editorial Candid).
-- Mention the chosen sub-genre in each card's 'creativeStrategy'.`;
-  } else {
-    const dirLabel = getVisualDirectionLabel(settings.visualDirection);
-    const dirSuffix = VISUAL_DIRECTION_SUFFIXES[settings.visualDirection] || '';
-    visualDirectionInstruction = `Visual Direction: ${dirLabel} (${settings.visualDirection})
-Style characteristics to embody: ${dirSuffix || settings.visualDirection}`;
-  }
+  const dirLabel = getVisualDirectionLabel(settings.visualDirection);
+  const spec = STYLE_SPECIFICATIONS[settings.visualDirection] || STYLE_SPECIFICATIONS.photo_commercial_lifestyle;
+  const dirSuffix = VISUAL_DIRECTION_SUFFIXES[settings.visualDirection] || '';
+
+  const visualDirectionInstruction = `=== MANDATORY VISUAL STYLE DIRECTIVE (ABSOLUTE HIGHEST PRIORITY) ===
+Chosen Visual Style: "${dirLabel}" (${settings.visualDirection})
+Artistic Medium: ${spec.medium}
+Required Visual Characteristics to Embody in Every Prompt:
+- ${spec.requiredElements}
+
+STRICTLY FORBIDDEN FOR THIS STYLE:
+- ${spec.forbiddenElements}
+
+Visual Direction Keywords Baseline: ${dirSuffix || settings.visualDirection}`;
 
   let contextIntro = '';
   if (mode === 'reference_to_prompt') {
@@ -433,6 +549,9 @@ ${safeDna.semanticProfile?.metaphor ? `Metaphors: ${safeStr(safeDna.semanticProf
 
 Similarity Level: ${settings.similarity}% (0 = wide creative exploration while preserving core essence; 100 = strict visual fidelity to subject and style).
 Semantic Preservation Mode: ${settings.semanticMode}
+STYLE TRANSFORMATION FOR REFERENCE IMAGE:
+- Extract the core subject from the reference image, but RENDER IT STRICTLY in the user's chosen style: "${dirLabel}" (${spec.medium}).
+- If the reference image has a background but the user selected an isolated style, isolate the subject on pure white!
 ${brief ? `User's Additional Creative Exploration / Focus Request: "${brief}"` : ''}
 ${twistsBlock}
 ${visualDirectionInstruction}`;
@@ -457,7 +576,7 @@ Similarity Level: ${settings.similarity}% (${
           ? 'Creative Departure: Retain only core mood/essence, freely explore new subjects, settings, and lighting'
           : settings.similarity > 75
           ? 'High Fidelity: Keep the primary subject, setting, and composition closely faithful to the reference image'
-          : 'Balanced Remix: Preserve core visual anchors and style while varying camera angles, lighting conditions, and narrative context'
+          : 'Balanced Remix: Preserve core visual anchors while varying perspective and narrative context in the chosen style'
       }).
 Semantic Preservation Mode: ${
         settings.semanticMode === 'meaning_preservation'
@@ -466,6 +585,11 @@ Semantic Preservation Mode: ${
           ? 'Visual Replication (Replicate physical visual features, materials, and composition closely)'
           : 'Free Ideation (Creative exploration sparked by the reference image)'
       }.
+STYLE TRANSFORMATION FOR REFERENCE IMAGE:
+- Extract the core subject from the reference image, but RENDER IT STRICTLY in the user's chosen style: "${dirLabel}" (${spec.medium}).
+- If the reference image is a photo and the user chose an illustration/vector/3D style, you MUST convert and reimagine that subject in the chosen medium!
+- If the reference image has a background but the user selected an isolated style, isolate the subject on pure white!
+- The user's chosen visual style takes total priority over the reference image's original medium.
 ${visualDirectionInstruction}`;
     }
   } else {
@@ -481,14 +605,20 @@ ${visualDirectionInstruction}`;
 ${contextIntro}
 
 TASK:
-Generate EXACTLY ${count} conceptually DISTINCT, visually concrete, and diverse image generation prompt concepts.
+Generate EXACTLY ${count} conceptually DISTINCT, visually concrete, and diverse image generation prompt concepts strictly in the user's chosen visual style ("${dirLabel}").
 
 STRICT DIVERSITY & QUALITY RULES:
-1. NO LAZY VARIATIONS: Do NOT simply swap synonyms or change background colors. Each prompt MUST explore a distinct creative axis (composition/camera angle, lighting mood, surrounding environment, tactile materials, or narrative tension).
-2. VISUAL SPECIFICITY: Every prompt must specify tangible physical subjects, distinct camera framing (e.g. overhead flatlay, dramatic low-angle, extreme macro, wide environmental hero), lighting (e.g. golden hour rim light, soft diffused studio softbox, atmospheric chiaroscuro), materials/textures, and clean copy space for designers.
-3. COMMERCIALLY SAFE & USABLE: Strictly NO copyrighted brand names, recognizable trademarks, or celebrity likenesses. Include natural negative space suitable for advertising copy.
-4. PROMPT LANGUAGE: The 'rawBasePrompt' field MUST be in English for optimal image generation performance. Titles and rationales should be in ${settings.promptLanguage === 'id' ? 'Bahasa Indonesia' : 'English'}.
-5. KEEP IT COMPACT: Keep 'rationale' strictly to 1 concise sentence (maximum 20 words) to prevent token truncation.
+1. STRICT ADHERENCE TO USER'S SELECTED VISUAL STYLE ("${dirLabel}") [CRITICAL HIGHEST PRIORITY]:
+   - Every single prompt's 'rawBasePrompt' MUST naturally be conceived and written in the medium of "${spec.medium}".
+   - ${spec.forbiddenElements ? `STRICTLY FORBIDDEN: ${spec.forbiddenElements}.` : ''}
+   - If this is an Illustration, Vector, 3D Render, or Graphic style: DO NOT use photographic camera lenses (e.g. Sony A7R, 85mm f/1.4), photographic aperture, realistic human skin grain, or photographic lighting. Describe vector shapes, clean linework, isometric orthographic renders, clay/glass materials, or watercolor washes!
+   - If this is an Isolated/Studio style (e.g. Studio Product Isolated, Vector Flat Isolated, Sticker): The subject MUST strictly be isolated on a pure white background with ample copy space. DO NOT create outdoor environments, landscapes, rooms, or beaches!
+   - If this is Commercial Lifestyle: Contextualize the setting realistically to the subject (e.g. office for professionals, kitchen for food, home for living, park for sports). DO NOT default to beach scenes unless explicitly requested in the brief!
+2. VISUAL SPECIFICITY & COPY SPACE: Every prompt must specify tangible physical subjects, distinct framing matching the style, material textures, and clean negative space for commercial copy and designer typography.
+3. NO LAZY VARIATIONS: Each prompt within the chosen visual style must explore a distinct concept, variation, angle, or narrative angle.
+4. COMMERCIALLY SAFE & USABLE: Strictly NO copyrighted brand names, recognizable trademarks, or celebrity likenesses.
+5. PROMPT LANGUAGE: The 'rawBasePrompt' field MUST be in English for optimal image generation performance. Titles and rationales should be in ${settings.promptLanguage === 'id' ? 'Bahasa Indonesia' : 'English'}.
+6. KEEP IT COMPACT: Keep 'rationale' strictly to 1 concise sentence (maximum 20 words) to prevent token truncation.
 
 CRITICAL OUTPUT FORMAT:
 You MUST return ONLY a valid, single, parseable JSON object matching this schema exactly. Do NOT include markdown code blocks, do not include backticks, do not include commentary before or after:
@@ -738,5 +868,12 @@ export function exportPromptsToQueueText(prompts: PromptCardItem[]): string {
     .map((p) => p.prompt.trim())
     .filter(Boolean)
     .join('\n\n');
+}
+
+/**
+ * Export only prompts that have not been copied yet.
+ */
+export function exportUncopiedPromptsToQueueText(prompts: PromptCardItem[]): string {
+  return exportPromptsToQueueText(prompts.filter((p) => !p.isCopied));
 }
 

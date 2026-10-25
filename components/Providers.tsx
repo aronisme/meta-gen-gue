@@ -8,7 +8,7 @@ export function Providers({ children }: { children: ReactNode }) {
   return (
     <ErrorBoundary>
       {children}
-      <Toaster richColors position="top-right" />
+      <Toaster richColors position="bottom-right" closeButton duration={3500} />
     </ErrorBoundary>
   );
 }

@@ -11,7 +11,7 @@ export const DEFAULT_VCPA_SETTINGS: VCPASettings = {
   count: 5,
   similarity: 60,
   engine: 'midjourney',
-  visualDirection: 'agent_decide',
+  visualDirection: 'photo_commercial_lifestyle',
   aspectRatio: '16:9',
   creativeFocus: 'composition_lighting',
   semanticMode: 'meaning_preservation',

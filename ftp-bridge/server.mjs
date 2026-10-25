@@ -9,6 +9,7 @@ import http from 'http';
 import fs from 'fs';
 import path from 'path';
 import os from 'os';
+import { exec } from 'child_process';
 import { fileURLToPath } from 'url';
 import { Readable } from 'stream';
 import { embedMetadataInFile } from './embed.mjs';
@@ -99,6 +100,51 @@ function resolveLocalFilePath(input) {
   if (fs.existsSync(picsPath) && fs.statSync(picsPath).isFile()) return picsPath;
 
   return null;
+}
+
+/**
+ * Menyelesaikan path direktori tujuan pemindahan/penyalinan file (QC Passed)
+ */
+function resolveTargetDirectory(inputTarget) {
+  const userHome = os.homedir();
+  if (!inputTarget || typeof inputTarget !== 'string' || inputTarget.trim() === '') {
+    return path.join(userHome, 'Downloads', 'MetaGen_QC_Passed');
+  }
+
+  const trimmed = inputTarget.trim();
+  if (path.isAbsolute(trimmed)) {
+    return path.resolve(trimmed);
+  }
+
+  // Jika nama folder relatif (misal "MetaGen_QC_Passed" atau "Adobe_Stock_Ready")
+  return path.join(userHome, 'Downloads', trimmed);
+}
+
+/**
+ * Pindahkan atau salin file fisik lokal dengan penanganan lintas partisi (cross-device EXDEV)
+ */
+function moveOrCopyLocalFile(sourcePath, destPath, operation = 'move') {
+  const destDir = path.dirname(destPath);
+  if (!fs.existsSync(destDir)) {
+    fs.mkdirSync(destDir, { recursive: true });
+  }
+
+  if (operation === 'copy') {
+    fs.copyFileSync(sourcePath, destPath);
+    return;
+  }
+
+  // Operasi MOVE
+  try {
+    fs.renameSync(sourcePath, destPath);
+  } catch (err) {
+    if (err.code === 'EXDEV') {
+      fs.copyFileSync(sourcePath, destPath);
+      fs.unlinkSync(sourcePath);
+    } else {
+      throw err;
+    }
+  }
 }
 
 /**
@@ -681,8 +727,15 @@ const server = http.createServer(async (req, res) => {
   const url = new URL(req.url, `http://${req.headers.host || 'localhost'}`);
   const pathname = url.pathname.replace(/\/+$/, '') || '/';
 
-  // 1. Health check endpoint
-  if (req.method === 'GET' && (pathname === '/' || pathname === '/health' || pathname === '/api/health')) {
+  // 1. Health check & status endpoint
+  if (
+    req.method === 'GET' &&
+    (pathname === '/' ||
+      pathname === '/health' ||
+      pathname === '/api/health' ||
+      pathname === '/status' ||
+      pathname === '/api/status')
+  ) {
     const exifStatus = getExifToolStatus();
     const healthData = {
       ok: true,
@@ -1241,6 +1294,181 @@ const server = http.createServer(async (req, res) => {
       res.writeHead(500, { 'Content-Type': 'application/json' });
       res.end(JSON.stringify({ ok: false, error: err.message }));
     }
+    return;
+  }
+
+  // 7. QC Passed Organizer: Pindahkan atau salin file yang lolos QC ke folder tujuan lokal
+  if (req.method === 'POST' && (pathname === '/api/local/organize-qc' || pathname === '/organize-qc' || pathname === '/api/local/move-qc-passed')) {
+    const contentType = req.headers['content-type'] || '';
+
+    // A. Multipart Form-Data (jika browser mengirim file fisik secara langsung)
+    if (contentType.includes('multipart/form-data')) {
+      try {
+        const webReq = new Request(`http://127.0.0.1:${PORT}${req.url}`, {
+          method: req.method,
+          headers: req.headers,
+          body: req,
+          duplex: 'half',
+        });
+
+        const formData = await webReq.formData();
+        const file = formData.get('file');
+        const filename = formData.get('filename') || file?.name || 'asset.jpg';
+        const targetFolder = formData.get('targetFolder') || 'MetaGen_QC_Passed';
+        const resolvedTargetDir = resolveTargetDirectory(targetFolder);
+
+        if (!fs.existsSync(resolvedTargetDir)) {
+          fs.mkdirSync(resolvedTargetDir, { recursive: true });
+        }
+
+        if (!file) {
+          res.writeHead(400, { 'Content-Type': 'application/json' });
+          res.end(JSON.stringify({ ok: false, error: 'Tidak ada file fisik yang dikirim.' }));
+          return;
+        }
+
+        const destPath = path.join(resolvedTargetDir, filename);
+        const arrayBuf = await file.arrayBuffer();
+        fs.writeFileSync(destPath, Buffer.from(arrayBuf));
+
+        log('QC ORGANIZE', `File "${filename}" berhasil disimpan ke: ${destPath}`, c.green);
+        res.writeHead(200, { 'Content-Type': 'application/json' });
+        res.end(JSON.stringify({
+          ok: true,
+          targetDir: resolvedTargetDir,
+          destPath,
+          filename,
+        }));
+      } catch (err) {
+        log('QC ORGANIZE ERROR', err.message, c.red);
+        res.writeHead(500, { 'Content-Type': 'application/json' });
+        res.end(JSON.stringify({ ok: false, error: err.message }));
+      }
+      return;
+    }
+
+    // B. JSON Body: Pindahkan/Salin file yang sudah ada di disk lokal
+    let bodyText = '';
+    req.on('data', (chunk) => { bodyText += chunk; });
+    req.on('end', () => {
+      try {
+        const body = JSON.parse(bodyText || '{}');
+        const targetFolder = body.targetFolder || 'MetaGen_QC_Passed';
+        const operation = body.operation === 'copy' ? 'copy' : 'move'; // default move
+        const items = Array.isArray(body.items) ? body.items : [];
+
+        if (items.length === 0) {
+          res.writeHead(400, { 'Content-Type': 'application/json' });
+          res.end(JSON.stringify({ ok: false, error: 'Daftar file (items) kosong.' }));
+          return;
+        }
+
+        const resolvedTargetDir = resolveTargetDirectory(targetFolder);
+        if (!fs.existsSync(resolvedTargetDir)) {
+          fs.mkdirSync(resolvedTargetDir, { recursive: true });
+        }
+
+        const results = [];
+        let successCount = 0;
+        let failCount = 0;
+
+        for (const item of items) {
+          const filename = typeof item === 'string' ? item : item.filename;
+          const explicitPath = typeof item === 'object' ? item.filePath : null;
+
+          // Cari path file lokal di disk
+          let sourcePath = null;
+          if (explicitPath && fs.existsSync(explicitPath) && fs.statSync(explicitPath).isFile()) {
+            sourcePath = explicitPath;
+          } else {
+            sourcePath = resolveLocalFilePath(filename);
+          }
+
+          if (!sourcePath) {
+            results.push({
+              filename,
+              success: false,
+              error: 'File fisik tidak ditemukan di disk lokal (Downloads, Desktop, Pictures, Flow).',
+            });
+            failCount++;
+            continue;
+          }
+
+          try {
+            const destPath = path.join(resolvedTargetDir, path.basename(sourcePath));
+            moveOrCopyLocalFile(sourcePath, destPath, operation);
+            results.push({
+              filename,
+              success: true,
+              sourcePath,
+              destPath,
+              operation,
+            });
+            successCount++;
+          } catch (fileErr) {
+            results.push({
+              filename,
+              success: false,
+              error: fileErr.message,
+            });
+            failCount++;
+          }
+        }
+
+        log(
+          'QC ORGANIZE',
+          `Selesai: ${successCount} file berhasil di-${operation} ke "${resolvedTargetDir}" (${failCount} gagal/tidak ditemukan).`,
+          c.green
+        );
+
+        res.writeHead(200, { 'Content-Type': 'application/json' });
+        res.end(JSON.stringify({
+          ok: true,
+          operation,
+          targetDir: resolvedTargetDir,
+          total: items.length,
+          successCount,
+          failCount,
+          results,
+        }));
+      } catch (err) {
+        log('QC ORGANIZE ERROR', err.message, c.red);
+        res.writeHead(500, { 'Content-Type': 'application/json' });
+        res.end(JSON.stringify({ ok: false, error: err.message }));
+      }
+    });
+    return;
+  }
+
+  // 8. Open Folder in Explorer endpoint
+  if (req.method === 'POST' && (pathname === '/api/local/open-folder' || pathname === '/open-folder')) {
+    let bodyText = '';
+    req.on('data', (chunk) => { bodyText += chunk; });
+    req.on('end', () => {
+      try {
+        const body = JSON.parse(bodyText || '{}');
+        const folderPath = resolveTargetDirectory(body.folderPath || body.targetFolder || 'MetaGen_QC_Passed');
+
+        if (!fs.existsSync(folderPath)) {
+          fs.mkdirSync(folderPath, { recursive: true });
+        }
+
+        const isWin = process.platform === 'win32';
+        if (isWin) {
+          exec(`explorer "${folderPath}"`);
+        } else if (process.platform === 'darwin') {
+          exec(`open "${folderPath}"`);
+        } else {
+          exec(`xdg-open "${folderPath}"`);
+        }
+
+        res.writeHead(200, { 'Content-Type': 'application/json' });
+        res.end(JSON.stringify({ ok: true, folderPath }));
+      } catch (err) {
+        res.writeHead(500, { 'Content-Type': 'application/json' });
+        res.end(JSON.stringify({ ok: false, error: err.message }));
+      }
+    });
     return;
   }
 

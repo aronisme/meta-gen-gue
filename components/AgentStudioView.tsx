@@ -39,7 +39,7 @@ export function AgentStudioView({
 }: AgentStudioViewProps) {
   const rotator = getGlobalKeyRotator();
   const [activeSkillId, setActiveSkillId] = useState<string>('general-coworker');
-  const [activeProvider, setActiveProvider] = useState<ProviderType>('gemini');
+  const [activeProvider, setActiveProvider] = useState<ProviderType>('custom');
   const [messages, setMessages] = useState<AgentMessage[]>([
     {
       id: 'welcome_1',
@@ -55,7 +55,15 @@ export function AgentStudioView({
   const [bridgeStatus, setBridgeStatus] = useState<{ online: boolean; details?: unknown }>({
     online: false,
   });
+  const [keysList, setKeysList] = useState(() => rotator.listKeys());
   const [expandedReasoningMap, setExpandedReasoningMap] = useState<Record<string, boolean>>({});
+
+  useEffect(() => {
+    setKeysList(rotator.listKeys());
+    return rotator.subscribe((updated) => {
+      setKeysList(updated);
+    });
+  }, []);
 
   const chatEndRef = useRef<HTMLDivElement>(null);
   const executorRef = useRef<AgentExecutor | null>(null);
@@ -78,17 +86,58 @@ export function AgentStudioView({
   }, [messages, isBusy]);
 
   async function checkBridge() {
+    // 1. Direct fetch to local bridge
     try {
-      const res = await fetch(`${LOCAL_BRIDGE_URL}/status`, { signal: AbortSignal.timeout(1500) });
+      let res = await fetch(`${LOCAL_BRIDGE_URL}/health`, { signal: AbortSignal.timeout(2000) });
+      if (!res.ok) {
+        res = await fetch(`${LOCAL_BRIDGE_URL}/status`, { signal: AbortSignal.timeout(2000) });
+      }
       if (res.ok) {
         const json = await res.json();
         setBridgeStatus({ online: true, details: json });
-      } else {
-        setBridgeStatus({ online: false });
+        return;
       }
     } catch {
-      setBridgeStatus({ online: false });
+      // 2. Fallback via extension relay if direct fetch blocked by browser mixed-content
+      if (
+        typeof window !== 'undefined' &&
+        (
+          window as unknown as {
+            chrome?: {
+              runtime?: {
+                sendMessage?: (message: unknown, callback?: (response: unknown) => void) => void;
+              };
+            };
+          }
+        ).chrome?.runtime?.sendMessage
+      ) {
+        try {
+          (
+            window as unknown as {
+              chrome: {
+                runtime: {
+                  sendMessage: (
+                    message: unknown,
+                    callback?: (response: { online: boolean; details?: unknown }) => void
+                  ) => void;
+                };
+              };
+            }
+          ).chrome.runtime.sendMessage(
+            { type: 'CHECK_LOCAL_BRIDGE' },
+            (resp: { online: boolean; details?: unknown }) => {
+              if (resp?.online) {
+                setBridgeStatus({ online: true, details: resp.details });
+              } else {
+                setBridgeStatus({ online: false });
+              }
+            }
+          );
+          return;
+        } catch {}
+      }
     }
+    setBridgeStatus({ online: false });
   }
 
   function handleSendPrompt(customText?: string) {
@@ -155,7 +204,9 @@ export function AgentStudioView({
   }
 
   const activeSkill = getSkillById(activeSkillId);
-  const activeKeysCount = rotator.listKeys(activeProvider).filter((k) => k.status === 'active').length;
+  const activeKeysCount = (keysList.length > 0 ? keysList : rotator.listKeys()).filter(
+    (k) => k.status === 'active'
+  ).length;
 
   return (
     <div className="space-y-6">
@@ -175,17 +226,22 @@ export function AgentStudioView({
               </span>
             </div>
             <p className="text-xs text-[#6b5344] font-medium hidden sm:block">
-              Pusat kendali agen otonom: eksekusi tool, memori sesi, dan auto-rotasi API multi-provider
+              Pusat kendali agen otonom: percakapan manusiawi, eksekusi tool, dan auto-rotasi GAS AI Proxy
             </p>
           </div>
         </div>
 
         {/* Top Actions: Provider Pill & Key Pool Modal */}
         <div className="flex items-center gap-2 flex-wrap">
+          <div className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-xl border-2 border-[#2c1810] shadow-[2px_2px_0_#2c1810] bg-[#fff5e6] text-xs font-bold text-[#2c1810]">
+            <span className="w-2 h-2 rounded-full bg-emerald-500 animate-pulse" />
+            <span>GAS Multi-Model Auto Rotator</span>
+          </div>
+
           <button
             type="button"
             onClick={() => setShowKeyModal(true)}
-            className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-xl border-2 border-[#2c1810] shadow-[2px_2px_0_#2c1810] bg-[#fff5e6] hover:bg-[#ffebd1] text-xs font-bold text-[#2c1810] transition-all cursor-pointer"
+            className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-xl border-2 border-[#2c1810] shadow-[2px_2px_0_#2c1810] bg-white hover:bg-[#fff5e6] text-xs font-bold text-[#2c1810] transition-all cursor-pointer"
             title="Kelola pool API Key dan rotasi cerdas"
           >
             <Key className="w-3.5 h-3.5 text-[#ff6b35]" />
@@ -441,11 +497,26 @@ export function AgentStudioView({
               </div>
               <div className="flex items-center justify-between">
                 <span className="text-stone-500">ExifTool Engine:</span>
-                <span className="font-bold">{bridgeStatus.online ? 'Siap' : 'Menunggu'}</span>
+                <span className="font-bold text-emerald-700">
+                  {bridgeStatus.online
+                    ? (bridgeStatus.details as { exiftool?: { available?: boolean; version?: string } })
+                        ?.exiftool?.available
+                      ? `Siap (v${
+                          (
+                            bridgeStatus.details as {
+                              exiftool?: { available?: boolean; version?: string };
+                            }
+                          )?.exiftool?.version || '13.59'
+                        })`
+                      : 'Siap (Fallback JS)'
+                    : 'Menunggu'}
+                </span>
               </div>
               <div className="flex items-center justify-between">
                 <span className="text-stone-500">FTP Multi-Upload:</span>
-                <span className="font-bold">{bridgeStatus.online ? 'Aktif' : 'Standby'}</span>
+                <span className="font-bold text-emerald-700">
+                  {bridgeStatus.online ? 'Aktif (Pool Ready)' : 'Standby'}
+                </span>
               </div>
             </div>
 

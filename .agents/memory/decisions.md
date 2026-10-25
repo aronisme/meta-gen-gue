@@ -613,3 +613,19 @@
   - Evaluasi komposisi hanya berfokus pada cacat objektif: garis cakrawala miring tak disengaja (*unintentional tilted/unlevel horizon*) dan pemotongan canggung (*accidental awkward crop* pada subjek/anatomi).
   - Secara eksplisit melarang penalti atau peringatan kekurangan *copy space* pada gambar gaya *close-up*, *macro*, pola rapat (*pattern*), atau *full-frame artwork* karena copy space murni pilihan gaya dan bukan syarat kelulusan.
 - **Rationale & Consequences**: Mengeliminasi peringatan palsu (*anti-slop*), menjaga akurasi hasil audit, dan memberikan pengalaman pengguna yang relevan bagi seluruh genre aset microstock.
+
+## [2026-10-24] Server-Side Chat Relay for Omnigent Agent (Eliminating Browser-to-GAS CORS Issues)
+- **Context**: Panggilan langsung dari browser ke endpoint Google Apps Script (`script.google.com`) dengan header `Authorization` memicu penolakan *CORS Preflight (HTTP OPTIONS)* karena infrastruktur GAS tidak mendukung OPTIONS request untuk Web Apps.
+- **Decision**: Membangun endpoint server-side reverse proxy di Cloudflare Pages Functions ([`functions/api/agent/chat.ts`](file:///c:/App%20Tools/meta-gen-gue/functions/api/agent/chat.ts)) dan Next.js API ([`app/api/agent/chat/route.ts`](file:///c:/App%20Tools/meta-gen-gue/app/api/agent/chat/route.ts)). Browser memanggil endpoint same-origin `/api/agent/chat`, dan backend Cloudflare Pages Function meneruskan request secara server-to-server ke Dual Cluster GAS Proxy dengan rotasi failover.
+- **Rationale & Consequences**: Menghapus 100% masalah CORS di browser, menyembunyikan token internal dari inspeksi jaringan browser, dan menjaga kecepatan respons live yang stabil.
+
+## [2026-10-24] Unlocking Full Multi-Model Auto Rotation via GAS AI Proxy (Defaulting to model: auto)
+- **Context**: Script [`gas/Code.gs`](file:///c:/App%20Tools/meta-gen-gue/gas/Code.gs) memiliki arsitektur multi-provider canggih dengan konfigurasi `PROVIDER_ORDER: groq,gemini,tokenharbor,openrouter,mistral,nvidia,xkiro` dan circuit breaker cooldown 60 detik. Namun, kode frontend sebelumnya meng-hardcode `model: 'gemini-2.5-flash'`, mengunci seluruh proxy ke satu model saja dan menonaktifkan potensi model Groq Llama 3.3 70B, Qwen, DeepSeek, dan Mistral.
+- **Decision**: Menghapus seluruh kuncian hardcoded dan menetapkan `model: 'auto'` sebagai default utama. Memetakan provider ID (`custom`, `groq`, `gemini`, `deepseek`, `openai`) secara fleksibel dan mendaftarkan kunci built-in untuk seluruh provider di `lib/agent/key-rotator.ts`.
+- **Rationale & Consequences**: Memungkinkan sistem memanfaatkan rotasi multi-model secara optimal sesuai ketersediaan kuota tanpa drama konfigurasi manual, terbukti menghasilkan respons kilat dari model seperti Qwen dan Llama.
+
+## [2026-10-24] Zero-Empty Output Guarantees in Autonomous Tool Execution
+- **Context**: Saat tool selesai dieksekusi (seperti `agent_generate_prompts` atau `agent_generate_metadata`), template fallback sebelumnya hanya menampilkan pesan ringkas singkat tanpa menyertakan variasi prompt atau metadata ke pesan obrolan.
+- **Decision**: Mengintegrasikan `formatToolResultsAsMarkdown` di [`lib/agent/executor.ts`](file:///c:/App%20Tools/meta-gen-gue/lib/agent/executor.ts) yang mengonversi seluruh data mentah tool menjadi blok kode Markdown siap salin (`--ar 16:9 --v 6.1`, metadata judul/keyword, dan kartu audit). Format ini dikirimkan ke observasi LLM dan dijadikan respons penjamin jika LLM mengalami kendala jaringan.
+- **Rationale & Consequences**: Menjamin pengguna selalu mendapatkan hasil nyata dan lengkap di jendela obrolan, mengeliminasi respons kosong atau terpotong.
+

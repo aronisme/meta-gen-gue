@@ -35,6 +35,164 @@ export function maskApiKey(raw: string): string {
   return `${trimmed.slice(0, 4)}...${trimmed.slice(-4)}`;
 }
 
+export const BUILTIN_GAS_PROXY_KEYS: ProviderKey[] = [
+  // 1. Custom / General Multi-Model Auto Rotator
+  {
+    id: 'builtin_gas_cluster_1',
+    providerId: 'custom',
+    name: 'GAS Auto Rotator Cluster 1 (Multi-Model Hunter)',
+    keyValue: 'sk-gas-default-token133',
+    keyMasked: 'sk-g...n133',
+    baseUrl:
+      'https://script.google.com/macros/s/AKfycbz0TfjsTcaMF6WvXqf8SIfHCHVqkHQjB8I8O5l_zfKmoqeqDdh0IyHvg0PJlg8kWzXKwA/exec',
+    priority: 1,
+    weight: 10,
+    status: 'active',
+    consecutiveErrors: 0,
+    callCount: 0,
+    errorCount: 0,
+  },
+  {
+    id: 'builtin_gas_cluster_2',
+    providerId: 'custom',
+    name: 'GAS Auto Rotator Cluster 2 (Secondary Failover)',
+    keyValue: 'gas_live_8b84dd959b764b4296669602',
+    keyMasked: 'gas_...9602',
+    baseUrl:
+      'https://script.google.com/macros/s/AKfycbyxgrWSWQGMYBwbn4mjR_0VaXa6DdkGHmbC3YUJ7cWByxdZ-uJXk76iCYzV1826syjGxA/exec',
+    priority: 1,
+    weight: 10,
+    status: 'active',
+    consecutiveErrors: 0,
+    callCount: 0,
+    errorCount: 0,
+  },
+  // 2. Google Gemini Models
+  {
+    id: 'builtin_gas_gemini_1',
+    providerId: 'gemini',
+    name: 'GAS Cluster 1 (Gemini 2.5 Flash / 2.0 Auto)',
+    keyValue: 'sk-gas-default-token133',
+    keyMasked: 'sk-g...n133',
+    baseUrl:
+      'https://script.google.com/macros/s/AKfycbz0TfjsTcaMF6WvXqf8SIfHCHVqkHQjB8I8O5l_zfKmoqeqDdh0IyHvg0PJlg8kWzXKwA/exec',
+    priority: 1,
+    weight: 10,
+    status: 'active',
+    consecutiveErrors: 0,
+    callCount: 0,
+    errorCount: 0,
+  },
+  {
+    id: 'builtin_gas_gemini_2',
+    providerId: 'gemini',
+    name: 'GAS Cluster 2 (Gemini Failover Backup)',
+    keyValue: 'gas_live_8b84dd959b764b4296669602',
+    keyMasked: 'gas_...9602',
+    baseUrl:
+      'https://script.google.com/macros/s/AKfycbyxgrWSWQGMYBwbn4mjR_0VaXa6DdkGHmbC3YUJ7cWByxdZ-uJXk76iCYzV1826syjGxA/exec',
+    priority: 2,
+    weight: 10,
+    status: 'active',
+    consecutiveErrors: 0,
+    callCount: 0,
+    errorCount: 0,
+  },
+  // 3. Groq (Llama 3.3 70B & Qwen)
+  {
+    id: 'builtin_gas_groq_1',
+    providerId: 'groq',
+    name: 'GAS Cluster 1 (Groq Llama 3.3 70B Versatile)',
+    keyValue: 'sk-gas-default-token133',
+    keyMasked: 'sk-g...n133',
+    baseUrl:
+      'https://script.google.com/macros/s/AKfycbz0TfjsTcaMF6WvXqf8SIfHCHVqkHQjB8I8O5l_zfKmoqeqDdh0IyHvg0PJlg8kWzXKwA/exec',
+    priority: 1,
+    weight: 10,
+    status: 'active',
+    consecutiveErrors: 0,
+    callCount: 0,
+    errorCount: 0,
+  },
+  {
+    id: 'builtin_gas_groq_2',
+    providerId: 'groq',
+    name: 'GAS Cluster 2 (Groq Failover Backup)',
+    keyValue: 'gas_live_8b84dd959b764b4296669602',
+    keyMasked: 'gas_...9602',
+    baseUrl:
+      'https://script.google.com/macros/s/AKfycbyxgrWSWQGMYBwbn4mjR_0VaXa6DdkGHmbC3YUJ7cWByxdZ-uJXk76iCYzV1826syjGxA/exec',
+    priority: 2,
+    weight: 10,
+    status: 'active',
+    consecutiveErrors: 0,
+    callCount: 0,
+    errorCount: 0,
+  },
+  // 4. DeepSeek / TokenHarbor
+  {
+    id: 'builtin_gas_deepseek_1',
+    providerId: 'deepseek',
+    name: 'GAS Cluster 1 (DeepSeek v3 / v4.1 Flash)',
+    keyValue: 'sk-gas-default-token133',
+    keyMasked: 'sk-g...n133',
+    baseUrl:
+      'https://script.google.com/macros/s/AKfycbz0TfjsTcaMF6WvXqf8SIfHCHVqkHQjB8I8O5l_zfKmoqeqDdh0IyHvg0PJlg8kWzXKwA/exec',
+    priority: 1,
+    weight: 10,
+    status: 'active',
+    consecutiveErrors: 0,
+    callCount: 0,
+    errorCount: 0,
+  },
+  {
+    id: 'builtin_gas_deepseek_2',
+    providerId: 'deepseek',
+    name: 'GAS Cluster 2 (DeepSeek Failover Backup)',
+    keyValue: 'gas_live_8b84dd959b764b4296669602',
+    keyMasked: 'gas_...9602',
+    baseUrl:
+      'https://script.google.com/macros/s/AKfycbyxgrWSWQGMYBwbn4mjR_0VaXa6DdkGHmbC3YUJ7cWByxdZ-uJXk76iCYzV1826syjGxA/exec',
+    priority: 2,
+    weight: 10,
+    status: 'active',
+    consecutiveErrors: 0,
+    callCount: 0,
+    errorCount: 0,
+  },
+  // 5. OpenAI / OpenRouter
+  {
+    id: 'builtin_gas_openai_1',
+    providerId: 'openai',
+    name: 'GAS Cluster 1 (OpenRouter / OpenAI Auto Router)',
+    keyValue: 'sk-gas-default-token133',
+    keyMasked: 'sk-g...n133',
+    baseUrl:
+      'https://script.google.com/macros/s/AKfycbz0TfjsTcaMF6WvXqf8SIfHCHVqkHQjB8I8O5l_zfKmoqeqDdh0IyHvg0PJlg8kWzXKwA/exec',
+    priority: 1,
+    weight: 10,
+    status: 'active',
+    consecutiveErrors: 0,
+    callCount: 0,
+    errorCount: 0,
+  },
+  {
+    id: 'builtin_gas_openai_2',
+    providerId: 'openai',
+    name: 'GAS Cluster 2 (OpenRouter Failover Backup)',
+    keyValue: 'gas_live_8b84dd959b764b4296669602',
+    keyMasked: 'gas_...9602',
+    baseUrl:
+      'https://script.google.com/macros/s/AKfycbyxgrWSWQGMYBwbn4mjR_0VaXa6DdkGHmbC3YUJ7cWByxdZ-uJXk76iCYzV1826syjGxA/exec',
+    priority: 2,
+    weight: 10,
+    status: 'active',
+    consecutiveErrors: 0,
+    callCount: 0,
+    errorCount: 0,
+  },
+];
+
 export class SmartKeyRotator {
   private keys: ProviderKey[] = [];
   private isLoaded = false;
@@ -67,24 +225,51 @@ export class SmartKeyRotator {
   }
 
   private loadFromStorage(): void {
-    if (typeof window === 'undefined') {
-      this.isLoaded = true;
-      return;
-    }
-    try {
-      const raw = window.localStorage.getItem(STORAGE_KEY);
-      if (raw) {
-        const parsed = JSON.parse(raw) as ProviderKey[];
-        if (Array.isArray(parsed)) {
-          this.keys = parsed;
-          this.isLoaded = true;
-          return;
+    let loaded: ProviderKey[] = [];
+    if (typeof window !== 'undefined') {
+      try {
+        const raw = window.localStorage.getItem(STORAGE_KEY);
+        if (raw) {
+          const parsed = JSON.parse(raw) as ProviderKey[];
+          if (Array.isArray(parsed)) {
+            loaded = parsed;
+          }
         }
+      } catch (e) {
+        console.warn('[SmartKeyRotator] Failed to read keys from storage:', e);
       }
-    } catch (e) {
-      console.warn('[SmartKeyRotator] Failed to read keys from storage:', e);
     }
+
+    // Ensure built-in GAS proxies are always present and active by default
+    const merged = [...loaded];
+    for (const builtin of BUILTIN_GAS_PROXY_KEYS) {
+      const idx = merged.findIndex(
+        (k) =>
+          k.id === builtin.id ||
+          (k.baseUrl === builtin.baseUrl && k.providerId === builtin.providerId)
+      );
+      if (idx === -1) {
+        merged.push({ ...builtin });
+      } else {
+        // Always sync the latest credentials and baseUrl, and ensure active status
+        merged[idx] = {
+          ...builtin,
+          ...merged[idx],
+          name: builtin.name,
+          keyValue: builtin.keyValue,
+          status:
+            merged[idx].status === 'rate_limited' || merged[idx].status === 'quota_exceeded'
+              ? merged[idx].status
+              : 'active',
+        };
+      }
+    }
+
+    this.keys = merged;
     this.isLoaded = true;
+    if (typeof window !== 'undefined') {
+      this.saveToStorage();
+    }
   }
 
   private saveToStorage(): void {
@@ -219,7 +404,15 @@ export class SmartKeyRotator {
       this.saveToStorage();
     }
 
-    const providerKeys = this.keys.filter((k) => k.providerId === providerId);
+    let providerKeys = this.keys.filter((k) => k.providerId === providerId);
+    if (providerKeys.length === 0 || !providerKeys.some((k) => k.status === 'active')) {
+      // Zero Drama Fallback: fallback to any active provider key (e.g. built-in GAS Proxy)
+      const anyActive = this.keys.filter((k) => k.status === 'active');
+      if (anyActive.length > 0) {
+        providerKeys = anyActive;
+      }
+    }
+
     if (providerKeys.length === 0) {
       throw new NoAvailableKeyError(
         providerId,

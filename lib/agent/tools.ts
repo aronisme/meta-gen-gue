@@ -289,6 +289,7 @@ export async function dispatchAgentTool(
           height,
           megapixels,
           sizeBytes,
+          mimeType,
           passesHardTech: passes,
           failReasons,
         },
@@ -422,7 +423,10 @@ export async function dispatchAgentTool(
       let bridgeDetails: unknown = null;
 
       try {
-        const res = await fetch(`${LOCAL_BRIDGE_URL}/status`, { signal: AbortSignal.timeout(1500) });
+        let res = await fetch(`${LOCAL_BRIDGE_URL}/health`, { signal: AbortSignal.timeout(1500) });
+        if (!res.ok) {
+          res = await fetch(`${LOCAL_BRIDGE_URL}/status`, { signal: AbortSignal.timeout(1500) });
+        }
         if (res.ok) {
           bridgeOnline = true;
           bridgeDetails = await res.json();

@@ -2,6 +2,7 @@
 
 import { useEffect, useRef, useState } from 'react';
 import {
+  AlertTriangle,
   Camera,
   Check,
   CheckCircle2,
@@ -33,6 +34,7 @@ import {
   Upload,
   Wand2,
   X,
+  Zap,
 } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
@@ -40,12 +42,14 @@ import { Label } from '@/components/ui/label';
 import { Textarea } from '@/components/ui/textarea';
 import { toast } from 'sonner';
 import { resizeImageToMax1024 } from '@/lib/resize';
+import { runDeterministicPreflight } from '@/lib/qc/preflight';
 import {
   CREATIVE_FOCUS_LABELS,
   ENGINE_LABELS,
   exportPromptsToCsv,
   exportPromptsToJson,
   exportPromptsToQueueText,
+  exportUncopiedPromptsToQueueText,
   exportPromptsToText,
   formatPromptForEngine,
   getVisualDirectionLabel,
@@ -98,13 +102,18 @@ export interface PromptToMetadataHandoff {
 export interface PromptGeneratorViewProps {
   onSwitchToMetadata?: () => void;
   onSendImageToMetadata?: (file: File, context?: PromptToMetadataHandoff) => void;
-  onSendBatchImagesToMetadata?: (files: File[], contextList?: PromptToMetadataHandoff[]) => void;
+  onSendBatchImagesToMetadata?: (
+    files: File[],
+    contextList?: PromptToMetadataHandoff[],
+    options?: { autoGenerate?: boolean }
+  ) => void;
   targetSessionId?: string;
 }
 
 const STORAGE_KEY_PROMPTS = 'vcpa_prompts_v1';
 const STORAGE_KEY_SETTINGS = 'vcpa_settings_v1';
 const STORAGE_KEY_DNA = 'vcpa_dna_v1';
+const STORAGE_KEY_AUTO_MODE = 'metagen_prompt_auto_mode_v1';
 
 function safeFormatList(val: unknown, fallback = ''): string {
   if (Array.isArray(val)) {
@@ -218,6 +227,9 @@ export function PromptGeneratorView({
   const [regeneratingId, setRegeneratingId] = useState<string | null>(null);
   const [copiedId, setCopiedId] = useState<string | null>(null);
   const [copiedAll, setCopiedAll] = useState<boolean>(false);
+  const [copiedUncopied, setCopiedUncopied] = useState<boolean>(false);
+  const [copiedFiltered, setCopiedFiltered] = useState<boolean>(false);
+  const [promptFilter, setPromptFilter] = useState<'all' | 'uncopied' | 'copied' | 'favorite'>('all');
   const [generatingFlowCardId, setGeneratingFlowCardId] = useState<string | null>(null);
   const [flowQueueCardIds, setFlowQueueCardIds] = useState<string[]>([]);
   const [flowBatchLimit, setFlowBatchLimit] = useState<number>(5);
@@ -244,12 +256,67 @@ export function PromptGeneratorView({
   const [isGeneratingTwists, setIsGeneratingTwists] = useState<boolean>(false);
   const [visualCategoryTab, setVisualCategoryTab] = useState<'photo' | 'illustration'>('photo');
 
+  // Mode Manual Permanen: Otomatis migrasikan gaya otomatis lama ke manual default
+  useEffect(() => {
+    if (
+      settings.visualDirection === 'agent_decide' ||
+      settings.visualDirection === 'smart_random' ||
+      !settings.visualDirection
+    ) {
+      setSettings((s) => ({ ...s, visualDirection: 'photo_commercial_lifestyle' }));
+    }
+  }, [settings.visualDirection]);
+
+  // Sinkronkan tab kategori gaya sesuai gaya manual terpilih
+  useEffect(() => {
+    const item = VISUAL_DIRECTION_LIST.find((v) => v.id === settings.visualDirection);
+    if (item?.category === 'photo' || item?.category === 'illustration') {
+      setVisualCategoryTab(item.category);
+    }
+  }, [settings.visualDirection]);
+
+  // Persist perubahan settings (gaya visual, aspek rasio, dll.) ke sesi aktif di IndexedDB
+  useEffect(() => {
+    if (session?.id) {
+      void saveActivePromptSession({ ...session, settings });
+    }
+  }, [settings, session]);
+
   // 8. Automated Multi-Image Queue System State
   const [queue, setQueue] = useState<PromptQueueItem[]>([]);
   const [isQueuePaused, setIsQueuePaused] = useState<boolean>(false);
   const [isQueueDrawerOpen, setIsQueueDrawerOpen] = useState<boolean>(true);
   const activeProcessingRef = useRef<boolean>(false);
   const processedPayloadIdsRef = useRef<Set<string>>(new Set());
+
+  // 9. Fully Autonomous End-to-End Mode State (Prompt -> Flow Gen -> Download 2K -> Auto QC -> Metadata Gen)
+  const [isAutoMode, setIsAutoMode] = useState<boolean>(() => {
+    if (typeof window === 'undefined') return false;
+    try {
+      return localStorage.getItem(STORAGE_KEY_AUTO_MODE) === 'true';
+    } catch {
+      return false;
+    }
+  });
+  const autoEnqueuedCardsRef = useRef<Set<string>>(new Set());
+  const autoDownloadedBatchesRef = useRef<Set<string>>(new Set());
+  const isAutoProcessingRef = useRef<boolean>(false);
+  const isAutoModeRef = useRef<boolean>(isAutoMode);
+  const promptsRef = useRef<PromptCardItem[]>(prompts);
+  const sessionRef = useRef<PromptGenerationSession>(session);
+  const executeAutoQcRef = useRef<() => Promise<void>>(async () => {});
+
+  useEffect(() => {
+    isAutoModeRef.current = isAutoMode;
+  }, [isAutoMode]);
+
+  useEffect(() => {
+    promptsRef.current = prompts;
+  }, [prompts]);
+
+  useEffect(() => {
+    sessionRef.current = session;
+  }, [session]);
 
   // Restore active session from IndexedDB on initial render
   useEffect(() => {
@@ -496,7 +563,7 @@ export function PromptGeneratorView({
       try {
         const result = await executeVCPAGeneration({
           mode: 'reference_to_prompt',
-          brief: nextPending.brief || brief || '',
+          brief: nextPending.brief || '',
           imageDataUrl: nextPending.imageDataUrl,
           settings,
           provider: 'gas-proxy',
@@ -774,6 +841,9 @@ export function PromptGeneratorView({
           toast.success(
             `✓ Unduh Massal Selesai! Berhasil menyimpan ${res.saved} aset 2K ke Downloads/MetaGen_Flow.`
           );
+          if (isAutoModeRef.current) {
+            void executeAutoQcRef.current();
+          }
         } else if (res?.error) {
           toast.error(`Gagal unduh massal: ${res.error}`);
         }
@@ -944,6 +1014,7 @@ export function PromptGeneratorView({
     }
 
     if (newItems.length > 0) {
+      setVisualDna(null);
       enqueueImages(newItems);
       toast.success(`${newItems.length} gambar berhasil masuk antrean generator!`, { id: toastId });
     } else {
@@ -1019,7 +1090,7 @@ export function PromptGeneratorView({
         mode,
         brief,
         imageDataUrl: mode === 'reference_to_prompt' ? (refImageDataUrl || undefined) : undefined,
-        visualDna: mode === 'reference_to_prompt' ? (visualDna || undefined) : undefined,
+        visualDna: mode === 'reference_to_prompt' && !refImageDataUrl ? (visualDna || undefined) : undefined,
         settings,
         provider: 'gas-proxy',
         model: 'auto',
@@ -1239,9 +1310,22 @@ export function PromptGeneratorView({
   };
 
   // Copy Single Prompt
-  const handleCopyCard = (card: PromptCardItem) => {
-    void navigator.clipboard.writeText(card.prompt);
+  const handleCopyCard = async (card: PromptCardItem) => {
+    await copyToClipboardSafe(card.prompt);
     setCopiedId(card.id);
+
+    // Tandai status prompt sebagai disalin dan simpan ke sesi
+    const now = Date.now();
+    const updated = prompts.map((c) =>
+      c.id === card.id ? { ...c, isCopied: true, copiedAt: now } : c
+    );
+    setPrompts(updated);
+    void savePromptSession({
+      ...session,
+      prompts: updated,
+      updatedAt: now,
+    });
+
     toast.success(`Prompt #${card.ordinal} disalin!`);
     setTimeout(() => setCopiedId(null), 2000);
   };
@@ -1339,6 +1423,19 @@ export function PromptGeneratorView({
     const copied = await copyToClipboardSafe(agentPrompt);
     setCopiedAgentBatch(true);
     setTimeout(() => setCopiedAgentBatch(false), 2500);
+
+    // Tandai targetCards sebagai disalin di sesi
+    const copiedCardIds = new Set(targetCards.map((c) => c.id));
+    const now = Date.now();
+    const updated = prompts.map((c) =>
+      copiedCardIds.has(c.id) ? { ...c, isCopied: true, copiedAt: now } : c
+    );
+    setPrompts(updated);
+    void savePromptSession({
+      ...session,
+      prompts: updated,
+      updatedAt: now,
+    });
 
     // Register active agent scenes with extension so manual copy-paste also gets tracked and tagged accurately
     window.postMessage(
@@ -1544,6 +1641,242 @@ export function PromptGeneratorView({
     }
   };
 
+  // Convert base64 dataUrl to native browser File object
+  const dataUrlToFile = (dataUrl: string, filename: string): File => {
+    const arr = dataUrl.split(',');
+    const mimeMatch = arr[0].match(/:(.*?);/);
+    const mime = mimeMatch ? mimeMatch[1] : 'image/jpeg';
+    const bstr = atob(arr[1] || '');
+    let n = bstr.length;
+    const u8arr = new Uint8Array(n);
+    while (n--) {
+      u8arr[n] = bstr.charCodeAt(n);
+    }
+    return new File([u8arr], filename, { type: mime, lastModified: Date.now() });
+  };
+
+  // Autonomous Pipeline: Scan 2K -> Auto QC -> Handoff to Metadata Generation
+  const executeAutoQcAndMetadataPipeline = async () => {
+    if (isAutoProcessingRef.current) return;
+    isAutoProcessingRef.current = true;
+    const currentPrompts = promptsRef.current;
+    const currentSession = sessionRef.current;
+
+    const toastId = toast.loading('⚡ [Mode Auto] Memindai dan mengambil aset 2K dari folder Downloads...', {
+      duration: 12000,
+    });
+
+    try {
+      const cleanFolder = currentSession.title?.replace(/[^a-zA-Z0-9_\-]/g, '_') || '';
+      let scanRes = cleanFolder ? await scanFlowDownloads(cleanFolder) : await scanFlowDownloads();
+      if (!scanRes.ok || scanRes.files.length === 0) {
+        scanRes = await scanFlowDownloads();
+      }
+
+      let browserFiles: File[] = [];
+      if (scanRes.ok && scanRes.files.length > 0) {
+        const matched = scanRes.files.filter((f) => f.resolutionTag === flowDownloadResolution);
+        const chosen = matched.length > 0 ? matched : scanRes.files;
+        for (const item of chosen) {
+          try {
+            const file = await fetchLocalFileAsBrowserFile(item);
+            browserFiles.push(file);
+          } catch (e) {
+            console.warn('[AutoPipeline] Gagal stream file dari bridge:', item.filename, e);
+          }
+        }
+      }
+
+      // Fallback: jika local bridge belum tersimpan / bridge offline, gunakan dataUrl / variasi dari kartu render
+      if (browserFiles.length === 0) {
+        for (const p of currentPrompts) {
+          const rawUrl =
+            p.generatedImageUrl ||
+            p.variations?.[p.selectedVariationIndex || 0]?.dataUrl ||
+            p.variations?.[0]?.dataUrl;
+
+          if (rawUrl) {
+            const safeName = `${(p.title || `Scene_${p.ordinal}`).replace(/[^a-zA-Z0-9_\-]/g, '_')}_2K.jpg`;
+            if (rawUrl.startsWith('data:')) {
+              const fallbackFile = dataUrlToFile(rawUrl, safeName);
+              browserFiles.push(fallbackFile);
+            } else {
+              try {
+                const res = await fetch(rawUrl);
+                const blob = await res.blob();
+                const fallbackFile = new File([blob], safeName, { type: blob.type || 'image/jpeg' });
+                browserFiles.push(fallbackFile);
+              } catch (e) {
+                console.warn('[AutoPipeline] Gagal fetch url gambar kartu:', rawUrl, e);
+              }
+            }
+          }
+        }
+      }
+
+      if (browserFiles.length === 0) {
+        toast.warning('⚡ [Mode Auto] Tidak ditemukan file render 2K untuk diperiksa.', { id: toastId });
+        return;
+      }
+
+      toast.loading(`⚡ [Mode Auto] Menjalankan Preflight QC untuk ${browserFiles.length} file 2K...`, { id: toastId });
+
+      const passedFiles: File[] = [];
+      const passedContextList: PromptToMetadataHandoff[] = [];
+      const failedList: Array<{ filename: string; reason: string }> = [];
+
+      for (const file of browserFiles) {
+        const technical = await runDeterministicPreflight(file, 'auto');
+        const matchingCard = currentPrompts.find(
+          (p) =>
+            (p.title && file.name.toLowerCase().includes(p.title.toLowerCase().replace(/[^a-z0-9]/g, '_'))) ||
+            file.name.toLowerCase().includes(p.id.slice(0, 6).toLowerCase())
+        );
+
+        if (technical.passes_hard_tech) {
+          passedFiles.push(file);
+          passedContextList.push({
+            file,
+            promptText: matchingCard?.prompt || '',
+            promptCardId: matchingCard?.id || '',
+            promptTitle: matchingCard?.title || '',
+            sessionId: currentSession.id,
+            sessionTitle: currentSession.title,
+          });
+
+          if (matchingCard) {
+            setPrompts((prev) =>
+              prev.map((c) =>
+                c.id === matchingCard.id
+                  ? { ...c, qcStatus: 'passed', qcDetails: `${technical.megapixels} MP` }
+                  : c
+              )
+            );
+          }
+        } else {
+          const reason = technical.fail_reasons.join('; ') || 'Resolusi/Format di bawah standar Adobe Stock';
+          failedList.push({ filename: file.name, reason });
+
+          if (matchingCard) {
+            setPrompts((prev) =>
+              prev.map((c) =>
+                c.id === matchingCard.id
+                  ? { ...c, qcStatus: 'failed', qcDetails: reason }
+                  : c
+              )
+            );
+          }
+        }
+      }
+
+      if (failedList.length > 0) {
+        toast.warning(`⚠️ [Mode Auto] ${failedList.length} file ditolak QC: ${failedList.map((f) => f.reason).join(', ')}`);
+      }
+
+      if (passedFiles.length === 0) {
+        toast.error('❌ [Mode Auto] Tidak ada file yang lolos kriteria QC Adobe Stock.', { id: toastId });
+        return;
+      }
+
+      toast.success(
+        `⚡ [Mode Auto] QC Lolos (${passedFiles.length} file)! Mengalihkan dan memproses metadata...`,
+        { id: toastId }
+      );
+
+      // Otomatis kirim ke Metadata Studio dan jalankan generasi metadata dalam sesi yang sama
+      if (onSendBatchImagesToMetadata) {
+        onSendBatchImagesToMetadata(passedFiles, passedContextList, { autoGenerate: true });
+      } else if (onSendImageToMetadata) {
+        for (let i = 0; i < passedFiles.length; i++) {
+          onSendImageToMetadata(passedFiles[i], passedContextList[i]);
+        }
+        if (onSwitchToMetadata) onSwitchToMetadata();
+      }
+    } catch (err) {
+      console.error('[AutoPipeline] Error:', err);
+      toast.error(`⚡ [Mode Auto] Terjadi kesalahan: ${err instanceof Error ? err.message : String(err)}`, {
+        id: toastId,
+      });
+    } finally {
+      isAutoProcessingRef.current = false;
+    }
+  };
+
+  useEffect(() => {
+    executeAutoQcRef.current = executeAutoQcAndMetadataPipeline;
+  });
+
+  // 1. Mode Auto: Auto-Enqueue new prompts to Google Flow
+  useEffect(() => {
+    if (!isAutoMode) return;
+
+    const unrenderedCards = prompts.filter(
+      (p) =>
+        !p.generatedImageUrl &&
+        !autoEnqueuedCardsRef.current.has(p.id) &&
+        p.flowStatus !== 'generating' &&
+        p.flowStatus !== 'completed'
+    );
+
+    if (unrenderedCards.length === 0) return;
+
+    for (const card of unrenderedCards) {
+      autoEnqueuedCardsRef.current.add(card.id);
+      window.postMessage(
+        {
+          type: 'METAGEN_TRIGGER_FLOW_GEN',
+          payload: {
+            cardId: card.id,
+            ordinal: card.ordinal,
+            title: card.title,
+            prompt: card.prompt,
+            ratio: settings.aspectRatio || '16:9',
+            outputCount: flowOutputCount || 'x1',
+            model: settings.engine === 'nanobanana' ? 'Nano Banana 2' : 'Imagen 3',
+          },
+        },
+        '*'
+      );
+    }
+
+    setPrompts((prev) =>
+      prev.map((c) =>
+        autoEnqueuedCardsRef.current.has(c.id) && !c.generatedImageUrl && !c.flowStatus
+          ? { ...c, flowStatus: 'pending' as const }
+          : c
+      )
+    );
+
+    toast.info(`⚡ [Mode Auto] ${unrenderedCards.length} prompt otomatis masuk antrean Google Flow!`, {
+      description: 'Google Flow sedang merender gambar di tab background.',
+      duration: 4000,
+    });
+  }, [prompts, isAutoMode, flowOutputCount, settings.aspectRatio, settings.engine]);
+
+  // 2. Mode Auto: Auto-Download 2K when generation finishes
+  useEffect(() => {
+    if (!isAutoMode) return;
+    if (generatingFlowCardId !== null || flowQueueCardIds.length > 0) return;
+    if (isFlowMassDownloading) return;
+
+    const renderedUndownloaded = prompts.filter(
+      (p) => p.generatedImageUrl && !autoDownloadedBatchesRef.current.has(p.id)
+    );
+
+    if (renderedUndownloaded.length === 0) return;
+
+    for (const card of renderedUndownloaded) {
+      autoDownloadedBatchesRef.current.add(card.id);
+    }
+
+    toast.info(`⚡ [Mode Auto] ${renderedUndownloaded.length} gambar siap! Memulai auto-download ${flowDownloadResolution}...`, {
+      description: 'Mengunduh aset beresolusi tinggi ke Downloads/MetaGen_Flow...',
+      duration: 4000,
+    });
+
+    handleTriggerFlowMassDownload();
+  }, [prompts, isAutoMode, generatingFlowCardId, flowQueueCardIds, isFlowMassDownloading, flowDownloadResolution]);
+
   // Push generated image into Metadata Studio queue
   const handleSendCardImageToMetadata = (card: PromptCardItem) => {
     if (!card.generatedImageUrl) return;
@@ -1632,8 +1965,105 @@ export function PromptGeneratorView({
     const txt = exportPromptsToQueueText(prompts);
     await copyToClipboardSafe(txt);
     setCopiedAll(true);
+
+    const now = Date.now();
+    const updated = prompts.map((c) => ({
+      ...c,
+      isCopied: true,
+      copiedAt: c.copiedAt || now,
+    }));
+    setPrompts(updated);
+    void savePromptSession({
+      ...session,
+      prompts: updated,
+      updatedAt: now,
+    });
+
     toast.success(`Semua (${prompts.length}) prompt disalin ke clipboard!`);
     setTimeout(() => setCopiedAll(false), 2000);
+  };
+
+  // Copy Only Prompts that have not been copied before
+  const handleCopyUncopied = async () => {
+    if (prompts.length === 0) return;
+    const uncopied = prompts.filter((p) => !p.isCopied);
+    if (uncopied.length === 0) {
+      toast.info('Semua prompt pada sesi ini sudah pernah disalin sebelumnya.', {
+        description: 'Gunakan tombol "Salin Semua" atau klik "Reset Status" jika ingin menyalin ulang dari awal.',
+      });
+      return;
+    }
+
+    const txt = exportUncopiedPromptsToQueueText(prompts);
+    await copyToClipboardSafe(txt);
+    setCopiedUncopied(true);
+
+    const now = Date.now();
+    const updated = prompts.map((c) =>
+      !c.isCopied ? { ...c, isCopied: true, copiedAt: now } : c
+    );
+    setPrompts(updated);
+    void savePromptSession({
+      ...session,
+      prompts: updated,
+      updatedAt: now,
+    });
+
+    toast.success(`${uncopied.length} prompt yang belum disalin berhasil disalin ke clipboard!`);
+    setTimeout(() => setCopiedUncopied(false), 2000);
+  };
+
+  // Copy Prompts currently displayed by active filter
+  const handleCopyFiltered = async () => {
+    if (displayedPrompts.length === 0) return;
+    const targetPrompts = [...displayedPrompts];
+    const count = targetPrompts.length;
+
+    const txt = exportPromptsToQueueText(targetPrompts);
+    await copyToClipboardSafe(txt);
+    setCopiedFiltered(true);
+
+    const now = Date.now();
+    const targetIds = new Set(targetPrompts.map((p) => p.id));
+    const updated = prompts.map((c) =>
+      targetIds.has(c.id) ? { ...c, isCopied: true, copiedAt: c.copiedAt || now } : c
+    );
+    setPrompts(updated);
+    void savePromptSession({
+      ...session,
+      prompts: updated,
+      updatedAt: now,
+    });
+
+    const filterLabel =
+      promptFilter === 'uncopied'
+        ? 'belum disalin'
+        : promptFilter === 'copied'
+        ? 'sudah disalin'
+        : promptFilter === 'favorite'
+        ? 'favorit'
+        : 'konsep';
+
+    toast.success(`${count} prompt (${filterLabel}) berhasil disalin ke clipboard!`);
+    setTimeout(() => setCopiedFiltered(false), 2000);
+  };
+
+  // Reset Copied Status for all prompts in session
+  const handleResetCopiedStatus = () => {
+    if (prompts.length === 0) return;
+    const now = Date.now();
+    const updated = prompts.map((c) => ({
+      ...c,
+      isCopied: false,
+      copiedAt: undefined,
+    }));
+    setPrompts(updated);
+    void savePromptSession({
+      ...session,
+      prompts: updated,
+      updatedAt: now,
+    });
+    toast.info('Status salin semua prompt telah di-reset.');
   };
 
   // Bulk Export: CSV Tabular (Excel / Sheets compatible with UTF-8 BOM)
@@ -1711,6 +2141,13 @@ export function PromptGeneratorView({
   const processingQueueItem = queue.find((q) => q.status === 'processing');
   const completedQueueCount = queue.filter((q) => q.status === 'completed').length;
   const completedQueueItems = queue.filter((q) => q.status === 'completed');
+
+  const displayedPrompts = prompts.filter((p) => {
+    if (promptFilter === 'uncopied') return !p.isCopied;
+    if (promptFilter === 'copied') return !!p.isCopied;
+    if (promptFilter === 'favorite') return !!p.isFavorite;
+    return true;
+  });
 
   return (
     <div className="space-y-6">
@@ -2378,48 +2815,80 @@ export function PromptGeneratorView({
 
             {!foldedSections.visual && (
               <div className="p-4 pt-0 space-y-4 border-t border-stone-200/80 mt-1">
-                {/* 1. Special Automation Modes (Agent Decide & Smart Variety Pack) */}
-                <div className="space-y-1.5 pt-3">
-                  <div className="flex items-center justify-between">
-                    <Label className="text-xs font-black text-[#2c1810]">Mode Otomasi Gaya</Label>
-                    <span className="text-[10px] font-bold text-[#ff6b35]">Rekomendasi AI</span>
+                {/* Katalog Gaya Spesifik Microstock (Mode Manual) */}
+                <div className="space-y-2 pt-3">
+                  <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-1.5">
+                    <div className="flex items-center gap-2">
+                      <Label className="text-xs font-black text-[#2c1810]">
+                        Katalog Gaya Spesifik Microstock
+                      </Label>
+                      <span className="text-[9px] font-black px-1.5 py-0.5 rounded bg-emerald-100 text-emerald-800 border border-emerald-300">
+                        ✓ Mode Manual
+                      </span>
+                    </div>
+
+                    <div className="flex bg-stone-100 p-0.5 rounded-lg border border-[#2c1810]/40 self-start sm:self-auto">
+                      <button
+                        type="button"
+                        onClick={() => setVisualCategoryTab('photo')}
+                        className={`px-2.5 py-1 rounded-md text-[11px] font-black transition-all cursor-pointer flex items-center gap-1 ${
+                          visualCategoryTab === 'photo'
+                            ? 'bg-[#2c1810] text-white shadow-[1px_1px_0_#ff6b35]'
+                            : 'text-stone-600 hover:text-stone-900'
+                        }`}
+                      >
+                        <span>📷 Fotografi (8)</span>
+                      </button>
+                      <button
+                        type="button"
+                        onClick={() => setVisualCategoryTab('illustration')}
+                        className={`px-2.5 py-1 rounded-md text-[11px] font-black transition-all cursor-pointer flex items-center gap-1 ${
+                          visualCategoryTab === 'illustration'
+                            ? 'bg-[#2c1810] text-white shadow-[1px_1px_0_#ff6b35]'
+                            : 'text-stone-600 hover:text-stone-900'
+                        }`}
+                      >
+                        <span>🎨 Ilustrasi & Vektor (8)</span>
+                      </button>
+                    </div>
                   </div>
-                  <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
-                    {VISUAL_DIRECTION_LIST.filter((v) => v.category === 'special').map((opt) => {
+
+                  {/* Info Gaya Manual Terpilih */}
+                  <div className="px-2.5 py-1.5 bg-emerald-50 rounded-lg border border-emerald-200 flex items-center justify-between text-[11px]">
+                    <span className="text-emerald-900 font-bold">
+                      Gaya terpilih saat ini:{' '}
+                      <b className="text-[#2c1810]">{getVisualDirectionLabel(settings.visualDirection)}</b>
+                    </span>
+                  </div>
+
+                  {/* Grid Sub-Gaya Berdasarkan Tab yang Dipilih */}
+                  <div className="grid grid-cols-1 sm:grid-cols-2 gap-1.5 max-h-[300px] overflow-y-auto pr-1">
+                    {VISUAL_DIRECTION_LIST.filter((v) => v.category === visualCategoryTab).map((opt) => {
                       const isSelected = settings.visualDirection === opt.id;
                       return (
                         <button
                           key={opt.id}
                           type="button"
-                          onClick={() => setSettings((s) => ({ ...s, visualDirection: opt.id as VisualDirection }))}
-                          className={`p-2.5 rounded-xl border-2 text-left transition-all cursor-pointer relative ${
+                          onClick={() =>
+                            setSettings((s) => ({ ...s, visualDirection: opt.id as VisualDirection }))
+                          }
+                          className={`p-2 rounded-lg border-2 text-left transition-all cursor-pointer ${
                             isSelected
-                              ? 'bg-[#2c1810] text-white border-[#2c1810] shadow-[3px_3px_0_#ff6b35]'
-                              : 'bg-white hover:bg-[#fff5e6] border-[#2c1810] shadow-[2px_2px_0_#2c1810]'
+                              ? 'bg-[#fff5e6] border-[#2c1810] shadow-[2px_2px_0_#2c1810] font-black'
+                              : 'bg-white border-stone-200 hover:border-stone-400 font-semibold text-stone-700'
                           }`}
                         >
                           <div className="flex items-center justify-between gap-1">
+                            <span className="text-xs text-[#2c1810] font-black truncate">{opt.label}</span>
                             <span
-                              className={`text-xs font-black flex items-center gap-1.5 ${
-                                isSelected ? 'text-amber-300' : 'text-[#2c1810]'
-                              }`}
-                            >
-                              <span>{opt.id === 'agent_decide' ? '🤖' : '🎲'}</span>
-                              <span>{opt.label}</span>
-                            </span>
-                            <span
-                              className={`text-[8.5px] font-black px-1.5 py-0.5 rounded uppercase tracking-wider ${
-                                isSelected ? 'bg-amber-400 text-stone-900' : 'bg-amber-100 text-[#ff6b35]'
+                              className={`text-[8.5px] px-1.5 py-0.2 rounded font-black shrink-0 ${
+                                isSelected ? 'bg-[#ff6b35] text-white' : 'bg-stone-100 text-stone-600'
                               }`}
                             >
                               {opt.badge}
                             </span>
                           </div>
-                          <span
-                            className={`text-[10px] font-medium block mt-1 leading-snug ${
-                              isSelected ? 'text-stone-300' : 'text-[#6b5344]'
-                            }`}
-                          >
+                          <span className="text-[10px] text-stone-500 font-normal block leading-tight mt-0.5 line-clamp-2">
                             {opt.desc}
                           </span>
                         </button>
@@ -2427,154 +2896,6 @@ export function PromptGeneratorView({
                     })}
                   </div>
                 </div>
-
-                {/* 2. Hierarki 2 Kategori: Fotografi vs Ilustrasi & Grafis */}
-                {(() => {
-                  const isAutomated =
-                    settings.visualDirection === 'agent_decide' || settings.visualDirection === 'smart_random';
-                  const activeAutoLabel =
-                    settings.visualDirection === 'agent_decide'
-                      ? 'Agent Decide (Otomatis)'
-                      : 'Smart Variety Pack (Acak)';
-
-                  return (
-                    <div className="space-y-2 pt-1 border-t border-stone-200/80">
-                      <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-1.5">
-                        <div className="flex items-center gap-2">
-                          <Label className="text-xs font-black text-[#2c1810]">
-                            Katalog Gaya Spesifik Microstock
-                          </Label>
-                          {isAutomated ? (
-                            <span className="text-[9px] font-bold px-1.5 py-0.5 rounded bg-stone-200 text-stone-700">
-                              🔒 Terkunci
-                            </span>
-                          ) : (
-                            <span className="text-[9px] font-black px-1.5 py-0.5 rounded bg-emerald-100 text-emerald-800 border border-emerald-300">
-                              ✓ Mode Manual
-                            </span>
-                          )}
-                        </div>
-
-                        <div className="flex bg-stone-100 p-0.5 rounded-lg border border-[#2c1810]/40 self-start sm:self-auto">
-                          <button
-                            type="button"
-                            onClick={() => setVisualCategoryTab('photo')}
-                            className={`px-2.5 py-1 rounded-md text-[11px] font-black transition-all cursor-pointer flex items-center gap-1 ${
-                              visualCategoryTab === 'photo'
-                                ? 'bg-[#2c1810] text-white shadow-[1px_1px_0_#ff6b35]'
-                                : 'text-stone-600 hover:text-stone-900'
-                            }`}
-                          >
-                            <span>📷 Fotografi (8)</span>
-                          </button>
-                          <button
-                            type="button"
-                            onClick={() => setVisualCategoryTab('illustration')}
-                            className={`px-2.5 py-1 rounded-md text-[11px] font-black transition-all cursor-pointer flex items-center gap-1 ${
-                              visualCategoryTab === 'illustration'
-                                ? 'bg-[#2c1810] text-white shadow-[1px_1px_0_#ff6b35]'
-                                : 'text-stone-600 hover:text-stone-900'
-                            }`}
-                          >
-                            <span>🎨 Ilustrasi & Vektor (8)</span>
-                          </button>
-                        </div>
-                      </div>
-
-                      {/* Info / Unlock Banner saat Mode Otomasi Aktif */}
-                      {isAutomated ? (
-                        <div className="p-3 rounded-xl border-2 border-dashed border-[#ff6b35]/60 bg-amber-50/90 flex flex-col sm:flex-row sm:items-center justify-between gap-2.5 shadow-[1px_1px_0_#2c1810]">
-                          <div className="flex items-start sm:items-center gap-2.5">
-                            <div className="w-7 h-7 rounded-lg bg-[#2c1810] text-amber-300 flex items-center justify-center font-black text-sm shrink-0">
-                              🔒
-                            </div>
-                            <div>
-                              <span className="text-xs font-black text-[#2c1810] block">
-                                Kartu Katalog Dinonaktifkan ({activeAutoLabel})
-                              </span>
-                              <span className="text-[10px] text-[#6b5344] font-medium block leading-tight">
-                                Gaya ditentukan otomatis oleh AI. Jika ingin mengunci ke 1 sub-gaya tertentu, buka kunci katalog di samping.
-                              </span>
-                            </div>
-                          </div>
-
-                          <Button
-                            type="button"
-                            size="sm"
-                            onClick={() => {
-                              const fallbackStyle =
-                                visualCategoryTab === 'photo'
-                                  ? 'photo_commercial_lifestyle'
-                                  : 'vector_flat_isolated';
-                              setSettings((s) => ({ ...s, visualDirection: fallbackStyle }));
-                              toast.success(`Mode Manual aktif: ${getVisualDirectionLabel(fallbackStyle)}`);
-                            }}
-                            className="h-7 px-3 text-[10px] font-black bg-[#ff6b35] hover:bg-[#e55a2b] text-white border-2 border-[#2c1810] shadow-[1px_1px_0_#2c1810] shrink-0 cursor-pointer self-start sm:self-auto"
-                          >
-                            🔓 Buka Kunci Katalog & Pilih Gaya
-                          </Button>
-                        </div>
-                      ) : (
-                        <div className="px-2.5 py-1 bg-emerald-50 rounded-lg border border-emerald-200 flex items-center justify-between text-[10px]">
-                          <span className="text-emerald-900 font-bold">
-                            Gaya terpilih saat ini:{' '}
-                            <b>{getVisualDirectionLabel(settings.visualDirection)}</b>
-                          </span>
-                          <button
-                            type="button"
-                            onClick={() => {
-                              setSettings((s) => ({ ...s, visualDirection: 'agent_decide' }));
-                              toast.info('Kembali ke mode Agent Decide (Auto)');
-                            }}
-                            className="text-[#ff6b35] font-black hover:underline cursor-pointer"
-                          >
-                            Kembalikan ke Auto
-                          </button>
-                        </div>
-                      )}
-
-                      {/* Grid Sub-Gaya Berdasarkan Tab yang Dipilih */}
-                      <div
-                        className={`grid grid-cols-1 sm:grid-cols-2 gap-1.5 max-h-[300px] overflow-y-auto pr-1 transition-all ${
-                          isAutomated ? 'opacity-35 pointer-events-none select-none grayscale-[40%]' : ''
-                        }`}
-                      >
-                        {VISUAL_DIRECTION_LIST.filter((v) => v.category === visualCategoryTab).map((opt) => {
-                          const isSelected = settings.visualDirection === opt.id;
-                          return (
-                            <button
-                              key={opt.id}
-                              type="button"
-                              disabled={isAutomated}
-                              onClick={() =>
-                                setSettings((s) => ({ ...s, visualDirection: opt.id as VisualDirection }))
-                              }
-                              className={`p-2 rounded-lg border-2 text-left transition-all cursor-pointer ${
-                                isSelected
-                                  ? 'bg-[#fff5e6] border-[#2c1810] shadow-[2px_2px_0_#2c1810] font-black'
-                                  : 'bg-white border-stone-200 hover:border-stone-400 font-semibold text-stone-700'
-                              }`}
-                            >
-                              <div className="flex items-center justify-between gap-1">
-                                <span className="text-xs text-[#2c1810] font-black truncate">{opt.label}</span>
-                                <span
-                                  className={`text-[8.5px] px-1.5 py-0.2 rounded font-black shrink-0 ${
-                                    isSelected ? 'bg-[#ff6b35] text-white' : 'bg-stone-100 text-stone-600'
-                                  }`}
-                                >
-                                  {opt.badge}
-                                </span>
-                              </div>
-                              <span className="text-[10px] text-stone-500 font-normal block leading-tight mt-0.5 line-clamp-2">
-                                {opt.desc}
-                              </span>
-                            </button>
-                          );
-                        })}
-                      </div>
-                    </div>
-                  );
-                })()}
 
                 {/* Creative Focus */}
                 <div className="space-y-1.5">
@@ -2948,7 +3269,21 @@ export function PromptGeneratorView({
                   <Eye className="w-4 h-4 text-[#ff6b35]" />
                   <span>Visual DNA Profile (Hasil Analisis Citra Referensi)</span>
                 </div>
-                {isDnaExpanded ? <ChevronUp className="w-4 h-4" /> : <ChevronDown className="w-4 h-4" />}
+                <div className="flex items-center gap-2">
+                  <button
+                    type="button"
+                    onClick={(e) => {
+                      e.stopPropagation();
+                      setVisualDna(null);
+                      toast.info('Visual DNA dibersihkan. Generasi berikutnya akan menganalisis ulang citra.');
+                    }}
+                    className="px-2 py-0.5 rounded border border-[#2c1810] bg-white text-[10px] font-bold text-stone-700 hover:bg-stone-100 transition-colors"
+                    title="Bersihkan Visual DNA lama untuk analisis ulang murni dari gambar"
+                  >
+                    Reset DNA
+                  </button>
+                  {isDnaExpanded ? <ChevronUp className="w-4 h-4" /> : <ChevronDown className="w-4 h-4" />}
+                </div>
               </button>
 
               {isDnaExpanded && (
@@ -3181,6 +3516,89 @@ export function PromptGeneratorView({
                     <span>{copiedAll ? 'Tersalin!' : 'Salin Semua'}</span>
                   </Button>
 
+                  {/* Opsi Salin Yang Belum Disalin Sebelumnya */}
+                  {(() => {
+                    const uncopiedCount = prompts.filter((p) => !p.isCopied).length;
+                    const allCopied = prompts.length > 0 && uncopiedCount === 0;
+
+                    return (
+                      <Button
+                        type="button"
+                        size="sm"
+                        onClick={handleCopyUncopied}
+                        disabled={prompts.length === 0}
+                        className={`h-7.5 px-2.5 text-xs font-bold border-2 border-[#2c1810] shadow-[1px_1px_0_#2c1810] cursor-pointer transition-all ${
+                          allCopied
+                            ? 'bg-stone-100 hover:bg-stone-200 text-stone-600'
+                            : 'bg-gradient-to-r from-amber-500 to-[#ff6b35] hover:from-amber-600 hover:to-[#e55a2b] text-white'
+                        }`}
+                        title={
+                          allCopied
+                            ? 'Semua prompt pada sesi ini sudah pernah disalin sebelumnya'
+                            : `Salin ${uncopiedCount} prompt yang belum pernah disalin ke clipboard`
+                        }
+                      >
+                        {copiedUncopied ? (
+                          <Check className="w-3.5 h-3.5 mr-1 text-emerald-300" />
+                        ) : (
+                          <Copy className="w-3.5 h-3.5 mr-1 text-white" />
+                        )}
+                        <span>
+                          {copiedUncopied
+                            ? 'Tersalin!'
+                            : allCopied
+                            ? 'Semua Sudah Disalin'
+                            : `Salin Belum Disalin (${uncopiedCount})`}
+                        </span>
+                      </Button>
+                    );
+                  })()}
+
+                  {/* Tombol Reset Status Salin */}
+                  {prompts.some((p) => p.isCopied) && (
+                    <button
+                      type="button"
+                      onClick={handleResetCopiedStatus}
+                      className="h-7.5 px-2 text-[10px] font-bold text-stone-600 hover:text-stone-900 bg-white hover:bg-stone-100 rounded-lg border-2 border-stone-300 shadow-[1px_1px_0_#2c1810] cursor-pointer transition-all"
+                      title="Reset status tanda disalin semua prompt jika ingin menyalin ulang dari awal"
+                    >
+                      Reset Status
+                    </button>
+                  )}
+
+                  {/* ⚡ Mode Auto (Autonomous Pipeline: Prompt -> Flow Gen -> Download 2K -> QC -> Metadata Gen) */}
+                  <Button
+                    type="button"
+                    size="sm"
+                    onClick={() => {
+                      setIsAutoMode((prev) => {
+                        const next = !prev;
+                        localStorage.setItem(STORAGE_KEY_AUTO_MODE, String(next));
+                        if (next) {
+                          toast.success('⚡ Mode Auto DIAKTIFKAN!', {
+                            description:
+                              'Alur otonom: Prompt baru ➔ Antrean Flow ➔ Unduh 2K ➔ Auto QC ➔ Metadata Gen dalam sesi aktif yang sama.',
+                            duration: 6000,
+                          });
+                        } else {
+                          toast.info('Mode Auto Dinonaktifkan.', {
+                            description: 'Kembali ke mode eksekusi manual.',
+                          });
+                        }
+                        return next;
+                      });
+                    }}
+                    className={`h-7.5 px-3 text-xs font-black border-2 border-[#2c1810] shadow-[1px_1px_0_#2c1810] cursor-pointer transition-all flex items-center gap-1.5 ${
+                      isAutoMode
+                        ? 'bg-gradient-to-r from-emerald-600 via-teal-600 to-emerald-700 text-white animate-pulse'
+                        : 'bg-white hover:bg-stone-100 text-stone-700'
+                    }`}
+                    title="Toggle Mode Auto: Setiap hasil prompt baru otomatis masuk antrean Google Flow, diunduh 2K, dicek QC, dan diproses metadatanya dalam sesi aktif yang sama"
+                  >
+                    <Zap className={`w-3.5 h-3.5 ${isAutoMode ? 'text-yellow-300 fill-yellow-300' : 'text-stone-400'}`} />
+                    <span>{isAutoMode ? '⚡ Mode Auto: ON' : 'Mode Auto: OFF'}</span>
+                  </Button>
+
                   {/* Flow Batch Generation with Safety Limit Controls */}
                   <div className="flex items-center gap-1 bg-[#fff5e6] p-0.5 rounded-lg border-2 border-[#2c1810] shadow-[1px_1px_0_#2c1810]">
                     <Button
@@ -3379,9 +3797,150 @@ export function PromptGeneratorView({
                 </div>
               </div>
             )}
+
+            {/* Auto Mode Active Live Indicator Banner */}
+            {isAutoMode && (
+              <div className="pt-2 border-t border-stone-200">
+                <div className="p-2.5 rounded-xl bg-gradient-to-r from-emerald-50 via-teal-50 to-emerald-50 border-2 border-emerald-600 shadow-[2px_2px_0_#2c1810] flex items-center justify-between gap-2 text-emerald-950 animate-in fade-in flex-wrap sm:flex-nowrap">
+                  <div className="flex items-center gap-2 min-w-0">
+                    <span className="flex h-2.5 w-2.5 relative shrink-0">
+                      <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-emerald-400 opacity-75"></span>
+                      <span className="relative inline-flex rounded-full h-2.5 w-2.5 bg-emerald-600"></span>
+                    </span>
+                    <div className="min-w-0">
+                      <span className="text-xs font-black mr-1.5 text-emerald-900">
+                        ⚡ ALUR OTONOM AKTIF:
+                      </span>
+                      <span className="text-[11px] font-bold text-emerald-800">
+                        Prompt Baru ➔ Antrean Flow ➔ Unduh 2K ➔ Auto QC ➔ Metadata Studio (Sesi Sama)
+                      </span>
+                    </div>
+                  </div>
+                  <div className="flex items-center gap-1.5 shrink-0 self-end sm:self-auto">
+                    <Button
+                      type="button"
+                      size="sm"
+                      disabled={isAutoProcessingRef.current}
+                      onClick={() => void executeAutoQcAndMetadataPipeline()}
+                      className="h-6.5 px-2.5 text-[10.5px] font-black bg-emerald-700 hover:bg-emerald-800 text-white border border-[#2c1810] shadow-[1px_1px_0_#2c1810] cursor-pointer"
+                      title="Jalankan QC & Handoff Metadata sekarang untuk hasil render saat ini"
+                    >
+                      <Zap className="w-3 h-3 mr-1 text-yellow-300 fill-yellow-300" />
+                      <span>Jalankan QC Sekarang</span>
+                    </Button>
+                    <span className="text-[9.5px] font-black uppercase px-2 py-0.5 rounded bg-emerald-700 text-white shrink-0">
+                      Auto-Pilot
+                    </span>
+                  </div>
+                </div>
+              </div>
+            )}
           </div>
 
-          {/* D. Prompt Cards Feed */}
+          {/* D. Prompt Filter Bar & Cards Feed */}
+          {prompts.length > 0 && (
+            <div className="flex items-center justify-between gap-2 flex-wrap bg-[#fffdf9] p-2.5 rounded-xl border-2 border-[#2c1810] shadow-[2px_2px_0_#2c1810]">
+              <div className="flex items-center gap-1.5 flex-wrap">
+                <span className="text-[10px] font-black uppercase text-stone-500 mr-0.5">Filter:</span>
+                <button
+                  type="button"
+                  onClick={() => setPromptFilter('all')}
+                  className={`px-2.5 py-1 rounded-lg text-xs font-bold border-2 transition-all cursor-pointer ${
+                    promptFilter === 'all'
+                      ? 'bg-[#2c1810] text-white border-[#2c1810] shadow-[1px_1px_0_#2c1810]'
+                      : 'bg-white hover:bg-stone-100 text-stone-700 border-stone-300'
+                  }`}
+                >
+                  Semua ({prompts.length})
+                </button>
+                <button
+                  type="button"
+                  onClick={() => setPromptFilter('uncopied')}
+                  className={`px-2.5 py-1 rounded-lg text-xs font-bold border-2 transition-all cursor-pointer ${
+                    promptFilter === 'uncopied'
+                      ? 'bg-[#ff6b35] text-white border-[#2c1810] shadow-[1px_1px_0_#2c1810]'
+                      : 'bg-white hover:bg-orange-50 text-orange-800 border-orange-300'
+                  }`}
+                >
+                  Belum Disalin ({prompts.filter((p) => !p.isCopied).length})
+                </button>
+                <button
+                  type="button"
+                  onClick={() => setPromptFilter('copied')}
+                  className={`px-2.5 py-1 rounded-lg text-xs font-bold border-2 transition-all cursor-pointer ${
+                    promptFilter === 'copied'
+                      ? 'bg-emerald-700 text-white border-[#2c1810] shadow-[1px_1px_0_#2c1810]'
+                      : 'bg-white hover:bg-emerald-50 text-emerald-800 border-emerald-300'
+                  }`}
+                >
+                  Sudah Disalin ({prompts.filter((p) => p.isCopied).length})
+                </button>
+                <button
+                  type="button"
+                  onClick={() => setPromptFilter('favorite')}
+                  className={`px-2.5 py-1 rounded-lg text-xs font-bold border-2 transition-all cursor-pointer ${
+                    promptFilter === 'favorite'
+                      ? 'bg-amber-600 text-white border-[#2c1810] shadow-[1px_1px_0_#2c1810]'
+                      : 'bg-white hover:bg-amber-50 text-amber-800 border-amber-300'
+                  }`}
+                >
+                  ★ Favorit ({prompts.filter((p) => p.isFavorite).length})
+                </button>
+              </div>
+
+              <div className="flex items-center gap-2 flex-wrap">
+                <span className="text-[11px] font-bold text-stone-500">
+                  Menampilkan {displayedPrompts.length} dari {prompts.length} konsep
+                </span>
+
+                <Button
+                  type="button"
+                  size="sm"
+                  onClick={handleCopyFiltered}
+                  disabled={!copiedFiltered && displayedPrompts.length === 0}
+                  className={`h-7 px-2.5 text-xs font-black border-2 border-[#2c1810] shadow-[1px_1px_0_#2c1810] cursor-pointer transition-all flex items-center gap-1.5 ${
+                    copiedFiltered
+                      ? 'bg-emerald-600 text-white'
+                      : displayedPrompts.length === 0
+                      ? 'bg-stone-100 text-stone-400 border-stone-300 cursor-not-allowed shadow-none'
+                      : promptFilter === 'uncopied'
+                      ? 'bg-gradient-to-r from-amber-500 to-[#ff6b35] hover:from-amber-600 hover:to-[#e55a2b] text-white'
+                      : promptFilter === 'copied'
+                      ? 'bg-emerald-600 hover:bg-emerald-700 text-white'
+                      : promptFilter === 'favorite'
+                      ? 'bg-amber-600 hover:bg-amber-700 text-white'
+                      : 'bg-[#2c1810] hover:bg-[#432519] text-white'
+                  }`}
+                  title={
+                    displayedPrompts.length === 0
+                      ? 'Tidak ada konsep pada filter ini untuk disalin'
+                      : `Salin ${displayedPrompts.length} prompt pada filter ini ke clipboard`
+                  }
+                >
+                  {copiedFiltered ? (
+                    <>
+                      <Check className="w-3.5 h-3.5 text-emerald-200" />
+                      <span>Tersalin!</span>
+                    </>
+                  ) : (
+                    <>
+                      <Copy className="w-3.5 h-3.5" />
+                      <span>
+                        {promptFilter === 'uncopied'
+                          ? `Salin Belum Disalin (${displayedPrompts.length})`
+                          : promptFilter === 'copied'
+                          ? `Salin Ulang (${displayedPrompts.length})`
+                          : promptFilter === 'favorite'
+                          ? `Salin Favorit (${displayedPrompts.length})`
+                          : `Salin Semua (${displayedPrompts.length})`}
+                      </span>
+                    </>
+                  )}
+                </Button>
+              </div>
+            </div>
+          )}
+
           {prompts.length === 0 ? (
             <div className="bg-[#fffdf9] border-2 border-dashed border-[#2c1810] rounded-2xl p-10 text-center shadow-[4px_4px_0_#2c1810] space-y-3">
               <div className="w-12 h-12 rounded-full bg-[#fff5e6] border-2 border-[#2c1810] mx-auto flex items-center justify-center">
@@ -3394,12 +3953,30 @@ export function PromptGeneratorView({
                 </p>
               </div>
             </div>
+          ) : displayedPrompts.length === 0 ? (
+            <div className="bg-[#fffdf9] border-2 border-dashed border-[#2c1810] rounded-2xl p-8 text-center shadow-[3px_3px_0_#2c1810] space-y-2">
+              <p className="text-xs font-bold text-stone-600">
+                {promptFilter === 'uncopied'
+                  ? '🎉 Semua prompt pada sesi ini sudah pernah disalin!'
+                  : promptFilter === 'copied'
+                  ? 'Belum ada prompt yang disalin pada sesi ini.'
+                  : 'Belum ada konsep yang ditandai favorit.'}
+              </p>
+              <button
+                type="button"
+                onClick={() => setPromptFilter('all')}
+                className="text-xs font-bold text-[#ff6b35] hover:underline cursor-pointer"
+              >
+                Tampilkan Semua Konsep ({prompts.length})
+              </button>
+            </div>
           ) : (
             <div className="space-y-4">
-              {prompts.map((card, index) => {
+              {displayedPrompts.map((card) => {
                 const isRegenerating = regeneratingId === card.id;
                 const isCopied = copiedId === card.id;
-                const isLatestBatch = index === 0;
+                const originalIndex = prompts.findIndex((p) => p.id === card.id);
+                const isLatestBatch = originalIndex === 0;
 
                 return (
                   <div
@@ -3410,7 +3987,7 @@ export function PromptGeneratorView({
                     <div className="flex items-center justify-between border-b-2 border-stone-200 pb-2.5 gap-2">
                       <div className="flex items-center gap-2 flex-wrap min-w-0">
                         <span className="font-black text-xs text-[#2c1810] bg-[#fff5e6] border border-[#2c1810] px-2 py-0.5 rounded">
-                          #{String(prompts.length - index).padStart(2, '0')}
+                          #{String(prompts.length - (originalIndex >= 0 ? originalIndex : 0)).padStart(2, '0')}
                         </span>
                         <input
                           type="text"
@@ -3424,6 +4001,39 @@ export function PromptGeneratorView({
                         {isLatestBatch && (
                           <span className="bg-emerald-100 border border-emerald-400 text-emerald-800 text-[9px] font-black px-1.5 py-0.2 rounded-full uppercase">
                             Terbaru
+                          </span>
+                        )}
+                        {card.isCopied && (
+                          <span
+                            className="bg-emerald-50 border border-emerald-300 text-emerald-800 text-[9px] font-black px-1.5 py-0.5 rounded-full uppercase flex items-center gap-0.5"
+                            title={card.copiedAt ? `Disalin: ${new Date(card.copiedAt).toLocaleTimeString('id-ID', { hour: '2-digit', minute: '2-digit' })}` : 'Sudah pernah disalin'}
+                          >
+                            <Check className="w-2.5 h-2.5 text-emerald-600" />
+                            Disalin
+                          </span>
+                        )}
+                        {card.qcStatus === 'passed' && (
+                          <span
+                            className="bg-emerald-100 border border-emerald-500 text-emerald-900 text-[9px] font-black px-1.5 py-0.5 rounded-full uppercase flex items-center gap-1 shadow-xs"
+                            title={card.qcDetails || 'Lolos kriteria teknis Adobe Stock'}
+                          >
+                            <ShieldCheck className="w-2.5 h-2.5 text-emerald-600" />
+                            <span>QC Lolos {card.qcDetails ? `(${card.qcDetails})` : ''}</span>
+                          </span>
+                        )}
+                        {card.qcStatus === 'failed' && (
+                          <span
+                            className="bg-rose-100 border border-rose-500 text-rose-900 text-[9px] font-black px-1.5 py-0.5 rounded-full uppercase flex items-center gap-1 shadow-xs"
+                            title={card.qcDetails || 'Gagal kriteria teknis Adobe Stock'}
+                          >
+                            <AlertTriangle className="w-2.5 h-2.5 text-rose-600" />
+                            <span>QC Ditolak {card.qcDetails ? `(${card.qcDetails})` : ''}</span>
+                          </span>
+                        )}
+                        {card.flowStatus === 'pending' && !card.generatedImageUrl && (
+                          <span className="bg-amber-100 border border-amber-400 text-amber-900 text-[9px] font-black px-1.5 py-0.5 rounded-full uppercase flex items-center gap-1 animate-pulse">
+                            <Loader2 className="w-2.5 h-2.5 animate-spin text-amber-600" />
+                            <span>Antrean Flow</span>
                           </span>
                         )}
                       </div>
@@ -3504,10 +4114,15 @@ export function PromptGeneratorView({
                           type="button"
                           size="sm"
                           onClick={() => handleCopyCard(card)}
-                          className="h-7 px-2.5 bg-[#ff6b35] hover:bg-[#e55a2b] text-white font-bold text-xs border border-[#2c1810] shadow-[1px_1px_0_#2c1810] cursor-pointer"
+                          className={`h-7 px-2.5 font-bold text-xs border border-[#2c1810] shadow-[1px_1px_0_#2c1810] cursor-pointer transition-all ${
+                            card.isCopied && !isCopied
+                              ? 'bg-amber-600 hover:bg-amber-700 text-white'
+                              : 'bg-[#ff6b35] hover:bg-[#e55a2b] text-white'
+                          }`}
+                          title={card.isCopied ? 'Klik untuk menyalin ulang ke clipboard' : 'Salin prompt ke clipboard'}
                         >
                           {isCopied ? <Check className="w-3.5 h-3.5" /> : <Copy className="w-3.5 h-3.5" />}
-                          <span className="ml-1">{isCopied ? 'Tersalin' : 'Salin'}</span>
+                          <span className="ml-1">{isCopied ? 'Tersalin' : card.isCopied ? 'Salin Ulang' : 'Salin'}</span>
                         </Button>
 
                         <button

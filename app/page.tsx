@@ -691,11 +691,12 @@ export default function App() {
   );
 
   // Generation handler (Akumulatif seperti dokumen kerja Office)
-  async function runGeneration() {
-    if (!files.length) return;
+  async function runGeneration(overrideFiles?: File[]) {
+    const candidateFiles = overrideFiles && overrideFiles.length > 0 ? overrideFiles : files;
+    if (!candidateFiles.length) return;
 
     // Safety filter duplikat terhadap item yang sudah selesai
-    const { acceptedFiles, rejectedDuplicates } = await filterDuplicateFiles(files, {
+    const { acceptedFiles, rejectedDuplicates } = await filterDuplicateFiles(candidateFiles, {
       existingItemFilenames: items.map((it) => it.filename),
     });
 
@@ -703,7 +704,9 @@ export default function App() {
       toast.warning(
         `${rejectedDuplicates.length} file diabaikan karena sudah ada di sesi tugas ini.`
       );
-      setFiles(acceptedFiles);
+      if (!overrideFiles) {
+        setFiles(acceptedFiles);
+      }
     }
 
     if (!acceptedFiles.length) {
@@ -1552,7 +1555,7 @@ export default function App() {
                   : 'File siap dianalisis untuk menghasilkan judul, deskripsi, dan keyword stock.',
               });
             }}
-            onSendBatchImagesToMetadata={(batchFiles, contextList) => {
+            onSendBatchImagesToMetadata={(batchFiles, contextList, options) => {
               if (contextList && contextList.length > 0) {
                 for (const ctx of contextList) {
                   promptContextMapRef.current.set(ctx.file.name.toLowerCase(), ctx);
@@ -1601,6 +1604,13 @@ export default function App() {
                   ? `Sesi Tugas Terpadu: "${firstCtx.sessionTitle}". Konteks prompt terhubung.`
                   : 'Semua file siap dianalisis untuk menghasilkan judul, deskripsi, dan keyword stock.',
               });
+
+              if (options?.autoGenerate) {
+                setTimeout(() => {
+                  toast.info('⚡ [Mode Auto] Memulai pembuatan metadata (Judul & Keywords) otomatis...');
+                  void runGeneration(batchFiles);
+                }, 400);
+              }
             }}
           />
         </div>

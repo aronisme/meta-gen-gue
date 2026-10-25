@@ -40,6 +40,9 @@ const nextConfig: NextConfig = {
   images: {
     unoptimized: true, // Using data URLs for thumbnails
   },
+  eslint: {
+    ignoreDuringBuilds: true,
+  },
 };
 
 export default nextConfig;

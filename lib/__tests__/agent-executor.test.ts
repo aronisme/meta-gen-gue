@@ -90,6 +90,7 @@ describe('Agent Tools & Skills', () => {
     expect(activities.length).toBeGreaterThan(0);
     expect(msg.role).toBe('assistant');
     expect(msg.toolCalls?.length).toBeGreaterThan(0);
-    expect(msg.content).toContain('prompt');
+    expect(msg.content).toContain('Variasi #1');
+    expect(msg.content).toContain('--ar 16:9 --v 6.1');
   });
 });
