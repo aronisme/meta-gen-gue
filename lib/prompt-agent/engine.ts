@@ -85,6 +85,15 @@ export interface StyleSpecification {
 }
 
 export const STYLE_SPECIFICATIONS: Record<string, StyleSpecification> = {
+  // --- 0. ADAPTIVE MODE (Ikut Gambar Referensi) ---
+  agent_decide: {
+    medium: 'Faithful to Reference Image Medium (Pure Adaptive DNA)',
+    requiredElements:
+      'Faithfully detect and mirror the exact visual medium and artistic aesthetic of the reference image (whether authentic photography, 3D render, flat vector, watercolor, anime, oil painting, claymorphism, or digital concept art). Retain the reference image lighting atmosphere, color palette, textural depth, and visual DNA while exploring fresh commercial stock concepts.',
+    forbiddenElements:
+      'Forcing a photographic style onto an illustration reference, or forcing an illustration style onto a photographic reference; altering the core medium of the reference image unless explicitly instructed.',
+  },
+
   // --- 1. FOTOGRAFI (Photography Sub-styles) ---
   photo_commercial_lifestyle: {
     medium: 'Authentic commercial stock photography',
@@ -219,20 +228,20 @@ export const STYLE_SPECIFICATIONS: Record<string, StyleSpecification> = {
 
 export interface VisualDirectionMeta {
   id: string;
-  category: 'photo' | 'illustration' | 'special';
+  category: 'photo' | 'illustration' | 'ref_adaptive' | 'special';
   label: string;
   desc: string;
   badge: string;
 }
 
 export const VISUAL_DIRECTION_LIST: VisualDirectionMeta[] = [
-  // Special Agent Modes
+  // Adaptive Reference Mode
   {
     id: 'agent_decide',
-    category: 'special',
-    label: 'Agent Decide (Otomatis)',
-    desc: 'AI menganalisis gambar dan otomatis memilih gaya paling bernilai komersial tinggi',
-    badge: 'Smart Auto',
+    category: 'ref_adaptive',
+    label: 'Ikut Gambar Referensi (Pure DNA)',
+    desc: 'AI mereplikasi medium visual, gaya, dan estetika asli dari citra acuan secara murni',
+    badge: 'Adaptif Ref',
   },
   {
     id: 'smart_random',
@@ -573,11 +582,24 @@ export function buildVCPAPromptInstruction(params: {
         `\nCRITICAL: Tastefully blend and harmonize these user-selected creative twists into the concepts generated for this reference image.\n`
       : '';
 
-  const dirLabel = getVisualDirectionLabel(settings.visualDirection);
-  const spec = STYLE_SPECIFICATIONS[settings.visualDirection] || STYLE_SPECIFICATIONS.photo_commercial_lifestyle;
+  const isFollowRefMode = settings.visualDirection === 'agent_decide';
+  const dirLabel = isFollowRefMode
+    ? 'Ikut Gambar Referensi (Pure Adaptive DNA)'
+    : getVisualDirectionLabel(settings.visualDirection);
+  const spec =
+    STYLE_SPECIFICATIONS[settings.visualDirection] || STYLE_SPECIFICATIONS.photo_commercial_lifestyle;
   const dirSuffix = VISUAL_DIRECTION_SUFFIXES[settings.visualDirection] || '';
 
-  const visualDirectionInstruction = `=== MANDATORY VISUAL STYLE DIRECTIVE (ABSOLUTE HIGHEST PRIORITY) ===
+  const visualDirectionInstruction = isFollowRefMode
+    ? `=== MANDATORY VISUAL STYLE DIRECTIVE (ADAPTIVE - FOLLOW REFERENCE IMAGE) ===
+Chosen Mode: "Ikut Gambar Referensi" (Pure Adaptive DNA)
+Artistic Medium: Faithful to the detected medium of the reference image.
+MANDATORY INSTRUCTIONS:
+- Faithfully inspect and mirror the exact visual medium of the reference image (whether authentic photography, 3D render, flat vector, watercolor, anime, oil painting, or digital illustration).
+- NEVER force a photographic style onto an illustration reference image.
+- NEVER force an illustration style onto a photographic reference image.
+- Preserve the visual DNA, lighting ambiance, color harmony, and artistic texture from the reference image across all generated prompt variations.`
+    : `=== MANDATORY VISUAL STYLE DIRECTIVE (ABSOLUTE HIGHEST PRIORITY) ===
 Chosen Visual Style: "${dirLabel}" (${settings.visualDirection})
 Artistic Medium: ${spec.medium}
 Required Visual Characteristics to Embody in Every Prompt:
@@ -605,9 +627,14 @@ ${safeDna.semanticProfile?.metaphor ? `Metaphors: ${safeStr(safeDna.semanticProf
 
 Similarity Level: ${settings.similarity}% (0 = wide creative exploration while preserving core essence; 100 = strict visual fidelity to subject and style).
 Semantic Preservation Mode: ${settings.semanticMode}
-STYLE TRANSFORMATION FOR REFERENCE IMAGE:
+${
+  isFollowRefMode
+    ? `STYLE HANDLING FOR REFERENCE IMAGE (ADAPTIVE - FOLLOW REFERENCE IMAGE):
+- ADAPTIVE MEDIUM FIDELITY: Inherit and mirror the exact artistic medium and visual aesthetic of the reference image. Generate diverse commercial concepts in that same medium without converting medium.`
+    : `STYLE TRANSFORMATION FOR REFERENCE IMAGE:
 - Extract the core subject from the reference image, but RENDER IT STRICTLY in the user's chosen style: "${dirLabel}" (${spec.medium}).
-- If the reference image has a background but the user selected an isolated style, isolate the subject on pure white!
+- If the reference image has a background but the user selected an isolated style, isolate the subject on pure white!`
+}
 ${brief ? `User's Additional Creative Exploration / Focus Request: "${brief}"` : ''}
 ${twistsBlock}
 ${visualDirectionInstruction}`;
@@ -641,11 +668,17 @@ Semantic Preservation Mode: ${
           ? 'Visual Replication (Replicate physical visual features, materials, and composition closely)'
           : 'Free Ideation (Creative exploration sparked by the reference image)'
       }.
-STYLE TRANSFORMATION FOR REFERENCE IMAGE:
+${
+  isFollowRefMode
+    ? `STYLE HANDLING FOR REFERENCE IMAGE (ADAPTIVE - FOLLOW REFERENCE IMAGE):
+- ADAPTIVE MEDIUM FIDELITY: Analyze the reference image pixels to determine its exact medium (photo, 3D, vector, watercolor, digital art, etc.) and generate fresh commercial stock variations faithful to that detected medium.
+- Do NOT convert photos to illustrations or illustrations to photos. Maintain the visual heritage and medium of the reference image.`
+    : `STYLE TRANSFORMATION FOR REFERENCE IMAGE:
 - Extract the core subject from the reference image, but RENDER IT STRICTLY in the user's chosen style: "${dirLabel}" (${spec.medium}).
 - If the reference image is a photo and the user chose an illustration/vector/3D style, you MUST convert and reimagine that subject in the chosen medium!
 - If the reference image has a background but the user selected an isolated style, isolate the subject on pure white!
-- The user's chosen visual style takes total priority over the reference image's original medium.
+- The user's chosen visual style takes total priority over the reference image's original medium.`
+}
 ${visualDirectionInstruction}`;
     }
   } else {

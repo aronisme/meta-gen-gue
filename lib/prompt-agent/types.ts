@@ -1,7 +1,7 @@
 export type EngineType = 'midjourney' | 'flux' | 'sdxl' | 'imagen3' | 'nanobanana';
 export type AspectRatio = 'none' | '16:9' | '3:2' | '1:1' | '4:3' | '9:16';
 
-export type VisualCategory = 'photo' | 'illustration' | 'agent_decide' | 'smart_random';
+export type VisualCategory = 'photo' | 'illustration' | 'ref_adaptive' | 'agent_decide' | 'smart_random';
 
 export type PhotoSubStyle =
   | 'photo_commercial_lifestyle'

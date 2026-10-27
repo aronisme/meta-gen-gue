@@ -235,5 +235,28 @@ describe('VCPA Engine Utilities', () => {
     expect(queuedItem2.settings.visualDirection).toBe('illustration_vector');
     expect(queuedItem2.settings.selectedTwists).toEqual(['minimalist vector lines']);
   });
+
+  it('generates faithful adaptive directives when visualDirection is agent_decide (Ikut Img Ref)', async () => {
+    const { VISUAL_DIRECTION_LIST } = await import('../prompt-agent/engine');
+    const item = VISUAL_DIRECTION_LIST.find((v) => v.id === 'agent_decide');
+    expect(item).toBeDefined();
+    expect(item?.category).toBe('ref_adaptive');
+    expect(item?.label).toContain('Ikut Gambar Referensi');
+
+    const adaptiveSettings: VCPASettings = {
+      ...baseSettings,
+      visualDirection: 'agent_decide',
+    };
+
+    const instruction = buildVCPAPromptInstruction({
+      mode: 'reference_to_prompt',
+      brief: '',
+      settings: adaptiveSettings,
+    });
+
+    expect(instruction).toContain('ADAPTIVE - FOLLOW REFERENCE IMAGE');
+    expect(instruction).toContain('ADAPTIVE MEDIUM FIDELITY');
+    expect(instruction).toContain('Do NOT convert photos to illustrations or illustrations to photos');
+  });
 });
 

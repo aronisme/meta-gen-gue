@@ -158,7 +158,6 @@ async function copyToClipboardSafe(text: string): Promise<boolean> {
   return false;
 }
 
-const VISUAL_DIRECTION_OPTIONS = VISUAL_DIRECTION_LIST;
 
 const ENGINE_ITEMS: Array<{ id: EngineType; label: string; badge: string }> = [
   { id: 'midjourney', label: 'Midjourney v6.1', badge: '--v 6.1' },
@@ -254,24 +253,20 @@ export function PromptGeneratorView({
   // 7b. Contextual Image Ref Twists State
   const [contextualTwists, setContextualTwists] = useState<ContextualTwistItem[]>(() => [...FALLBACK_STOCK_TWISTS]);
   const [isGeneratingTwists, setIsGeneratingTwists] = useState<boolean>(false);
-  const [visualCategoryTab, setVisualCategoryTab] = useState<'photo' | 'illustration'>('photo');
+  const [visualCategoryTab, setVisualCategoryTab] = useState<'photo' | 'illustration' | 'ref_adaptive'>('photo');
 
-  // Mode Manual Permanen: Otomatis migrasikan gaya otomatis lama ke manual default
+  // Mode Auto / Reset: Pastikan jika visualDirection kosong, fallback ke photo_commercial_lifestyle
   useEffect(() => {
-    if (
-      settings.visualDirection === 'agent_decide' ||
-      settings.visualDirection === 'smart_random' ||
-      !settings.visualDirection
-    ) {
+    if (!settings.visualDirection) {
       setSettings((s) => ({ ...s, visualDirection: 'photo_commercial_lifestyle' }));
     }
   }, [settings.visualDirection]);
 
-  // Sinkronkan tab kategori gaya sesuai gaya manual terpilih
+  // Sinkronkan tab kategori gaya sesuai gaya manual atau adaptif terpilih
   useEffect(() => {
     const item = VISUAL_DIRECTION_LIST.find((v) => v.id === settings.visualDirection);
-    if (item?.category === 'photo' || item?.category === 'illustration') {
-      setVisualCategoryTab(item.category);
+    if (item?.category === 'photo' || item?.category === 'illustration' || item?.category === 'ref_adaptive') {
+      setVisualCategoryTab(item.category as 'photo' | 'illustration' | 'ref_adaptive');
     }
   }, [settings.visualDirection]);
 
@@ -2892,6 +2887,8 @@ export function PromptGeneratorView({
                   <span className="text-[10px] text-[#6b5344] font-medium block">
                     {VISUAL_DIRECTION_LIST.find((v) => v.id === settings.visualDirection)?.category === 'illustration'
                       ? 'Katalog Ilustrasi & Vektor'
+                      : settings.visualDirection === 'agent_decide'
+                      ? 'Mode Ikut Gambar Referensi'
                       : 'Katalog Fotografi'}
                   </span>
                 </div>
@@ -2910,7 +2907,7 @@ export function PromptGeneratorView({
 
             {!foldedSections.visual && (
               <div className="p-4 pt-0 space-y-4 border-t border-stone-200/80 mt-1">
-                {/* Katalog Gaya Spesifik Microstock (Mode Manual) */}
+                {/* Katalog Gaya Spesifik Microstock / Ikut Img Ref */}
                 <div className="space-y-2 pt-3">
                   <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-1.5">
                     <div className="flex items-center gap-2">
@@ -2918,11 +2915,11 @@ export function PromptGeneratorView({
                         Katalog Gaya Spesifik Microstock
                       </Label>
                       <span className="text-[9px] font-black px-1.5 py-0.5 rounded bg-emerald-100 text-emerald-800 border border-emerald-300">
-                        ✓ Mode Manual
+                        {settings.visualDirection === 'agent_decide' ? '🎯 Mode Adaptif Ref' : '✓ Mode Manual'}
                       </span>
                     </div>
 
-                    <div className="flex bg-stone-100 p-0.5 rounded-lg border border-[#2c1810]/40 self-start sm:self-auto">
+                    <div className="flex bg-stone-100 p-0.5 rounded-lg border border-[#2c1810]/40 self-start sm:self-auto flex-wrap gap-0.5">
                       <button
                         type="button"
                         onClick={() => {
@@ -2957,53 +2954,112 @@ export function PromptGeneratorView({
                       >
                         <span>🎨 Ilustrasi & Vektor ({VISUAL_DIRECTION_LIST.filter((v) => v.category === 'illustration').length})</span>
                       </button>
+                      <button
+                        type="button"
+                        onClick={() => {
+                          setVisualCategoryTab('ref_adaptive');
+                          setSettings((s) => ({ ...s, visualDirection: 'agent_decide' }));
+                        }}
+                        className={`px-2.5 py-1 rounded-md text-[11px] font-black transition-all cursor-pointer flex items-center gap-1 ${
+                          visualCategoryTab === 'ref_adaptive'
+                            ? 'bg-[#2c1810] text-white shadow-[1px_1px_0_#ff6b35]'
+                            : 'text-stone-600 hover:text-stone-900'
+                        }`}
+                      >
+                        <span>🎯 Ikut Img Ref</span>
+                      </button>
                     </div>
                   </div>
 
-                  {/* Info Gaya Manual Terpilih */}
+                  {/* Info Gaya Terpilih */}
                   <div className="px-2.5 py-1.5 bg-emerald-50 rounded-lg border border-emerald-200 flex items-center justify-between text-[11px]">
                     <span className="text-emerald-900 font-bold">
                       Gaya terpilih saat ini:{' '}
                       <b className="text-[#2c1810]">{getVisualDirectionLabel(settings.visualDirection)}</b>
                     </span>
                     <span className="text-[10px] font-bold text-emerald-700 bg-white px-2 py-0.5 rounded border border-emerald-200">
-                      Kategori {VISUAL_DIRECTION_LIST.find((v) => v.id === settings.visualDirection)?.category === 'illustration' ? 'Ilustrasi & Vektor' : 'Fotografi'}
+                      {settings.visualDirection === 'agent_decide'
+                        ? '🎯 Ikut Img Ref (Adaptif)'
+                        : VISUAL_DIRECTION_LIST.find((v) => v.id === settings.visualDirection)?.category === 'illustration'
+                        ? 'Kategori Ilustrasi & Vektor'
+                        : 'Kategori Fotografi'}
                     </span>
                   </div>
 
                   {/* Grid Sub-Gaya Berdasarkan Tab yang Dipilih */}
                   <div className="grid grid-cols-1 sm:grid-cols-2 gap-1.5 max-h-[360px] overflow-y-auto pr-1">
-                    {VISUAL_DIRECTION_LIST.filter((v) => v.category === visualCategoryTab).map((opt) => {
-                      const isSelected = settings.visualDirection === opt.id;
-                      return (
+                    {visualCategoryTab === 'ref_adaptive' ? (
+                      <div className="col-span-full space-y-2">
                         <button
-                          key={opt.id}
                           type="button"
-                          onClick={() =>
-                            setSettings((s) => ({ ...s, visualDirection: opt.id as VisualDirection }))
-                          }
-                          className={`p-2.5 rounded-lg border-2 text-left transition-all cursor-pointer flex flex-col justify-between ${
-                            isSelected
-                              ? 'bg-[#fff5e6] border-[#2c1810] shadow-[2px_2px_0_#2c1810] font-black'
-                              : 'bg-white border-stone-200 hover:border-stone-400 font-semibold text-stone-700'
-                          }`}
+                          onClick={() => setSettings((s) => ({ ...s, visualDirection: 'agent_decide' }))}
+                          className="w-full p-3.5 rounded-xl border-2 border-[#2c1810] bg-gradient-to-br from-amber-50 via-orange-50/40 to-emerald-50/30 shadow-[2px_2px_0_#2c1810] text-left cursor-pointer transition-all hover:bg-amber-100/50"
                         >
-                          <div className="flex items-start justify-between gap-1.5">
-                            <span className="text-xs text-[#2c1810] font-black leading-snug">{opt.label}</span>
-                            <span
-                              className={`text-[8.5px] px-1.5 py-0.5 rounded font-black shrink-0 uppercase tracking-wide mt-0.5 ${
-                                isSelected ? 'bg-[#ff6b35] text-white shadow-xs' : 'bg-stone-100 text-stone-600'
-                              }`}
-                            >
-                              {opt.badge}
+                          <div className="flex items-start justify-between gap-2">
+                            <div className="flex items-center gap-2.5">
+                              <span className="text-xl">🎯</span>
+                              <div>
+                                <span className="text-xs font-black text-[#2c1810] block">
+                                  Ikut Gambar Referensi (Pure Adaptive DNA)
+                                </span>
+                                <span className="text-[11px] text-stone-600 font-medium block mt-0.5">
+                                  AI mereplikasi medium visual, pencahayaan, dan estetika gambar referensi secara murni tanpa dipaksa menjadi gaya manual lain.
+                                </span>
+                              </div>
+                            </div>
+                            <span className="text-[9px] font-black px-2 py-0.5 rounded bg-[#ff6b35] text-white shrink-0 uppercase tracking-wide">
+                              Aktif
                             </span>
                           </div>
-                          <span className="text-[10px] text-stone-500 font-normal block leading-tight mt-1 line-clamp-2">
-                            {opt.desc}
-                          </span>
                         </button>
-                      );
-                    })}
+                        <div className="grid grid-cols-1 sm:grid-cols-3 gap-2 text-[10.5px]">
+                          <div className="bg-white p-2 rounded-lg border border-stone-200 shadow-2xs">
+                            <b className="text-[#2c1810] block font-bold mb-0.5">📷 Gambar Acuan Foto</b>
+                            <span className="text-stone-600">Prompt tetap berwujud fotografi komersial autentik dengan tone, lighting, dan lensa selaras.</span>
+                          </div>
+                          <div className="bg-white p-2 rounded-lg border border-stone-200 shadow-2xs">
+                            <b className="text-[#2c1810] block font-bold mb-0.5">🎨 Gambar Acuan Ilustrasi / Vektor</b>
+                            <span className="text-stone-600">Prompt dipertahankan dalam gaya 2D flat vector, watercolor, atau digital art sesuai aslinya.</span>
+                          </div>
+                          <div className="bg-white p-2 rounded-lg border border-stone-200 shadow-2xs">
+                            <b className="text-[#2c1810] block font-bold mb-0.5">🧊 Gambar Acuan 3D</b>
+                            <span className="text-stone-600">Prompt dirender dalam format 3D (isometric, clay, atau glass) mewarisi material acuan.</span>
+                          </div>
+                        </div>
+                      </div>
+                    ) : (
+                      VISUAL_DIRECTION_LIST.filter((v) => v.category === visualCategoryTab).map((opt) => {
+                        const isSelected = settings.visualDirection === opt.id;
+                        return (
+                          <button
+                            key={opt.id}
+                            type="button"
+                            onClick={() =>
+                              setSettings((s) => ({ ...s, visualDirection: opt.id as VisualDirection }))
+                            }
+                            className={`p-2.5 rounded-lg border-2 text-left transition-all cursor-pointer flex flex-col justify-between ${
+                              isSelected
+                                ? 'bg-[#fff5e6] border-[#2c1810] shadow-[2px_2px_0_#2c1810] font-black'
+                                : 'bg-white border-stone-200 hover:border-stone-400 font-semibold text-stone-700'
+                            }`}
+                          >
+                            <div className="flex items-start justify-between gap-1.5">
+                              <span className="text-xs text-[#2c1810] font-black leading-snug">{opt.label}</span>
+                              <span
+                                className={`text-[8.5px] px-1.5 py-0.5 rounded font-black shrink-0 uppercase tracking-wide mt-0.5 ${
+                                  isSelected ? 'bg-[#ff6b35] text-white shadow-xs' : 'bg-stone-100 text-stone-600'
+                                }`}
+                              >
+                                {opt.badge}
+                              </span>
+                            </div>
+                            <span className="text-[10px] text-stone-500 font-normal block leading-tight mt-1 line-clamp-2">
+                              {opt.desc}
+                            </span>
+                          </button>
+                        );
+                      })
+                    )}
                   </div>
                 </div>
 
