@@ -258,5 +258,17 @@ describe('VCPA Engine Utilities', () => {
     expect(instruction).toContain('ADAPTIVE MEDIUM FIDELITY');
     expect(instruction).toContain('Do NOT convert photos to illustrations or illustrations to photos');
   });
+
+  it('mandates demographic, age, ethnicity, and facial feature deconstruction when human subjects are present', () => {
+    const instruction = buildVCPAPromptInstruction({
+      mode: 'reference_to_prompt',
+      brief: '',
+      settings: baseSettings,
+    });
+
+    expect(instruction).toContain('perceived ethnicity/heritage');
+    expect(instruction).toContain('DEMOGRAPHIC, AGE, RACE & FACIAL FIDELITY (MANDATORY INCLUSION)');
+    expect(instruction).toContain('DO NOT omit ethnicity or write vague descriptions');
+  });
 });
 

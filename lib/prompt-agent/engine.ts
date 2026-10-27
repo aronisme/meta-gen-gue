@@ -618,6 +618,7 @@ Visual Direction Keywords Baseline: ${dirSuffix || settings.visualDirection}`;
         Array.isArray(arr) ? arr.join(', ') : typeof arr === 'string' ? arr : '';
 
       contextIntro = `=== REFERENCE IMAGE VISUAL DNA (PREVIOUSLY ANALYZED) ===
+Primary subject profile: ${safeDna.subject?.type || 'Subject'}${safeDna.subject?.attributes && safeDna.subject.attributes.length > 0 ? ` (${safeStr(safeDna.subject.attributes)})` : ''}
 Observed elements: ${safeStr(safeDna.observed)}
 Inferred mood/atmosphere: ${safeStr(safeDna.inferred)}
 Core anchors to respect: ${safeStr(safeDna.anchors)}
@@ -644,6 +645,7 @@ The user has attached an image as the primary visual reference (Anchor).
 YOUR MANDATORY FIRST STEP:
 Thoroughly examine the attached image pixels and extract its full Visual DNA into the "visualDna" output object:
 1. "subject": Identify the primary physical subject (type, specific physical attributes, clothing/materials, posture).
+   - If a human model is present, EXPLICITLY deconstruct and record demographic & facial traits: perceived ethnicity/heritage (e.g. Indonesian/Southeast Asian, East Asian, South Asian, Caucasian, Black, Hispanic, Middle Eastern), exact age bracket (e.g. 24-28 years old, late 40s, active senior 65+), skin complexion/undertone, facial features/eyes/smile, and hair style/color/texture.
 2. "observed": Concrete visual elements observed directly in the image (textures, background setting, props, colors).
 3. "inferred": Atmosphere, lighting quality, mood, color palette, and camera technique.
 4. "anchors": The essential signature traits that MUST be preserved to maintain visual lineage with this reference.
@@ -707,7 +709,7 @@ STRICT DIVERSITY & QUALITY RULES:
    - ZERO FORCED HUMANS: If the concept, brief, or reference image is an object, product, food, flatlay, architecture, interior, texture, abstract graphic, or landscape, DO NOT force or insert human figures. Keep it strictly focused on the non-human subject.
    - IF AND ONLY IF A HUMAN MODEL/SUBJECT IS NATURALLY PRESENT OR REQUESTED:
      * COMMERCIAL APPEAL & CASTING (GOOD LOOKING & APPROACHABLE): Models must have photogenic, attractive commercial stock appeal. Describe well-groomed hair, healthy radiant skin textures, and timeless well-fitted styling. Expressions must be warm, confident, engaging, or genuinely joyful with clear catchlights in the eyes. STRICTLY AVOID: grim, dreary, sullen, tired, weary, weathered, moody, or unflattering unkempt looks. Ensure flattering, uplifting commercial lighting that brightens the face without harsh dreary shadows.
-     * DEMOGRAPHIC & INTENTIONAL AGE FIDELITY: Strictly respect the intended age group, gender, ethnicity, and persona from the reference DNA or user brief.
+     * DEMOGRAPHIC, AGE, RACE & FACIAL FIDELITY (MANDATORY INCLUSION): Strictly respect the intended age group, gender, ethnicity, and persona from the reference DNA or user brief. You MUST EXPLICITLY specify their ethnicity/heritage (e.g. "Indonesian woman", "Southeast Asian man", "East Asian professional", "African-American creative", "Hispanic entrepreneur", "Middle Eastern businessman"), exact age bracket (e.g. "in their late 20s", "in his 40s", "a 7-year-old child"), skin complexion, and facial attributes in every single 'rawBasePrompt'. DO NOT omit ethnicity or write vague descriptions like "a person" or "a model" because Midjourney and FLUX will default to generic Western/Caucasian faces without explicit ethnic and age anchoring!
      * ACTIVE & DIGNIFIED SENIORS: If the subject is an elderly person / senior citizen / grandparent, DO NOT replace them with a young model! Instead, depict an ACTIVE, CHARISMATIC, HEALTHY, DIGNIFIED, and RADIANT senior with genuine joyful smiles, graceful elegance, and contemporary neat styling (never frail, impoverished, sickly, or dreary).
      * CONTEMPORARY WARDROBE: Modern, well-fitted, timeless professional or casual attire suitable for premium global advertising.
 3. VISUAL SPECIFICITY & COPY SPACE: Every prompt must specify tangible physical subjects, distinct framing matching the style, material textures, and clean negative space for commercial copy and designer typography.
