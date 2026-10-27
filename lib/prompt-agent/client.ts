@@ -184,7 +184,7 @@ Existing concepts in the batch: [${existingTitles}].
 
 TASK:
 Provide a FRESH, high-impact alternative commercial prompt concept that does NOT repeat any of the existing concepts.
-Ensure unique camera angle, lighting, and composition.
+Ensure unique camera angle, lighting, and composition. If human subjects are naturally featured, ensure photogenic, attractive, and warm commercial appeal respecting the intended demographic (do not force humans if absent).
 
 Output ONLY a JSON object:
 {

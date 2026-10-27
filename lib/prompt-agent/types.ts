@@ -14,6 +14,10 @@ export type PhotoSubStyle =
   | 'photo_drone_aerial';
 
 export type IllustrationSubStyle =
+  | 'illustration_digital_scene'
+  | 'vector_scene_editorial'
+  | 'illustration_storybook_character'
+  | 'art_concept_digital'
   | 'vector_flat_isolated'
   | 'vector_lineart_minimal'
   | 'render_3d_isometric'
@@ -111,6 +115,9 @@ export interface PromptCardItem {
   mediaId?: string;
   qcStatus?: 'pending' | 'passed' | 'failed';
   qcDetails?: string;
+  engine?: EngineType;
+  aspectRatio?: AspectRatio;
+  settingsSnapshot?: VCPASettings;
 }
 
 export interface FlowVariationItem {
@@ -157,6 +164,7 @@ export interface PromptQueueItem {
   completedAt?: number;
   generatedCount?: number;
   brief?: string;
+  settings?: VCPASettings;
 }
 
 

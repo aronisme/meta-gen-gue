@@ -22,7 +22,7 @@ export const VISUAL_DIRECTION_SUFFIXES: Record<string, string> = {
 
   // --- 1. FOTOGRAFI (Photography Sub-styles) ---
   photo_commercial_lifestyle:
-    'authentic commercial stock photography, candid real people, natural soft morning light, shot on Sony A7R V, 85mm f/1.4 lens, natural skin textures, 8k resolution, genuine emotion',
+    'authentic commercial stock photography, photogenic approachable subjects, candid real people, natural soft morning light, shot on Sony A7R V, 85mm f/1.4 lens, natural healthy skin textures, 8k resolution, genuine positive emotion',
   photo_studio_isolated:
     'clean commercial studio product photography, isolated on pure neutral white background, professional softbox studio lighting, crisp razor-sharp focus, generous negative copy space, 8k resolution',
   photo_flatlay_knolling:
@@ -39,6 +39,14 @@ export const VISUAL_DIRECTION_SUFFIXES: Record<string, string> = {
     'dramatic top-down drone aerial photography, bird-eye perspective, geometric landscape patterns, high-altitude wide angle, sharp environmental details',
 
   // --- 2. ILUSTRASI & GRAFIS (Illustration & Graphics Sub-styles) ---
+  illustration_digital_scene:
+    'modern commercial digital illustration, complete environmental scene, vibrant color harmony, clean atmospheric digital painting, expressive subjects with coherent background, commercial microstock illustration',
+  vector_scene_editorial:
+    'stylish 2D flat vector editorial illustration with background, modern editorial scene, balanced geometric shapes, sophisticated contemporary color palette, trendy tech and lifestyle graphic design',
+  illustration_storybook_character:
+    'whimsical storybook illustration, charming character design, warm digital painting textures, expressive emotive acting, delightful background storytelling, cozy family-friendly art style',
+  art_concept_digital:
+    'epic digital concept art, environmental matte painting, vast cinematic scale, atmospheric depth, painterly brush textures, volumetric lighting, immersive worldbuilding',
   vector_flat_isolated:
     'clean vector illustration, modern flat 2d graphic design, isolated on pure white background, crisp vector outlines, balanced modern color palette, microstock asset, scalable SVG aesthetics',
   vector_lineart_minimal:
@@ -80,8 +88,8 @@ export const STYLE_SPECIFICATIONS: Record<string, StyleSpecification> = {
   // --- 1. FOTOGRAFI (Photography Sub-styles) ---
   photo_commercial_lifestyle: {
     medium: 'Authentic commercial stock photography',
-    requiredElements: 'Real candid people, authentic emotions, natural available daylight or soft morning window light, natural skin textures, contextual environment matching the subject (e.g. modern office for work, kitchen for food, home for family, park/gym for fitness)',
-    forbiddenElements: 'Fake plastic studio looks, stiff poses, repetitive unrequested beach or vacation clichés when unrelated to the subject',
+    requiredElements: 'Photogenic approachable people with genuine warm expressions, confident candid emotions, natural available daylight or soft morning window light, healthy glowing skin textures, contextual environment matching the subject (e.g. modern office for work, kitchen for food, home for family, park/gym for fitness)',
+    forbiddenElements: 'Grim sullen expressions, gloomy or weary looks, stiff fake plastic studio poses, repetitive unrequested beach or vacation clichés when unrelated to the subject',
   },
   photo_studio_isolated: {
     medium: 'Commercial studio product photography isolated on white',
@@ -120,6 +128,26 @@ export const STYLE_SPECIFICATIONS: Record<string, StyleSpecification> = {
   },
 
   // --- 2. ILUSTRASI & GRAFIS (Illustration & Graphics Sub-styles) ---
+  illustration_digital_scene: {
+    medium: 'Commercial digital illustration and environmental scene',
+    requiredElements: 'Modern commercial digital art style, vibrant rich color palette, coherent environmental background setting, expressive well-proportioned subjects, clean atmospheric lighting, commercial microstock ready',
+    forbiddenElements: 'Photorealistic camera blur, grainy camera noise, 3D raw polygons, isolated white voids unless requested',
+  },
+  vector_scene_editorial: {
+    medium: 'Modern 2D flat vector editorial scene with background',
+    requiredElements: 'Harmonious flat vector color palette, stylish editorial composition, complete architectural or natural environmental setting, modern tech/lifestyle graphic aesthetic, clean geometric balance',
+    forbiddenElements: 'Photorealism, pure white isolated cutouts, 3D shaders, real skin textures',
+  },
+  illustration_storybook_character: {
+    medium: 'Whimsical storybook and character illustration',
+    requiredElements: 'Warm approachable character design, soft charming digital painting textures, expressive emotive facial acting, delightful storytelling background, cozy color harmony',
+    forbiddenElements: 'Grim sullen realistic human photos, harsh horror themes, sterile corporate diagrams',
+  },
+  art_concept_digital: {
+    medium: 'Epic digital concept art and environmental matte painting',
+    requiredElements: 'Vast cinematic scale, painterly digital brushwork, atmospheric perspective, rich ambient lighting and volumetric haze, detailed scenic worldbuilding',
+    forbiddenElements: 'Flat vector icons, sterile white cutouts, casual smartphone snapshots',
+  },
   vector_flat_isolated: {
     medium: 'Clean 2D flat vector illustration (SVG / Microstock graphic asset)',
     requiredElements: 'Solid vector shapes, crisp clean outlines, modern flat color palette, strictly isolated on a pure white background, scalable graphic design asset',
@@ -273,6 +301,34 @@ export const VISUAL_DIRECTION_LIST: VisualDirectionMeta[] = [
   },
 
   // 2. Ilustrasi & Grafis
+  {
+    id: 'illustration_digital_scene',
+    category: 'illustration',
+    label: 'Ilustrasi Digital & Scene',
+    desc: 'Seni digital modern, komposisi adegan utuh, warna hidup & latar lengkap',
+    badge: 'Digital Art',
+  },
+  {
+    id: 'vector_scene_editorial',
+    category: 'illustration',
+    label: 'Flat Art & Editorial Scene',
+    desc: 'Ilustrasi flat berlatar lengkap untuk banner web, aplikasi, dan editorial artikel',
+    badge: 'Editorial Flat',
+  },
+  {
+    id: 'illustration_storybook_character',
+    category: 'illustration',
+    label: 'Storybook & Karakter',
+    desc: 'Gaya buku cerita anak & keluarga, karakter ekspresif, hangat, ramah edukasi',
+    badge: 'Storybook',
+  },
+  {
+    id: 'art_concept_digital',
+    category: 'illustration',
+    label: 'Concept Art & Matte Painting',
+    desc: 'Pemandangan imajinatif dramatis, kedalaman sinematik, visual atmosferik',
+    badge: 'Concept Art',
+  },
   {
     id: 'vector_flat_isolated',
     category: 'illustration',
@@ -614,11 +670,18 @@ STRICT DIVERSITY & QUALITY RULES:
    - If this is an Illustration, Vector, 3D Render, or Graphic style: DO NOT use photographic camera lenses (e.g. Sony A7R, 85mm f/1.4), photographic aperture, realistic human skin grain, or photographic lighting. Describe vector shapes, clean linework, isometric orthographic renders, clay/glass materials, or watercolor washes!
    - If this is an Isolated/Studio style (e.g. Studio Product Isolated, Vector Flat Isolated, Sticker): The subject MUST strictly be isolated on a pure white background with ample copy space. DO NOT create outdoor environments, landscapes, rooms, or beaches!
    - If this is Commercial Lifestyle: Contextualize the setting realistically to the subject (e.g. office for professionals, kitchen for food, home for living, park for sports). DO NOT default to beach scenes unless explicitly requested in the brief!
-2. VISUAL SPECIFICITY & COPY SPACE: Every prompt must specify tangible physical subjects, distinct framing matching the style, material textures, and clean negative space for commercial copy and designer typography.
-3. NO LAZY VARIATIONS: Each prompt within the chosen visual style must explore a distinct concept, variation, angle, or narrative angle.
-4. COMMERCIALLY SAFE & USABLE: Strictly NO copyrighted brand names, recognizable trademarks, or celebrity likenesses.
-5. PROMPT LANGUAGE: The 'rawBasePrompt' field MUST be in English for optimal image generation performance. Titles and rationales should be in ${settings.promptLanguage === 'id' ? 'Bahasa Indonesia' : 'English'}.
-6. KEEP IT COMPACT: Keep 'rationale' strictly to 1 concise sentence (maximum 20 words) to prevent token truncation.
+2. CONDITIONAL HUMAN SUBJECT CASTING & COMMERCIAL AESTHETICS (STRICT):
+   - ZERO FORCED HUMANS: If the concept, brief, or reference image is an object, product, food, flatlay, architecture, interior, texture, abstract graphic, or landscape, DO NOT force or insert human figures. Keep it strictly focused on the non-human subject.
+   - IF AND ONLY IF A HUMAN MODEL/SUBJECT IS NATURALLY PRESENT OR REQUESTED:
+     * COMMERCIAL APPEAL & CASTING (GOOD LOOKING & APPROACHABLE): Models must have photogenic, attractive commercial stock appeal. Describe well-groomed hair, healthy radiant skin textures, and timeless well-fitted styling. Expressions must be warm, confident, engaging, or genuinely joyful with clear catchlights in the eyes. STRICTLY AVOID: grim, dreary, sullen, tired, weary, weathered, moody, or unflattering unkempt looks. Ensure flattering, uplifting commercial lighting that brightens the face without harsh dreary shadows.
+     * DEMOGRAPHIC & INTENTIONAL AGE FIDELITY: Strictly respect the intended age group, gender, ethnicity, and persona from the reference DNA or user brief.
+     * ACTIVE & DIGNIFIED SENIORS: If the subject is an elderly person / senior citizen / grandparent, DO NOT replace them with a young model! Instead, depict an ACTIVE, CHARISMATIC, HEALTHY, DIGNIFIED, and RADIANT senior with genuine joyful smiles, graceful elegance, and contemporary neat styling (never frail, impoverished, sickly, or dreary).
+     * CONTEMPORARY WARDROBE: Modern, well-fitted, timeless professional or casual attire suitable for premium global advertising.
+3. VISUAL SPECIFICITY & COPY SPACE: Every prompt must specify tangible physical subjects, distinct framing matching the style, material textures, and clean negative space for commercial copy and designer typography.
+4. NO LAZY VARIATIONS: Each prompt within the chosen visual style must explore a distinct concept, variation, angle, or narrative angle.
+5. COMMERCIALLY SAFE & USABLE: Strictly NO copyrighted brand names, recognizable trademarks, or celebrity likenesses.
+6. PROMPT LANGUAGE: The 'rawBasePrompt' field MUST be in English for optimal image generation performance. Titles and rationales should be in ${settings.promptLanguage === 'id' ? 'Bahasa Indonesia' : 'English'}.
+7. KEEP IT COMPACT: Keep 'rationale' strictly to 1 concise sentence (maximum 20 words) to prevent token truncation.
 
 CRITICAL OUTPUT FORMAT:
 You MUST return ONLY a valid, single, parseable JSON object matching this schema exactly. Do NOT include markdown code blocks, do not include backticks, do not include commentary before or after:

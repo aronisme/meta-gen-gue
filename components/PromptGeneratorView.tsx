@@ -304,6 +304,7 @@ export function PromptGeneratorView({
   const isAutoModeRef = useRef<boolean>(isAutoMode);
   const promptsRef = useRef<PromptCardItem[]>(prompts);
   const sessionRef = useRef<PromptGenerationSession>(session);
+  const settingsRef = useRef<VCPASettings>(settings);
   const executeAutoQcRef = useRef<() => Promise<void>>(async () => {});
 
   useEffect(() => {
@@ -317,6 +318,10 @@ export function PromptGeneratorView({
   useEffect(() => {
     sessionRef.current = session;
   }, [session]);
+
+  useEffect(() => {
+    settingsRef.current = settings;
+  }, [settings]);
 
   // Restore active session from IndexedDB on initial render
   useEffect(() => {
@@ -499,9 +504,18 @@ export function PromptGeneratorView({
       sourceUrl?: string;
       brief?: string;
       id?: string;
+      settings?: VCPASettings;
     }>
   ) => {
     if (!items || items.length === 0) return;
+
+    // Snapshot current active settings from panel so each queue item freezes its own configuration
+    const currentSettingsSnapshot: VCPASettings = {
+      ...settingsRef.current,
+      selectedTwists: settingsRef.current.selectedTwists
+        ? [...settingsRef.current.selectedTwists]
+        : undefined,
+    };
 
     const timestamp = Date.now();
     const newQueueItems: PromptQueueItem[] = items.map((it, idx) => ({
@@ -512,6 +526,14 @@ export function PromptGeneratorView({
       addedAt: timestamp + idx,
       status: 'pending',
       brief: it.brief,
+      settings: it.settings
+        ? {
+            ...it.settings,
+            selectedTwists: it.settings.selectedTwists
+              ? [...it.settings.selectedTwists]
+              : undefined,
+          }
+        : { ...currentSettingsSnapshot },
     }));
 
     setQueue((prev) => {
@@ -560,12 +582,28 @@ export function PromptGeneratorView({
       setRefImageDataUrl(nextPending.imageDataUrl);
       setBusy(true);
 
+      // Gunakan snapshot pengaturan yang diingat saat gambar ditambahkan/dikirim,
+      // sehingga perubahan pada Panel Pengaturan saat antrean berjalan TIDAK merusak item ini!
+      const effectiveSettings: VCPASettings = nextPending.settings
+        ? {
+            ...nextPending.settings,
+            selectedTwists: nextPending.settings.selectedTwists
+              ? [...nextPending.settings.selectedTwists]
+              : undefined,
+          }
+        : {
+            ...settingsRef.current,
+            selectedTwists: settingsRef.current.selectedTwists
+              ? [...settingsRef.current.selectedTwists]
+              : undefined,
+          };
+
       try {
         const result = await executeVCPAGeneration({
           mode: 'reference_to_prompt',
           brief: nextPending.brief || '',
           imageDataUrl: nextPending.imageDataUrl,
-          settings,
+          settings: effectiveSettings,
           provider: 'gas-proxy',
           model: 'auto',
           onProgressStep: (step) => {
@@ -581,16 +619,19 @@ export function PromptGeneratorView({
           ...p,
           createdAt: now + idx,
           batchId: result.jobId,
+          engine: effectiveSettings.engine,
+          aspectRatio: effectiveSettings.aspectRatio,
+          settingsSnapshot: effectiveSettings,
         }));
 
         // AUTO-ADD: Prepend to the top of active session!
         setPrompts((prev) => {
           const updated = [...newBatch, ...prev];
           void savePromptSession({
-            ...session,
+            ...sessionRef.current,
             prompts: updated,
             visualDna: result.visualDna || undefined,
-            settings,
+            settings: sessionRef.current.settings || settingsRef.current,
             mode: 'reference_to_prompt',
             updatedAt: Date.now(),
           });
@@ -610,13 +651,14 @@ export function PromptGeneratorView({
                   completedAt: Date.now(),
                   generatedCount: result.completedCount,
                   progressStep: 'Selesai',
+                  settings: effectiveSettings,
                 }
               : q
           )
         );
 
         toast.success(
-          `Antrean [${nextPending.filename}]: ${result.completedCount} prompt berhasil di-generate!`
+          `Antrean [${nextPending.filename}]: ${result.completedCount} prompt berhasil di-generate (${effectiveSettings.engine}, ${effectiveSettings.aspectRatio})!`
         );
       } catch (err: unknown) {
         const msg = err instanceof Error ? err.message : String(err);
@@ -632,7 +674,7 @@ export function PromptGeneratorView({
         setProgressStep('');
       }
     })();
-  }, [queue, isQueuePaused, brief, settings, session]);
+  }, [queue, isQueuePaused]);
 
   // Listener for Browser Extension & External URL Actions
   useEffect(() => {
@@ -642,6 +684,8 @@ export function PromptGeneratorView({
       imageDataUrl?: string;
       sourceUrl?: string;
       filename?: string;
+      brief?: string;
+      settings?: VCPASettings;
     };
 
     const handleIncomingPayload = (payload: unknown) => {
@@ -653,7 +697,9 @@ export function PromptGeneratorView({
           filename: string;
           source: 'extension';
           sourceUrl?: string;
+          brief?: string;
           id?: string;
+          settings?: VCPASettings;
         }> = [];
 
         for (const p of payload as ExtensionIncomingItem[]) {
@@ -666,7 +712,9 @@ export function PromptGeneratorView({
             filename: p.filename || `Web_Batch_${Date.now().toString().slice(-4)}.jpg`,
             source: 'extension',
             sourceUrl: p.sourceUrl,
+            brief: p.brief,
             id: p.id,
+            settings: p.settings ? { ...p.settings } : undefined,
           });
         }
 
@@ -689,7 +737,9 @@ export function PromptGeneratorView({
               filename: p.filename || `Web_Image_${Date.now().toString().slice(-4)}.jpg`,
               source: 'extension',
               sourceUrl: p.sourceUrl,
+              brief: p.brief,
               id: p.id,
+              settings: p.settings ? { ...p.settings } : undefined,
             },
           ]);
           toast.success('Gambar dari ekstensi browser berhasil masuk ke antrean generator!');
@@ -892,6 +942,19 @@ export function PromptGeneratorView({
     toast.info('Seluruh antrean pending dibatalkan.');
   };
 
+  const handleApplyCurrentSettingsToPendingQueue = () => {
+    const currentSnapshot: VCPASettings = {
+      ...settingsRef.current,
+      selectedTwists: settingsRef.current.selectedTwists
+        ? [...settingsRef.current.selectedTwists]
+        : undefined,
+    };
+    setQueue((prev) =>
+      prev.map((q) => (q.status === 'pending' ? { ...q, settings: { ...currentSnapshot } } : q))
+    );
+    toast.success('Pengaturan panel saat ini telah disinkronkan ke semua antrean pending.');
+  };
+
   // Inspiration handlers
   const handleShuffleInspirations = () => {
     const currentIds = inspirations.map((i) => i.id);
@@ -997,7 +1060,19 @@ export function PromptGeneratorView({
     }
 
     const toastId = toast.loading(`Memproses ${fileArray.length} gambar untuk antrean...`);
-    const newItems: Array<{ dataUrl: string; filename: string; source: 'upload' }> = [];
+    const newItems: Array<{
+      dataUrl: string;
+      filename: string;
+      source: 'upload';
+      settings: VCPASettings;
+    }> = [];
+
+    const snapshotSettings: VCPASettings = {
+      ...settingsRef.current,
+      selectedTwists: settingsRef.current.selectedTwists
+        ? [...settingsRef.current.selectedTwists]
+        : undefined,
+    };
 
     for (let i = 0; i < fileArray.length; i++) {
       const f = fileArray[i];
@@ -1007,6 +1082,7 @@ export function PromptGeneratorView({
           dataUrl: resized.dataUrl,
           filename: f.name,
           source: 'upload',
+          settings: { ...snapshotSettings },
         });
       } catch (err) {
         console.warn('Gagal memproses gambar:', f.name, err);
@@ -1076,6 +1152,7 @@ export function PromptGeneratorView({
           dataUrl: refImageDataUrl,
           filename: refImageFile?.name || `Manual_Ref_${Date.now().toString().slice(-4)}.jpg`,
           source: 'upload',
+          settings: { ...settingsRef.current },
         },
       ]);
       toast.info('Gambar dimasukkan ke antrean generator.');
@@ -1102,6 +1179,9 @@ export function PromptGeneratorView({
         ...p,
         createdAt: now + idx,
         batchId: result.jobId,
+        engine: settings.engine,
+        aspectRatio: settings.aspectRatio,
+        settingsSnapshot: { ...settings },
       }));
 
       // AUTO-ADD: PREPEND KE PALING ATAS
@@ -1144,6 +1224,7 @@ export function PromptGeneratorView({
                     status: 'completed',
                     completedAt: now,
                     generatedCount: (q.generatedCount || 0) + result.completedCount,
+                    settings: { ...settings },
                   }
                 : q
             );
@@ -1160,6 +1241,7 @@ export function PromptGeneratorView({
               completedAt: now,
               generatedCount: result.completedCount,
               progressStep: 'Selesai',
+              settings: { ...settings },
             },
           ];
         });
@@ -1181,16 +1263,27 @@ export function PromptGeneratorView({
   // Re-generate single card in place
   const handleRegenerateCard = async (card: PromptCardItem) => {
     setRegeneratingId(card.id);
+    const cardSettings = card.settingsSnapshot || settings;
     try {
       const newCard = await regenerateSinglePromptCard(
         card,
         prompts,
-        settings,
+        cardSettings,
         visualDna || undefined,
         'gas-proxy',
         'auto'
       );
-      const updated = prompts.map((c) => (c.id === card.id ? { ...newCard, createdAt: card.createdAt } : c));
+      const updated = prompts.map((c) =>
+        c.id === card.id
+          ? {
+              ...newCard,
+              createdAt: card.createdAt,
+              engine: cardSettings.engine,
+              aspectRatio: cardSettings.aspectRatio,
+              settingsSnapshot: cardSettings,
+            }
+          : c
+      );
       setPrompts(updated);
       const updatedSession: PromptGenerationSession = {
         ...session,
@@ -1673,7 +1766,7 @@ export function PromptGeneratorView({
         scanRes = await scanFlowDownloads();
       }
 
-      let browserFiles: File[] = [];
+      const browserFiles: File[] = [];
       if (scanRes.ok && scanRes.files.length > 0) {
         const matched = scanRes.files.filter((f) => f.resolutionTag === flowDownloadResolution);
         const chosen = matched.length > 0 ? matched : scanRes.files;
@@ -2797,7 +2890,9 @@ export function PromptGeneratorView({
                     3. Gaya Visual & Sumbu Fokus
                   </span>
                   <span className="text-[10px] text-[#6b5344] font-medium block">
-                    {getVisualDirectionLabel(settings.visualDirection)}
+                    {VISUAL_DIRECTION_LIST.find((v) => v.id === settings.visualDirection)?.category === 'illustration'
+                      ? 'Katalog Ilustrasi & Vektor'
+                      : 'Katalog Fotografi'}
                   </span>
                 </div>
               </div>
@@ -2830,25 +2925,37 @@ export function PromptGeneratorView({
                     <div className="flex bg-stone-100 p-0.5 rounded-lg border border-[#2c1810]/40 self-start sm:self-auto">
                       <button
                         type="button"
-                        onClick={() => setVisualCategoryTab('photo')}
+                        onClick={() => {
+                          setVisualCategoryTab('photo');
+                          const cur = VISUAL_DIRECTION_LIST.find((v) => v.id === settings.visualDirection);
+                          if (cur?.category !== 'photo') {
+                            setSettings((s) => ({ ...s, visualDirection: 'photo_commercial_lifestyle' }));
+                          }
+                        }}
                         className={`px-2.5 py-1 rounded-md text-[11px] font-black transition-all cursor-pointer flex items-center gap-1 ${
                           visualCategoryTab === 'photo'
                             ? 'bg-[#2c1810] text-white shadow-[1px_1px_0_#ff6b35]'
                             : 'text-stone-600 hover:text-stone-900'
                         }`}
                       >
-                        <span>📷 Fotografi (8)</span>
+                        <span>📷 Fotografi ({VISUAL_DIRECTION_LIST.filter((v) => v.category === 'photo').length})</span>
                       </button>
                       <button
                         type="button"
-                        onClick={() => setVisualCategoryTab('illustration')}
+                        onClick={() => {
+                          setVisualCategoryTab('illustration');
+                          const cur = VISUAL_DIRECTION_LIST.find((v) => v.id === settings.visualDirection);
+                          if (cur?.category !== 'illustration') {
+                            setSettings((s) => ({ ...s, visualDirection: 'illustration_digital_scene' }));
+                          }
+                        }}
                         className={`px-2.5 py-1 rounded-md text-[11px] font-black transition-all cursor-pointer flex items-center gap-1 ${
                           visualCategoryTab === 'illustration'
                             ? 'bg-[#2c1810] text-white shadow-[1px_1px_0_#ff6b35]'
                             : 'text-stone-600 hover:text-stone-900'
                         }`}
                       >
-                        <span>🎨 Ilustrasi & Vektor (8)</span>
+                        <span>🎨 Ilustrasi & Vektor ({VISUAL_DIRECTION_LIST.filter((v) => v.category === 'illustration').length})</span>
                       </button>
                     </div>
                   </div>
@@ -2859,10 +2966,13 @@ export function PromptGeneratorView({
                       Gaya terpilih saat ini:{' '}
                       <b className="text-[#2c1810]">{getVisualDirectionLabel(settings.visualDirection)}</b>
                     </span>
+                    <span className="text-[10px] font-bold text-emerald-700 bg-white px-2 py-0.5 rounded border border-emerald-200">
+                      Kategori {VISUAL_DIRECTION_LIST.find((v) => v.id === settings.visualDirection)?.category === 'illustration' ? 'Ilustrasi & Vektor' : 'Fotografi'}
+                    </span>
                   </div>
 
                   {/* Grid Sub-Gaya Berdasarkan Tab yang Dipilih */}
-                  <div className="grid grid-cols-1 sm:grid-cols-2 gap-1.5 max-h-[300px] overflow-y-auto pr-1">
+                  <div className="grid grid-cols-1 sm:grid-cols-2 gap-1.5 max-h-[360px] overflow-y-auto pr-1">
                     {VISUAL_DIRECTION_LIST.filter((v) => v.category === visualCategoryTab).map((opt) => {
                       const isSelected = settings.visualDirection === opt.id;
                       return (
@@ -2872,23 +2982,23 @@ export function PromptGeneratorView({
                           onClick={() =>
                             setSettings((s) => ({ ...s, visualDirection: opt.id as VisualDirection }))
                           }
-                          className={`p-2 rounded-lg border-2 text-left transition-all cursor-pointer ${
+                          className={`p-2.5 rounded-lg border-2 text-left transition-all cursor-pointer flex flex-col justify-between ${
                             isSelected
                               ? 'bg-[#fff5e6] border-[#2c1810] shadow-[2px_2px_0_#2c1810] font-black'
                               : 'bg-white border-stone-200 hover:border-stone-400 font-semibold text-stone-700'
                           }`}
                         >
-                          <div className="flex items-center justify-between gap-1">
-                            <span className="text-xs text-[#2c1810] font-black truncate">{opt.label}</span>
+                          <div className="flex items-start justify-between gap-1.5">
+                            <span className="text-xs text-[#2c1810] font-black leading-snug">{opt.label}</span>
                             <span
-                              className={`text-[8.5px] px-1.5 py-0.2 rounded font-black shrink-0 ${
-                                isSelected ? 'bg-[#ff6b35] text-white' : 'bg-stone-100 text-stone-600'
+                              className={`text-[8.5px] px-1.5 py-0.5 rounded font-black shrink-0 uppercase tracking-wide mt-0.5 ${
+                                isSelected ? 'bg-[#ff6b35] text-white shadow-xs' : 'bg-stone-100 text-stone-600'
                               }`}
                             >
                               {opt.badge}
                             </span>
                           </div>
-                          <span className="text-[10px] text-stone-500 font-normal block leading-tight mt-0.5 line-clamp-2">
+                          <span className="text-[10px] text-stone-500 font-normal block leading-tight mt-1 line-clamp-2">
                             {opt.desc}
                           </span>
                         </button>
@@ -3151,6 +3261,25 @@ export function PromptGeneratorView({
                               {processingQueueItem.filename}
                             </span>
                           </div>
+                          <div className="flex items-center gap-1 flex-wrap mt-0.5">
+                            <span className="text-[9px] font-black uppercase bg-white text-[#2c1810] px-1.5 py-0.2 rounded border border-[#2c1810]">
+                              {processingQueueItem.settings?.engine || settings.engine}
+                            </span>
+                            <span className="text-[9px] font-bold bg-[#ff6b35]/20 text-[#2c1810] px-1.5 py-0.2 rounded border border-[#ff6b35]/40">
+                              {processingQueueItem.settings?.count || settings.count}P
+                            </span>
+                            <span className="text-[9px] font-bold bg-amber-100 text-[#2c1810] px-1.5 py-0.2 rounded border border-amber-300">
+                              {processingQueueItem.settings?.aspectRatio || settings.aspectRatio}
+                            </span>
+                            {processingQueueItem.settings?.visualDirection && (
+                              <span
+                                className="text-[9px] font-bold text-[#6b5344] truncate max-w-[130px]"
+                                title={getVisualDirectionLabel(processingQueueItem.settings.visualDirection)}
+                              >
+                                {getVisualDirectionLabel(processingQueueItem.settings.visualDirection)}
+                              </span>
+                            )}
+                          </div>
                           <p className="text-[10px] text-[#ff6b35] font-bold flex items-center gap-1 mt-0.5">
                             <Loader2 className="w-3 h-3 animate-spin shrink-0" />
                             <span>{processingQueueItem.progressStep || 'Memproses Visual Concept Agent...'}</span>
@@ -3166,41 +3295,67 @@ export function PromptGeneratorView({
                   {/* 2. Pending Items List */}
                   {pendingQueueCount > 0 && (
                     <div className="space-y-1.5">
-                      <span className="text-[10px] font-black uppercase text-[#6b5344] tracking-wide block">
-                        Menunggu Giliran ({pendingQueueCount}):
-                      </span>
+                      <div className="flex items-center justify-between gap-2 flex-wrap">
+                        <span className="text-[10px] font-black uppercase text-[#6b5344] tracking-wide block">
+                          Menunggu Giliran ({pendingQueueCount}) — Setelan Tersimpan:
+                        </span>
+                        <button
+                          type="button"
+                          onClick={handleApplyCurrentSettingsToPendingQueue}
+                          className="text-[10px] font-bold text-[#ff6b35] hover:text-[#2c1810] underline cursor-pointer"
+                          title="Terapkan konfigurasi panel generator saat ini ke seluruh item pending"
+                        >
+                          Sinkronkan Setelan Panel
+                        </button>
+                      </div>
                       <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
                         {queue
                           .filter((q) => q.status === 'pending')
-                          .map((item, idx) => (
-                            <div
-                              key={item.id}
-                              className="p-2 rounded-lg border border-stone-300 bg-white flex items-center justify-between gap-2 shadow-[1px_1px_0_#2c1810]"
-                            >
-                              <div className="flex items-center gap-2 min-w-0">
-                                <span className="text-[10px] font-black text-stone-500 bg-stone-100 px-1 rounded">
-                                  #{idx + 1}
-                                </span>
-                                {/* eslint-disable-next-line @next/next/no-img-element */}
-                                <img
-                                  src={item.imageDataUrl}
-                                  alt="Pending"
-                                  className="w-8 h-8 object-cover rounded border border-stone-200 shrink-0"
-                                />
-                                <span className="text-[11px] font-bold text-[#2c1810] truncate">
-                                  {item.filename}
-                                </span>
-                              </div>
-                              <button
-                                type="button"
-                                onClick={() => handleRemoveQueueItem(item.id)}
-                                className="text-stone-400 hover:text-red-600 p-1 cursor-pointer shrink-0"
-                                title="Batalkan item ini"
+                          .map((item, idx) => {
+                            const itemSettings = item.settings || settings;
+                            return (
+                              <div
+                                key={item.id}
+                                className="p-2 rounded-lg border border-stone-300 bg-white flex items-center justify-between gap-2 shadow-[1px_1px_0_#2c1810]"
                               >
-                                <X className="w-3 h-3" />
-                              </button>
-                            </div>
-                          ))}
+                                <div className="flex items-center gap-2 min-w-0 flex-1">
+                                  <span className="text-[10px] font-black text-stone-500 bg-stone-100 px-1 rounded shrink-0">
+                                    #{idx + 1}
+                                  </span>
+                                  {/* eslint-disable-next-line @next/next/no-img-element */}
+                                  <img
+                                    src={item.imageDataUrl}
+                                    alt="Pending"
+                                    className="w-10 h-10 object-cover rounded border border-stone-200 shrink-0"
+                                  />
+                                  <div className="min-w-0 flex-1">
+                                    <span className="text-[11px] font-bold text-[#2c1810] truncate block">
+                                      {item.filename}
+                                    </span>
+                                    <div className="flex items-center gap-1 flex-wrap mt-0.5">
+                                      <span className="text-[8px] font-black uppercase bg-stone-100 text-stone-700 px-1 py-0.2 rounded border border-stone-300">
+                                        {itemSettings.engine}
+                                      </span>
+                                      <span className="text-[8px] font-bold bg-amber-50 text-amber-800 px-1 py-0.2 rounded border border-amber-200">
+                                        {itemSettings.count}P
+                                      </span>
+                                      <span className="text-[8px] font-bold bg-amber-50 text-amber-800 px-1 py-0.2 rounded border border-amber-200">
+                                        {itemSettings.aspectRatio}
+                                      </span>
+                                    </div>
+                                  </div>
+                                </div>
+                                <button
+                                  type="button"
+                                  onClick={() => handleRemoveQueueItem(item.id)}
+                                  className="text-stone-400 hover:text-red-600 p-1 cursor-pointer shrink-0"
+                                  title="Batalkan item ini"
+                                >
+                                  <X className="w-3.5 h-3.5" />
+                                </button>
+                              </div>
+                            );
+                          })}
                       </div>
                     </div>
                   )}
@@ -3238,7 +3393,7 @@ export function PromptGeneratorView({
                                 className="w-full h-full object-cover group-hover:scale-105 transition-transform"
                               />
                               <span className="absolute bottom-1 right-1 bg-emerald-600 text-white text-[9px] font-black px-1.5 py-0.5 rounded shadow">
-                                +{item.generatedCount || settings.count}P
+                                +{item.generatedCount || item.settings?.count || settings.count}P
                               </span>
                               <span className="absolute top-1 left-1 bg-[#2c1810]/80 text-white text-[9px] font-bold px-1 rounded flex items-center gap-0.5">
                                 <Check className="w-2.5 h-2.5 text-emerald-400" />

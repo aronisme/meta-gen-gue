@@ -7,13 +7,13 @@
 Pengembangan Fitur & Polishing UI: Mode Auto End-to-End Pipeline (Prompt Gen -> Antrean Google Flow -> Auto Download 2K -> Auto Preflight QC -> Auto Gen Metadata dalam Sesi Kerja Tunggal).
 
 ## Completed Recently
-- **Alur Mode Auto End-to-End (Prompt Gen -> Flow -> 2K Download -> Preflight QC -> Metadata Gen)**:
-  - Toggle Switch Mode Auto persisten (`isAutoMode`, `STORAGE_KEY_AUTO_MODE: 'metagen_auto_mode_enabled'`) di toolbar Generator Prompt ([`components/PromptGeneratorView.tsx`](file:///c:/App%20Tools/meta-gen-gue/components/PromptGeneratorView.tsx)) lengkap dengan banner aktif beranimasi pulsasi indigo.
-  - **Auto Enqueue**: Ketika prompt baru digenerate dan `isAutoMode` aktif, kartu otomatis di-enqueue ke ekstensi Google Flow via event `METAGEN_TRIGGER_FLOW_GEN` dan status diubah ke `pending`.
-  - **Auto Download 2K**: Ketika rendering di Google Flow selesai (`flowStatus === 'completed'`), sistem otomatis memicu `METAGEN_TRIGGER_FLOW_MASS_DOWNLOAD` dengan resolusi `2K, 1080p`.
-  - **Auto Preflight QC**: Ketika batch unduhan 2K diterima di tab browser, sistem mengeksekusi `runDeterministicPreflight(file, 'auto')` untuk memeriksa spesifikasi teknis Adobe Stock (`passes_hard_tech`, megapixels >= 4 MP, format JPEG/PNG, rasio). Status kartu diperbarui dengan badge `QC Lolos` / `QC Gagal ({alasan})`.
-  - **Auto Metadata Studio Handoff & Auto Gen**: File yang lolos QC otomatis dipaketkan bersama konteks prompt asli (`PromptToMetadataHandoff` menyertakan `promptText`, `promptTitle`, `promptCardId`, `sessionId`, `sessionTitle`), dialihkan ke Studio Metadata, dan otomatis memicu `runGeneration()` dalam **sesi kerja yang sama (single unified session continuity)**.
-  - 133 unit test lulus (100% pass), TypeScript 0 error (`npx tsc --noEmit`), dan build export static Cloudflare Pages sukses tanpa error.
+- **Isolasi Pengaturan Snapshot Per Item Antrean Generator (Image Ref Queue)**:
+  - Masalah teratasi: Perubahan pada Panel Pengaturan Generator di tengah antrean tidak lagi menimpa atau mengubah konfigurasi gambar acuan yang sedang menunggu.
+  - Snapshot konfigurasi otomatis dibekukan ke `PromptQueueItem.settings` pada saat gambar diunggah, di-paste, di-drag-drop, atau dikirim via ekstensi Chrome.
+  - Worker antrean FIFO mengeksekusi `executeVCPAGeneration` dengan `effectiveSettings` spesifik milik item tersebut.
+  - Setiap kartu hasil (`PromptCardItem`) mewarisi `engine`, `aspectRatio`, dan `settingsSnapshot` asli sehingga regenerasi tunggal maupun otomasi Google Flow tetap konsisten.
+  - Tampilan Laci Antrean (Queue Drawer) diperkaya badge visual setelan tersimpan (`Engine`, `Count P`, `Rasio`, `Gaya Visual`) serta tombol aksi "Sinkronkan Setelan Panel" jika pengguna sewaktu-waktu ingin menerapkan setelan aktif secara massal ke antrean pending.
+  - 135/135 unit test lulus (100% pass), `npx tsc --noEmit` 0 error, `pnpm lint` 0 error, dan `pnpm build` sukses.
 - **Opsi Salin Belum Disalin (Tab Gen Prompt)**:
   - Penambahan field `isCopied` dan `copiedAt` pada kontrak `PromptCardItem` ([`lib/prompt-agent/types.ts`](file:///c:/App%20Tools/meta-gen-gue/lib/prompt-agent/types.ts)) dan helper [`exportUncopiedPromptsToQueueText`](file:///c:/App%20Tools/meta-gen-gue/lib/prompt-agent/engine.ts).
   - Tombol aksi `Salin Belum Disalin ({N})` di toolbar aksi dengan auto-counter dinamis, deteksi `Semua Sudah Disalin`, serta tombol `Reset Status`.
@@ -21,8 +21,16 @@ Pengembangan Fitur & Polishing UI: Mode Auto End-to-End Pipeline (Prompt Gen -> 
 - **Fix Fatal Syntax Error & Tab Blocking di Extension Google Flow**:
   - Memperbaiki unclosed loop di `extension/flow-bridge.js:371` dan layout overlap `extension/agent-floater.js`.
 
+- **Conditional Human Subject Casting & Commercial Aesthetics Directive (VCPA Engine)**:
+  - Mengimplementasikan pedoman casting model bersyarat 3 lapis pada [`lib/prompt-agent/engine.ts`](file:///c:/App%20Tools/meta-gen-gue/lib/prompt-agent/engine.ts):
+    1. *Zero Forced Humans*: Mencegah AI menyelipkan manusia pada gambar objek, makanan, flatlay, arsitektur, lanskap, dan produk.
+    2. *Commercial Appeal*: Jika konsep memuat manusia, model wajib fotogenik, menarik, terawat (*well-groomed*), berbusana pas, kulit sehat (*radiant*), dan ekspresi hangat/percaya diri dengan *catchlight*, melarang keras tampang suram, kusam, atau lelah (*weary/grim*).
+    3. *Demographic Fidelity & Active Seniors*: Menjaga demografi asli konsep (misal jika konsep lansia/orang tua, tetap lansia berwibawa/karismatik/sehat, bukan kusam dan bukan diubah menjadi anak muda).
+  - Memperbarui `STYLE_SPECIFICATIONS.photo_commercial_lifestyle` dan instruksi regenerasi kartu tunggal di [`lib/prompt-agent/client.ts`](file:///c:/App%20Tools/meta-gen-gue/lib/prompt-agent/client.ts).
+  - Terverifikasi: 134/134 unit test lulus (100% pass) dan `npx tsc --noEmit` 0 error.
+
 ## Currently Working On
-- Fitur Mode Auto selesai dibangun dan teruji lulus compile & test.
+- Penyempurnaan parameter kualitas visual prompt agent selesai diuji.
 
 ## Remaining Tasks
 - Opsional: Pengguna dapat mengaktifkan toggle "⚡ Mode Auto" di tab Generator Prompt dan melakukan uji coba langsung ke Google Flow.

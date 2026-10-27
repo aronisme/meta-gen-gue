@@ -171,5 +171,69 @@ describe('VCPA Engine Utilities', () => {
     expect(mode1Instruction).toContain('"visualDna": {');
     expect(mode1Instruction).toContain('"prompts": [');
   });
+
+  it('preserves and isolates per-item settings snapshot for queued image references', () => {
+    const livePanelSettings: VCPASettings = {
+      count: 5,
+      similarity: 80,
+      engine: 'midjourney',
+      visualDirection: 'photo_commercial_lifestyle',
+      aspectRatio: '16:9',
+      creativeFocus: 'lighting',
+      semanticMode: 'meaning_preservation',
+      commercialSafety: true,
+      promptLanguage: 'en',
+      selectedTwists: ['warm golden catchlights'],
+    };
+
+    // Item 1 is enqueued with snapshot of current settings
+    const queuedItem1: {
+      id: string;
+      filename: string;
+      settings: VCPASettings;
+    } = {
+      id: 'q1',
+      filename: 'fashion_model.jpg',
+      settings: {
+        ...livePanelSettings,
+        selectedTwists: livePanelSettings.selectedTwists ? [...livePanelSettings.selectedTwists] : undefined,
+      },
+    };
+
+    // User subsequently modifies panel settings for the next image
+    livePanelSettings.engine = 'flux';
+    livePanelSettings.count = 1;
+    livePanelSettings.aspectRatio = '1:1';
+    livePanelSettings.visualDirection = 'illustration_vector';
+    livePanelSettings.selectedTwists = ['minimalist vector lines'];
+
+    // Item 2 is enqueued with the new panel settings
+    const queuedItem2: {
+      id: string;
+      filename: string;
+      settings: VCPASettings;
+    } = {
+      id: 'q2',
+      filename: 'food_flatlay.jpg',
+      settings: {
+        ...livePanelSettings,
+        selectedTwists: livePanelSettings.selectedTwists ? [...livePanelSettings.selectedTwists] : undefined,
+      },
+    };
+
+    // Item 1 must retain its original snapshot settings
+    expect(queuedItem1.settings.engine).toBe('midjourney');
+    expect(queuedItem1.settings.count).toBe(5);
+    expect(queuedItem1.settings.aspectRatio).toBe('16:9');
+    expect(queuedItem1.settings.visualDirection).toBe('photo_commercial_lifestyle');
+    expect(queuedItem1.settings.selectedTwists).toEqual(['warm golden catchlights']);
+
+    // Item 2 must use its own distinct settings
+    expect(queuedItem2.settings.engine).toBe('flux');
+    expect(queuedItem2.settings.count).toBe(1);
+    expect(queuedItem2.settings.aspectRatio).toBe('1:1');
+    expect(queuedItem2.settings.visualDirection).toBe('illustration_vector');
+    expect(queuedItem2.settings.selectedTwists).toEqual(['minimalist vector lines']);
+  });
 });
 
